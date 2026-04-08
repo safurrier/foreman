@@ -1,0 +1,52 @@
+#!/usr/bin/env -S uv run python
+# MISE description="Build artifacts"
+# MISE depends=["setup"]
+import os
+import subprocess
+import sys
+
+sys.path.insert(0, os.path.join(os.environ["MISE_PROJECT_ROOT"], "scripts"))
+from lib import (  # noqa: E402
+    PROJECT_ROOT,
+    dispatch_module,
+    dispatch_stack,
+    get_shape,
+    log_ok,
+    log_step,
+    run,
+    run_per_module,
+)
+
+
+def build_python(cwd=PROJECT_ROOT):
+    log_step("Building Python package")
+    run(["uv", "build"], cwd=cwd)
+    log_ok("Python build")
+
+
+def build_go(cwd=PROJECT_ROOT):
+    log_step("Building Go binaries")
+    (cwd / "bin").mkdir(exist_ok=True)
+    result = subprocess.run(
+        ["go", "build", "-o", "bin/", "./cmd/..."],
+        cwd=cwd,
+        env={**os.environ, "CGO_ENABLED": "0"},
+    )
+    if result.returncode != 0:
+        sys.exit(result.returncode)
+    log_ok("Go build")
+
+
+def build_rust(cwd=PROJECT_ROOT):
+    log_step("Building Rust binaries")
+    run(["cargo", "build", "--release"], cwd=cwd)
+    log_ok("Rust build")
+
+
+if get_shape() == "apps":
+    run_per_module(
+        "build",
+        dispatch_module({"python": build_python, "go": build_go, "rust": build_rust}),
+    )
+else:
+    dispatch_stack({"python": build_python, "go": build_go, "rust": build_rust})

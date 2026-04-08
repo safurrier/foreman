@@ -1,0 +1,101 @@
+#!/usr/bin/env -S uv run python
+# MISE description="Heavy validation gate (integration, docker, security, docs)"
+# MISE depends=["setup"]
+import os
+import subprocess
+import sys
+
+sys.path.insert(0, os.path.join(os.environ["MISE_PROJECT_ROOT"], "scripts"))
+from lib import (  # noqa: E402
+    PROJECT_ROOT,
+    dispatch_module,
+    dispatch_stack,
+    get_project_name,
+    get_shape,
+    log_ok,
+    log_step,
+    run,
+    run_per_module,
+)
+
+TASKS = PROJECT_ROOT / ".mise" / "tasks"
+
+
+def _run_task(name: str, *args: str) -> None:
+    r = subprocess.run([sys.executable, str(TASKS / name), *args])
+    if r.returncode != 0:
+        sys.exit(r.returncode)
+
+
+def verify_python(cwd=PROJECT_ROOT):
+    integration_dir = cwd / "tests" / "integration"
+    if integration_dir.is_dir():
+        log_step("Running Python integration tests")
+        run(["uv", "run", "pytest", "tests/integration/", "-v"], cwd=cwd)
+        log_ok("Integration tests")
+
+    dockerfile = cwd / "Dockerfile"
+    if dockerfile.exists():
+        log_step("Building Docker image")
+        run(["docker", "build", "-t", f"{get_project_name()}:verify", "."], cwd=cwd)
+        log_ok("Docker build")
+
+
+def verify_go(cwd=PROJECT_ROOT):
+    tests_dir = cwd / "tests"
+    if tests_dir.is_dir():
+        log_step("Running Go integration tests")
+        result = subprocess.run(
+            ["go", "test", "-tags=integration", "./..."],
+            cwd=cwd,
+            env={**os.environ, "CGO_ENABLED": "0"},
+        )
+        if result.returncode != 0:
+            sys.exit(result.returncode)
+        log_ok("Integration tests")
+
+    dockerfile = cwd / "Dockerfile"
+    if dockerfile.exists():
+        log_step("Building Docker image")
+        run(["docker", "build", "-t", f"{get_project_name()}:verify", "."], cwd=cwd)
+        log_ok("Docker build")
+
+
+def verify_rust(cwd=PROJECT_ROOT):
+    log_step("Running Rust integration tests")
+    result = subprocess.run(
+        ["cargo", "test", "--all-features"],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+    )
+    print(result.stdout + result.stderr, end="")
+    if result.returncode != 0:
+        sys.exit(result.returncode)
+    log_ok("Integration tests")
+
+    dockerfile = cwd / "Dockerfile"
+    if dockerfile.exists():
+        log_step("Building Docker image")
+        run(["docker", "build", "-t", f"{get_project_name()}:verify", "."], cwd=cwd)
+        log_ok("Docker build")
+
+
+log_step("Running verification suite")
+log_step("Phase 1: quality gate (check)")
+_run_task("check")
+
+log_step("Phase 2: stack-specific verification")
+if get_shape() == "apps":
+    run_per_module(
+        "verify",
+        dispatch_module(
+            {"python": verify_python, "go": verify_go, "rust": verify_rust}
+        ),
+    )
+else:
+    dispatch_stack(
+        {"python": verify_python, "go": verify_go, "rust": verify_rust}
+    )
+
+log_ok("Verification complete")

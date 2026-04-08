@@ -1,0 +1,5 @@
+[package]
+name = "foreman"
+version = "0.1.0"
+edition = "2021"
+description = "TUI for managing AI agents across tmux"

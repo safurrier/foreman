@@ -1,0 +1,6 @@
+slug: {{slug}}
+branch: {{branch}}
+created: {{created}}
+pr:
+status: planned
+source:

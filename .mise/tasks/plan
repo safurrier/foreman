@@ -1,0 +1,146 @@
+#!/usr/bin/env -S uv run python
+# MISE description="Create a new plan directory for a unit of work"
+import os
+import re
+import subprocess
+import sys
+from datetime import datetime
+from pathlib import Path
+
+sys.path.insert(0, os.path.join(os.environ["MISE_PROJECT_ROOT"], "scripts"))
+from lib import PROJECT_ROOT, log_error, log_ok, log_step  # noqa: E402
+
+PLANS_DIR = PROJECT_ROOT / ".ai" / "plans"
+REQUIRED_PLAN_FILES = ("META.yaml", "TODO.md", "LEARNING_LOG.md", "VALIDATION.md")
+SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+
+def get_current_branch() -> str:
+    """Get the current git branch name."""
+    result = subprocess.run(
+        ["git", "symbolic-ref", "--quiet", "--short", "HEAD"],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def resolve_templates_dir() -> Path:
+    """Find the plan template directory for scaffold and generated repos."""
+    candidates = [
+        PROJECT_ROOT / ".ai" / "plans" / "_templates",
+        PROJECT_ROOT / "templates" / ".ai" / "plans" / "_templates",
+    ]
+    for path in candidates:
+        if path.is_dir():
+            missing = [
+                name for name in REQUIRED_PLAN_FILES if not (path / name).exists()
+            ]
+            if missing:
+                log_error(
+                    "Plan templates are incomplete: "
+                    f"{', '.join(missing)} missing in {path.relative_to(PROJECT_ROOT)}"
+                )
+                sys.exit(1)
+            return path
+    log_error("Plan templates not found.")
+    log_error("Expected one of:")
+    for path in candidates:
+        print(f"  {path.relative_to(PROJECT_ROOT)}", file=sys.stderr)
+    sys.exit(1)
+
+
+def validate_slug(raw_slug: str) -> str:
+    """Validate a lowercase kebab-case slug."""
+    slug = raw_slug.strip()
+    if not SLUG_RE.fullmatch(slug):
+        raise ValueError(
+            "Invalid slug: use lowercase letters, digits, and single hyphens "
+            "(example: add-user-auth)"
+        )
+    return slug
+
+
+def find_existing_plan(slug: str) -> Path | None:
+    """Return an existing plan directory for *slug*, if any."""
+    if not PLANS_DIR.is_dir():
+        return None
+    for path in sorted(PLANS_DIR.iterdir()):
+        if path.is_dir() and path.name.endswith(f"-{slug}"):
+            return path
+    return None
+
+
+def create_plan(slug: str, branch: str) -> Path:
+    """Create a plan directory with template files."""
+    templates_dir = resolve_templates_dir()
+    timestamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+    dirname = f"{timestamp}-{slug}"
+    plan_dir = PLANS_DIR / dirname
+    plan_dir.mkdir(parents=True, exist_ok=False)
+
+    created = datetime.now().strftime("%Y-%m-%d")
+
+    for src in templates_dir.iterdir():
+        dst = plan_dir / src.name
+        content = src.read_text()
+        content = content.replace("{{slug}}", slug)
+        content = content.replace("{{branch}}", branch)
+        content = content.replace("{{created}}", created)
+        dst.write_text(content)
+
+    return plan_dir
+
+
+def main() -> None:
+    args = sys.argv[1:]
+
+    if not args:
+        log_error("Usage: mise run plan -- <slug>")
+        log_error("  slug: lowercase-hyphenated name (e.g., add-user-auth)")
+        sys.exit(1)
+
+    try:
+        slug = validate_slug(args[0])
+    except ValueError as e:
+        log_error(str(e))
+        sys.exit(1)
+
+    branch = get_current_branch()
+    if not branch:
+        log_error(
+            "No git branch detected. Initialize git and create a feature branch first."
+        )
+        sys.exit(1)
+    if branch in ("main", "master"):
+        log_error(
+            f"You're on '{branch}'. Create a feature branch before starting work."
+        )
+        log_error(f"  git checkout -b feat/{slug}")
+        sys.exit(1)
+
+    existing_plan = find_existing_plan(slug)
+    if existing_plan is not None:
+        log_error(
+            f"A plan for '{slug}' already exists: "
+            f"{existing_plan.relative_to(PROJECT_ROOT)}"
+        )
+        sys.exit(1)
+
+    log_step(f"Creating plan: {slug}")
+    plan_dir = create_plan(slug, branch)
+    log_ok(f"Plan created: {plan_dir.relative_to(PROJECT_ROOT)}")
+
+    print()
+    print(f"  Files:")
+    for f in sorted(plan_dir.iterdir()):
+        print(f"    {f.name}")
+    print()
+    print(f"  Next steps:")
+    print(f"    1. Edit TODO.md with your tasks")
+    print(f"    2. Fill in META.yaml source field")
+    print(f"    3. Start working — append to LEARNING_LOG.md as you go")
+
+
+main()

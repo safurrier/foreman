@@ -1,0 +1,34 @@
+#!/usr/bin/env -S uv run python
+# MISE description="Fast quality gate: fmt-check + lint + typecheck + test"
+# MISE depends=["setup"]
+import os
+import subprocess
+import sys
+
+sys.path.insert(0, os.path.join(os.environ["MISE_PROJECT_ROOT"], "scripts"))
+from lib import log_ok, log_step, PROJECT_ROOT  # noqa: E402
+
+TASKS = PROJECT_ROOT / ".mise" / "tasks"
+
+
+def run_task(name: str, *args: str) -> None:
+    r = subprocess.run([sys.executable, str(TASKS / name), *args])
+    if r.returncode != 0:
+        sys.exit(r.returncode)
+
+
+log_step("Running quality gate (check)")
+
+log_step("Step 1/4: format check")
+run_task("fmt", "--check")
+
+log_step("Step 2/4: lint")
+run_task("lint")
+
+log_step("Step 3/4: typecheck")
+run_task("typecheck")
+
+log_step("Step 4/4: test")
+run_task("test")
+
+log_ok("All checks passed")

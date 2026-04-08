@@ -1,0 +1,67 @@
+#!/usr/bin/env -S uv run python
+# MISE description="Start local development"
+# MISE depends=["setup"]
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.environ["MISE_PROJECT_ROOT"], "scripts"))
+from lib import (  # noqa: E402
+    PROJECT_ROOT,
+    dispatch_stack,
+    get_modules,
+    get_project_name,
+    get_shape,
+    log_error,
+    log_step,
+    log_warn,
+    run,
+)
+
+
+def dev_python(cwd=PROJECT_ROOT):
+    log_step("Starting Python development server")
+    module_name = get_project_name().replace("-", "_")
+    main_py = cwd / module_name / "__main__.py"
+    if main_py.exists():
+        run(["uv", "run", "python", "-m", module_name], cwd=cwd)
+    else:
+        log_warn(f"No __main__.py found — this appears to be a library.")
+        log_warn(f"Add {module_name}/__main__.py for a runnable dev target.")
+
+
+def dev_go(cwd=PROJECT_ROOT):
+    log_step("Starting Go development server")
+    run(["go", "run", "./cmd/..."], cwd=cwd)
+
+
+def dev_rust(cwd=PROJECT_ROOT):
+    log_step("Starting Rust development server")
+    run(["cargo", "run"], cwd=cwd)
+
+
+shape = get_shape()
+
+if shape == "apps":
+    if len(sys.argv) < 2:
+        log_error("Apps workspace requires a module name: mise run dev -- <module>")
+        log_step("Available modules:")
+        for mod in get_modules():
+            print(f"  {mod['name']} ({mod['kind']}, {mod['role']})")
+        sys.exit(1)
+
+    target = sys.argv[1]
+    modules = {m["name"]: m for m in get_modules()}
+    if target not in modules:
+        log_error(f"Module '{target}' not found in workspace.toml")
+        sys.exit(1)
+
+    mod = modules[target]
+    cwd = PROJECT_ROOT / mod["path"]
+    log_step(f"[{target}] dev")
+    fn = {"python": dev_python, "go": dev_go, "rust": dev_rust}.get(mod["kind"])
+    if fn:
+        fn(cwd=cwd)
+    else:
+        log_warn(f"{mod['kind']} stack: not yet implemented")
+else:
+    dispatch_stack({"python": dev_python, "go": dev_go, "rust": dev_rust})

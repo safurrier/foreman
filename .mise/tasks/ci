@@ -1,0 +1,12 @@
+#!/usr/bin/env -S uv run python
+# MISE description="CI entrypoint (runs check)"
+import os
+import subprocess
+import sys
+
+sys.path.insert(0, os.path.join(os.environ["MISE_PROJECT_ROOT"], "scripts"))
+from lib import log_step, PROJECT_ROOT  # noqa: E402
+
+log_step("CI: running quality gate")
+result = subprocess.run([sys.executable, str(PROJECT_ROOT / ".mise" / "tasks" / "check")])
+sys.exit(result.returncode)

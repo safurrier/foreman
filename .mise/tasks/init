@@ -1,0 +1,13 @@
+#!/usr/bin/env -S uv run python
+# MISE description="Initialize a fresh agent-scaffold into a project"
+# Interactive:     mise run init
+# Non-interactive: mise run init -- --non-interactive --name myproj --shape single --stack python
+import os
+import subprocess
+import sys
+
+result = subprocess.run(
+    ["uv", "run", "agent-scaffold", "init"] + sys.argv[1:],
+    cwd=os.environ["MISE_PROJECT_ROOT"],
+)
+sys.exit(result.returncode)

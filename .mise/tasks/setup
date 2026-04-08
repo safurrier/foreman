@@ -1,0 +1,54 @@
+#!/usr/bin/env -S uv run python
+# MISE description="Install dependencies and prepare the environment"
+import os
+import shutil
+import sys
+
+sys.path.insert(0, os.path.join(os.environ["MISE_PROJECT_ROOT"], "scripts"))
+from lib import (  # noqa: E402
+    PROJECT_ROOT,
+    dispatch_module,
+    dispatch_stack,
+    get_shape,
+    log_ok,
+    log_step,
+    run,
+    run_per_module,
+)
+
+
+def setup_python(cwd=PROJECT_ROOT):
+    log_step("Installing Python dependencies")
+    run(["uv", "sync", "--all-extras"], cwd=cwd)
+    log_ok("Python dependencies installed")
+
+
+def setup_go(cwd=PROJECT_ROOT):
+    log_step("Installing Go dependencies")
+    run(["go", "mod", "download"], cwd=cwd)
+    log_ok("Go dependencies installed")
+
+
+def setup_rust(cwd=PROJECT_ROOT):
+    log_step("Fetching Rust dependencies")
+    cargo_toml = cwd / "Cargo.toml"
+    if cargo_toml.exists():
+        run(["cargo", "fetch"], cwd=cwd)
+    log_ok("Rust dependencies fetched")
+
+
+if get_shape() == "apps":
+    run_per_module(
+        "setup",
+        dispatch_module({"python": setup_python, "go": setup_go, "rust": setup_rust}),
+    )
+else:
+    dispatch_stack({"python": setup_python, "go": setup_go, "rust": setup_rust})
+
+# Install pre-commit hooks if available
+pre_commit_cfg = PROJECT_ROOT / ".pre-commit-config.yaml"
+git_dir = PROJECT_ROOT / ".git"
+if pre_commit_cfg.exists() and shutil.which("pre-commit") and git_dir.exists():
+    log_step("Installing pre-commit hooks")
+    run(["pre-commit", "install"])
+    log_ok("Pre-commit hooks installed")
