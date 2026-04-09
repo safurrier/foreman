@@ -113,3 +113,14 @@ test ladder.
   Result: pass
 - `mise run check`
   Result: pass
+
+## 2026-04-08 20:42 - Chunk 7 validation
+
+- Claude native signal source and precedence tests in `src/integrations/claude.rs`
+  Result: pass
+- Real tmux + native shim tests in `tests/claude_native.rs`
+  Result: pass
+- `cargo test`
+  Result: pass
+- `mise run check`
+  Result: pass

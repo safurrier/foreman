@@ -1,6 +1,9 @@
 use crate::adapters::tmux::{SystemTmuxBackend, TmuxAdapter};
 use crate::app::{AppState, InventorySummary};
 use crate::config::{load_config, resolve_paths, write_default_config, ConfigError, RuntimeConfig};
+use crate::integrations::{
+    apply_claude_native_signals, ClaudeNativeOverlaySummary, FileClaudeNativeSignalSource,
+};
 use crate::services::logging::{RunLogSummary, RunLogger};
 use clap::Parser;
 use std::fmt;
@@ -35,6 +38,9 @@ pub struct Cli {
 
     #[arg(long, hide = true)]
     pub tmux_socket: Option<PathBuf>,
+
+    #[arg(long, hide = true)]
+    pub claude_native_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,6 +56,7 @@ pub struct BootstrapSummary {
     pub logs: RunLogSummary,
     pub state: AppState,
     pub inventory: InventorySummary,
+    pub claude_native: ClaudeNativeOverlaySummary,
 }
 
 #[derive(Debug)]
@@ -96,11 +103,19 @@ pub fn run(cli: Cli) -> Result<RunOutcome, RunError> {
     let mut logger =
         RunLogger::start(&runtime.log_dir, runtime.log_retention).map_err(ConfigError::Io)?;
     logger.log_bootstrap(&runtime).map_err(ConfigError::Io)?;
-    let state = bootstrap_state(&runtime);
+    let (state, claude_native) = bootstrap_state(&runtime);
     let inventory = state.inventory_summary();
     logger.log_inventory(&inventory).map_err(ConfigError::Io)?;
     if let Some(error) = &state.startup_error {
         logger.log_tmux_error(error).map_err(ConfigError::Io)?;
+    }
+    logger
+        .log_claude_native_summary(&claude_native)
+        .map_err(ConfigError::Io)?;
+    for warning in &claude_native.warnings {
+        logger
+            .log_claude_native_warning(warning)
+            .map_err(ConfigError::Io)?;
     }
 
     println!("Foreman bootstrap complete.");
@@ -109,21 +124,39 @@ pub fn run(cli: Cli) -> Result<RunOutcome, RunError> {
         logs: logger.summary(),
         state,
         inventory,
+        claude_native,
     })))
 }
 
-fn bootstrap_state(runtime: &RuntimeConfig) -> AppState {
+fn bootstrap_state(runtime: &RuntimeConfig) -> (AppState, ClaudeNativeOverlaySummary) {
     let adapter = TmuxAdapter::new(SystemTmuxBackend::new(runtime.tmux_socket.clone()));
     match adapter.load_inventory(runtime.capture_lines) {
-        Ok(inventory) => AppState {
-            popup_mode: runtime.popup,
-            ..AppState::with_inventory(inventory)
-        },
-        Err(error) => AppState {
-            popup_mode: runtime.popup,
-            startup_error: Some(error.to_string()),
-            ..AppState::default()
-        },
+        Ok(mut inventory) => {
+            let claude_native = if let Some(dir) = &runtime.claude_native_dir {
+                apply_claude_native_signals(
+                    &mut inventory,
+                    &FileClaudeNativeSignalSource::new(dir.clone()),
+                )
+            } else {
+                ClaudeNativeOverlaySummary::default()
+            };
+
+            (
+                AppState {
+                    popup_mode: runtime.popup,
+                    ..AppState::with_inventory(inventory)
+                },
+                claude_native,
+            )
+        }
+        Err(error) => (
+            AppState {
+                popup_mode: runtime.popup,
+                startup_error: Some(error.to_string()),
+                ..AppState::default()
+            },
+            ClaudeNativeOverlaySummary::default(),
+        ),
     }
 }
 

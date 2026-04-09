@@ -1,5 +1,6 @@
 use crate::app::InventorySummary;
 use crate::config::RuntimeConfig;
+use crate::integrations::ClaudeNativeOverlaySummary;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -95,6 +96,25 @@ impl RunLogger {
         self.write_line("WARN", &format!("tmux_bootstrap_error {error}"))
     }
 
+    pub fn log_claude_native_summary(
+        &mut self,
+        summary: &ClaudeNativeOverlaySummary,
+    ) -> io::Result<()> {
+        self.write_line(
+            "INFO",
+            &format!(
+                "claude_native_summary applied={} fallback_to_compatibility={} warnings={}",
+                summary.applied,
+                summary.fallback_to_compatibility,
+                summary.warnings.len()
+            ),
+        )
+    }
+
+    pub fn log_claude_native_warning(&mut self, warning: &str) -> io::Result<()> {
+        self.write_line("WARN", &format!("claude_native_warning {warning}"))
+    }
+
     pub fn summary(&self) -> RunLogSummary {
         RunLogSummary {
             run_path: self.run_path.clone(),
@@ -152,6 +172,7 @@ mod tests {
     use super::RunLogger;
     use crate::app::InventorySummary;
     use crate::config::RuntimeConfig;
+    use crate::integrations::ClaudeNativeOverlaySummary;
     use std::path::Path;
     use tempfile::tempdir;
 
@@ -160,6 +181,7 @@ mod tests {
             config_file: Path::new("/tmp/config.toml").to_path_buf(),
             log_dir: log_dir.to_path_buf(),
             tmux_socket: None,
+            claude_native_dir: None,
             poll_interval_ms: 1_000,
             capture_lines: 200,
             popup: false,
@@ -255,5 +277,25 @@ mod tests {
         assert!(contents.contains("inventory_loaded"));
         assert!(contents.contains("visible_sessions=2"));
         assert!(contents.contains("visible_panes=2"));
+    }
+
+    #[test]
+    fn claude_native_log_writes_summary_counts() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let mut logger = RunLogger::start(temp_dir.path(), 2).expect("logger should start");
+
+        logger
+            .log_claude_native_summary(&ClaudeNativeOverlaySummary {
+                applied: 1,
+                fallback_to_compatibility: 2,
+                warnings: vec!["missing".to_string()],
+            })
+            .expect("native summary log should succeed");
+
+        let contents =
+            std::fs::read_to_string(logger.summary().run_path).expect("run log should be readable");
+        assert!(contents.contains("claude_native_summary"));
+        assert!(contents.contains("applied=1"));
+        assert!(contents.contains("fallback_to_compatibility=2"));
     }
 }

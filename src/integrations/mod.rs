@@ -4,6 +4,10 @@ mod gemini;
 mod opencode;
 
 use crate::app::{AgentSnapshot, AgentStatus, HarnessKind, IntegrationMode, Inventory};
+pub use claude::{
+    apply_native_signals as apply_claude_native_signals, ClaudeNativeOverlaySummary,
+    FileClaudeNativeSignalSource,
+};
 
 const WORKING_STATUS_DEBOUNCE_POLLS: u8 = 2;
 

@@ -46,7 +46,7 @@ testable as the app grows.
 | App state core | Own `Command`, `Action`, `Mode`, `Focus`, selection state, filters, sort mode, modal state, and reducer logic |
 | Ratatui renderer | Render header, sidebar, preview, input, footer, help, and overlays from pure state |
 | tmux adapter | Discover sessions/windows/panes, capture pane output, focus panes, send input, rename windows, create windows, and kill panes |
-| Harness integrations | Detect supported harness families and translate native or compatibility signals into the Foreman status model |
+| Harness integrations | Detect supported harness families, translate compatibility signals, and overlay native signals such as Claude when available |
 | Pull request service | Resolve pull request metadata for the selected workspace with caching and graceful degradation |
 | Notification service | Apply suppression, cooldown, and profile rules and dispatch best-effort notifications |
 | Logging + telemetry | Persist structured run logs, latest-run pointer, retention cleanup, and header-level system stats |
@@ -245,7 +245,7 @@ boundaries unless an ADR changes them.
 | src/app/ | Core state, commands, actions, reducer, selectors, and UI-facing invariants | This document |
 | src/ui/ | Ratatui layout, widgets, rendering, and buffer-test helpers | This document |
 | src/adapters/tmux.rs | tmux discovery, capture, and focus seam; transport only, no status heuristics | `SPEC.md` |
-| src/integrations/ | Harness recognition, compatibility status derivation, and debounce logic for refresh replacement | `SPEC.md` |
+| src/integrations/ | Harness recognition, compatibility status derivation, debounce logic, and native-over-compatibility precedence overlays | `SPEC.md` |
 | src/services/notifications.rs (planned) | Notification policy, cooldowns, backend dispatch | `SPEC.md` |
 | src/services/pull_requests.rs (planned) | Pull request lookup, caching, degradation behavior | `SPEC.md` |
 | src/services/logging.rs | Run logs, latest-run pointer, retention cleanup, and bootstrap/inventory summaries | `SPEC.md` |

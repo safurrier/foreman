@@ -47,7 +47,8 @@ description: >
 - [x] Add compatibility-mode harness detection for supported families
 - [x] Implement coarse status model: working, needs attention, idle, error, unknown
 - [x] Add status debouncing to prevent flicker
-- [ ] Add Claude Code native integration and native-over-compatibility precedence
+- [x] Add Claude Code native integration and native-over-compatibility precedence
+- [x] Add real tmux + native-shim coverage for precedence and fallback behavior
 
 ## Phase 6: Direct actions
 - [ ] Implement multiline direct input to selected pane

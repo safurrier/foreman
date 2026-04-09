@@ -21,7 +21,7 @@ description: >
   Dominant validation: adapter contract tests, reducer tests, and real tmux
   fixture smoke/E2E tests
 
-- [ ] **Supported harness detection and status model**
+- [x] **Supported harness detection and status model**
   Root spec: R5-R8, A4-A7, A11
   Planned chunks: 6, 7
   Dominant validation: status-engine unit tests, fake capture/native-signal

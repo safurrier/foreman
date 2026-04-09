@@ -111,3 +111,12 @@ derives compatibility snapshots from those observations, and reducer refresh
 logic applies the debounce policy during inventory replacement. That split keeps
 status heuristics pure and makes the eventual native-precedence work a
 targeted follow-up instead of another tmux refactor.
+
+## 2026-04-08 20:41 - Native precedence also needed its own overlay seam
+
+The first native integration worked best as a post-discovery overlay, not as a
+special case inside `tmux.rs`. Compatibility discovery still builds the base
+inventory. `src/integrations/claude.rs` then overlays native Claude signals on
+top, replaces the normalized snapshot when present, and leaves compatibility in
+place when the native file disappears or errors. That keeps precedence
+enforcement in one place and made the tmux + file-shim E2E test straightforward.

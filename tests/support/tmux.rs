@@ -53,6 +53,7 @@ impl TmuxFixture {
         ])
     }
 
+    #[allow(dead_code)]
     pub fn split_window(&self, target: &str, command: &str) -> String {
         self.run_checked(&[
             "split-window",
