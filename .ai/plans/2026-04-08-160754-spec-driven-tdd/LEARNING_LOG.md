@@ -81,3 +81,16 @@ The render shell slice worked best as a pure Ratatui layer with buffer tests,
 not as a half-fake interactive app. That keeps the architecture honest:
 rendering can evolve and be tested now, while the eventual event loop and tmux
 integration still arrive as separate chunks.
+
+## 2026-04-08 18:35 - Chunk 4 needed both fake and real tmux tests
+
+The tmux slice was the first place where unit tests alone stopped being
+convincing. The useful pattern was:
+
+- fake-backed adapter tests for grouping, capture fallback, and recognition
+- reducer/state assertions for default visibility and toggle behavior
+- a dedicated real tmux fixture server for the startup path and binary-level log
+  proof
+
+That combination gives fast local feedback without pretending the subprocess and
+socket boundary are already covered.

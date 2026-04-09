@@ -12,7 +12,7 @@ description: >
 - Unit tests for reducers, status logic, config parsing, and precedence rules
 - Ratatui buffer tests for visible shell and focus behavior
 - Adapter contract tests with fakes for tmux, notifications, and pull requests
-- Shell smoke tests for the highest-value operator journeys
+- Real-environment smoke / E2E tests for the highest-value operator journeys
 
 No implementation validation has been run yet. This plan defines the intended
 test ladder.
@@ -61,6 +61,21 @@ test ladder.
 ## 2026-04-08 17:48 - Chunk 3 validation
 
 - Ratatui buffer tests in `src/ui/render.rs`
+  Result: pass
+- `cargo test`
+  Result: pass
+- `mise run check`
+  Result: pass
+- `python3 /Users/alex.furrier/.codex/skills/alex-ai-ai-context-engineering-files/scripts/verify_references.py .`
+  Result: pass
+- `python3 /Users/alex.furrier/.codex/skills/alex-ai-ai-context-engineering-files/scripts/validate_frontmatter.py .`
+  Result: pass
+
+## 2026-04-08 18:42 - Chunk 4 validation
+
+- Fake-backed tmux adapter contract tests in `src/adapters/tmux.rs`
+  Result: pass
+- Real tmux fixture tests in `tests/tmux_inventory.rs`
   Result: pass
 - `cargo test`
   Result: pass

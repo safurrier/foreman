@@ -18,8 +18,8 @@ description: >
 - [ ] **tmux inventory and visibility controls**
   Root spec: R4, R7, A3, A6
   Planned chunks: 4, 5
-  Dominant validation: adapter contract tests, reducer tests, smoke tests for
-  live tmux flows
+  Dominant validation: adapter contract tests, reducer tests, and real tmux
+  fixture smoke/E2E tests
 
 - [ ] **Supported harness detection and status model**
   Root spec: R5-R8, A4-A7, A11
@@ -37,7 +37,7 @@ description: >
   Root spec: R12-R13, A10, A12
   Planned chunks: 8
   Dominant validation: reducer tests for modal state, tmux adapter contract
-  tests, smoke tests
+  tests, real tmux smoke/E2E tests
 
 - [ ] **Search, flash navigation, and sorting**
   Root spec: R14-R16, A13-A15

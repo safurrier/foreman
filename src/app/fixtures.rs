@@ -50,6 +50,8 @@ impl AgentSnapshotBuilder {
 pub struct PaneBuilder {
     id: PaneId,
     title: String,
+    current_command: Option<String>,
+    preview: String,
     agent: Option<AgentSnapshot>,
 }
 
@@ -59,6 +61,8 @@ impl PaneBuilder {
         Self {
             title: id.clone(),
             id: PaneId::new(id),
+            current_command: None,
+            preview: String::new(),
             agent: None,
         }
     }
@@ -74,6 +78,16 @@ impl PaneBuilder {
 
     pub fn with_agent(mut self, agent: AgentSnapshot) -> Self {
         self.agent = Some(agent);
+        self
+    }
+
+    pub fn current_command(mut self, current_command: impl Into<String>) -> Self {
+        self.current_command = Some(current_command.into());
+        self
+    }
+
+    pub fn preview(mut self, preview: impl Into<String>) -> Self {
+        self.preview = preview.into();
         self
     }
 
@@ -96,6 +110,8 @@ impl PaneBuilder {
         Pane {
             id: self.id,
             title: self.title,
+            current_command: self.current_command,
+            preview: self.preview,
             agent: self.agent,
         }
     }

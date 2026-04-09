@@ -30,10 +30,11 @@ description: >
 - [x] Ensure the shell is usable when tmux is missing or empty
 
 ## Phase 3: Inventory and visibility
-- [ ] Add tmux discovery adapter with fake-backed contract tests
-- [ ] Populate multi-session inventory across sessions and windows
-- [ ] Hide non-agent sessions and panes by default, with runtime toggles
-- [ ] Preserve collapse state and logical selection across refreshes
+- [x] Add tmux discovery adapter with fake-backed contract tests
+- [x] Populate multi-session inventory across sessions and windows
+- [x] Hide non-agent sessions and panes by default, with runtime toggles
+- [x] Preserve collapse state and logical selection across refreshes
+- [x] Add real tmux fixture smoke / E2E coverage for startup inventory and visibility rules
 
 ## Phase 4: Navigation and focus
 - [ ] Implement keyboard navigation through visible targets

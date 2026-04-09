@@ -195,7 +195,7 @@ mise run verify   # heavy: integration, security, docker        (on PR)
 | Unit tests | Reducer logic, command/action mapping, config parsing, status debouncing, precedence rules |
 | Ratatui buffer tests | Surface visibility, focus treatment, overlays, empty-state shell, monochrome-safe status presentation |
 | Adapter contract tests | tmux, harness, pull request, and notification seams with fakes or spies |
-| Shell smoke tests | End-to-end operator journeys that require a real CLI process or live tmux coordination |
+| Real-environment smoke / E2E tests | End-to-end operator journeys that require a real CLI process, live tmux coordination, or other external tooling |
 
 ### Pre-push documentation and contract sync
 

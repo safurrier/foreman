@@ -1,3 +1,4 @@
+use crate::app::InventorySummary;
 use crate::config::RuntimeConfig;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
@@ -59,14 +60,39 @@ impl RunLogger {
         self.write_line(
             "INFO",
             &format!(
-                "bootstrap_complete config={} poll_interval_ms={} capture_lines={} popup={} notifications_enabled={}",
+                "bootstrap_complete config={} poll_interval_ms={} capture_lines={} popup={} notifications_enabled={} tmux_socket={}",
                 runtime.config_file.display(),
                 runtime.poll_interval_ms,
                 runtime.capture_lines,
                 runtime.popup,
-                runtime.notifications_enabled
+                runtime.notifications_enabled,
+                runtime
+                    .tmux_socket
+                    .as_deref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "default".to_string())
             ),
         )
+    }
+
+    pub fn log_inventory(&mut self, summary: &InventorySummary) -> io::Result<()> {
+        self.write_line(
+            "INFO",
+            &format!(
+                "inventory_loaded sessions={} windows={} panes={} visible_sessions={} visible_windows={} visible_panes={} startup_error={}",
+                summary.total_sessions,
+                summary.total_windows,
+                summary.total_panes,
+                summary.visible_sessions,
+                summary.visible_windows,
+                summary.visible_panes,
+                summary.startup_error.is_some()
+            ),
+        )
+    }
+
+    pub fn log_tmux_error(&mut self, error: &str) -> io::Result<()> {
+        self.write_line("WARN", &format!("tmux_bootstrap_error {error}"))
     }
 
     pub fn summary(&self) -> RunLogSummary {
@@ -124,6 +150,7 @@ fn current_run_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::RunLogger;
+    use crate::app::InventorySummary;
     use crate::config::RuntimeConfig;
     use std::path::Path;
     use tempfile::tempdir;
@@ -132,6 +159,7 @@ mod tests {
         RuntimeConfig {
             config_file: Path::new("/tmp/config.toml").to_path_buf(),
             log_dir: log_dir.to_path_buf(),
+            tmux_socket: None,
             poll_interval_ms: 1_000,
             capture_lines: 200,
             popup: false,
@@ -203,5 +231,29 @@ mod tests {
             std::fs::read_to_string(logger.summary().run_path).expect("run log should be readable");
         assert!(contents.contains("bootstrap_complete"));
         assert!(contents.contains("poll_interval_ms=1000"));
+    }
+
+    #[test]
+    fn inventory_log_writes_visible_counts() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let mut logger = RunLogger::start(temp_dir.path(), 2).expect("logger should start");
+
+        logger
+            .log_inventory(&InventorySummary {
+                total_sessions: 3,
+                total_windows: 3,
+                total_panes: 4,
+                visible_sessions: 2,
+                visible_windows: 2,
+                visible_panes: 2,
+                startup_error: None,
+            })
+            .expect("inventory log should succeed");
+
+        let contents =
+            std::fs::read_to_string(logger.summary().run_path).expect("run log should be readable");
+        assert!(contents.contains("inventory_loaded"));
+        assert!(contents.contains("visible_sessions=2"));
+        assert!(contents.contains("visible_panes=2"));
     }
 }

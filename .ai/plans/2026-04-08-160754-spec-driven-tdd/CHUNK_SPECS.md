@@ -19,6 +19,8 @@ Before starting any chunk:
 4. Update `SPEC.md` or `docs/architecture.md` if the chunk changes a contract or
    invariant
 5. Do not begin the next chunk until the current chunk's validation gate is green
+6. Add at least one real-environment smoke/E2E test whenever the chunk crosses a
+   process or adapter boundary and the environment is available locally
 
 Chunk 1 is already complete in commit `fcbef09`.
 
@@ -112,7 +114,7 @@ window, and pane data.
 **Dominant validation**
 - Adapter contract tests with a fake tmux backend
 - Reducer tests for visibility and reconciliation behavior
-- Focused smoke test against a real tmux fixture
+- Focused real-tmux smoke/E2E test against a dedicated fixture server
 
 **Likely files**
 - `src/adapters/tmux.rs`

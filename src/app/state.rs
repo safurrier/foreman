@@ -125,6 +125,8 @@ pub struct AgentSnapshot {
 pub struct Pane {
     pub id: PaneId,
     pub title: String,
+    pub current_command: Option<String>,
+    pub preview: String,
     pub agent: Option<AgentSnapshot>,
 }
 
@@ -290,6 +292,25 @@ impl Inventory {
             .find(|pane| &pane.id == pane_id)
     }
 
+    pub fn session_count(&self) -> usize {
+        self.sessions.len()
+    }
+
+    pub fn window_count(&self) -> usize {
+        self.sessions
+            .iter()
+            .map(|session| session.windows.len())
+            .sum()
+    }
+
+    pub fn pane_count(&self) -> usize {
+        self.sessions
+            .iter()
+            .flat_map(|session| session.windows.iter())
+            .map(|window| window.panes.len())
+            .sum()
+    }
+
     pub fn visible_targets(
         &self,
         filters: &Filters,
@@ -435,6 +456,17 @@ pub struct AppState {
     pub startup_error: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct InventorySummary {
+    pub total_sessions: usize,
+    pub total_windows: usize,
+    pub total_panes: usize,
+    pub visible_sessions: usize,
+    pub visible_windows: usize,
+    pub visible_panes: usize,
+    pub startup_error: Option<String>,
+}
+
 impl AppState {
     pub fn with_inventory(inventory: Inventory) -> Self {
         let mut state = Self {
@@ -477,6 +509,28 @@ impl AppState {
             Focus::Sidebar => "SIDEBAR",
             Focus::Preview => "PREVIEW",
             Focus::Input => "INPUT",
+        }
+    }
+
+    pub fn inventory_summary(&self) -> InventorySummary {
+        let visible_targets = self.visible_targets();
+        InventorySummary {
+            total_sessions: self.inventory.session_count(),
+            total_windows: self.inventory.window_count(),
+            total_panes: self.inventory.pane_count(),
+            visible_sessions: visible_targets
+                .iter()
+                .filter(|target| matches!(target, SelectionTarget::Session(_)))
+                .count(),
+            visible_windows: visible_targets
+                .iter()
+                .filter(|target| matches!(target, SelectionTarget::Window(_)))
+                .count(),
+            visible_panes: visible_targets
+                .iter()
+                .filter(|target| matches!(target, SelectionTarget::Pane(_)))
+                .count(),
+            startup_error: self.startup_error.clone(),
         }
     }
 }

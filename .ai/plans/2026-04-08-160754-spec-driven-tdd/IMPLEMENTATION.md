@@ -91,13 +91,14 @@ Use fakes and spies for:
 - pull request providers
 - notification backends
 
-### 4. Shell smoke tests
+### 4. Real-environment smoke / E2E tests
 
 Reserve for:
 
 - config-path and init-config flows
 - startup logging
 - multi-session tmux discovery
+- filter defaults and reveal toggles against a live tmux fixture
 - popup focus behavior
 - direct input and pane operations
 - end-to-end notification and pull request happy paths

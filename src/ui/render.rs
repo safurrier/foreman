@@ -178,10 +178,19 @@ fn preview_lines(state: &AppState) -> String {
                     .as_ref()
                     .map(|agent| format!("{:?}", agent.harness))
                     .unwrap_or_else(|| "None".to_string());
+                let preview = if pane.preview.trim().is_empty() {
+                    "Preview capture is empty right now.".to_string()
+                } else {
+                    pane.preview.clone()
+                };
 
                 format!(
-                    "Selected pane: {}\nStatus: {}\nHarness: {}\n\nPreview capture will appear here.",
-                    pane.title, status, harness
+                    "Selected pane: {}\nStatus: {}\nHarness: {}\nCommand: {}\n\n{}",
+                    pane.title,
+                    status,
+                    harness,
+                    pane.current_command.as_deref().unwrap_or("unknown"),
+                    preview
                 )
             } else {
                 "Selected pane is no longer available.".to_string()

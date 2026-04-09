@@ -10,5 +10,6 @@ pub use fixtures::{inventory, AgentSnapshotBuilder, PaneBuilder, SessionBuilder,
 pub use reducer::{reduce, Effect};
 pub use state::{
     AgentSnapshot, AgentStatus, AppState, Filters, Focus, HarnessKind, IntegrationMode, Inventory,
-    Mode, Pane, PaneId, SelectionTarget, Session, SessionId, SortMode, Window, WindowId,
+    InventorySummary, Mode, Pane, PaneId, SelectionTarget, Session, SessionId, SortMode, Window,
+    WindowId,
 };

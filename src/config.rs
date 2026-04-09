@@ -146,6 +146,7 @@ impl Default for PullRequestConfig {
 pub struct RuntimeConfig {
     pub config_file: PathBuf,
     pub log_dir: PathBuf,
+    pub tmux_socket: Option<PathBuf>,
     pub poll_interval_ms: u64,
     pub capture_lines: usize,
     pub popup: bool,
@@ -158,6 +159,7 @@ impl RuntimeConfig {
         Self {
             config_file: paths.config_file,
             log_dir: paths.log_dir,
+            tmux_socket: cli.tmux_socket.clone(),
             poll_interval_ms: cli
                 .poll_interval_ms
                 .unwrap_or(file_config.monitoring.poll_interval_ms),
@@ -376,6 +378,7 @@ mod tests {
 
         assert_eq!(runtime.poll_interval_ms, 250);
         assert_eq!(runtime.capture_lines, 400);
+        assert_eq!(runtime.tmux_socket, None);
         assert!(runtime.popup);
         assert!(!runtime.notifications_enabled);
     }

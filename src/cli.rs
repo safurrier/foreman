@@ -1,3 +1,5 @@
+use crate::adapters::tmux::{SystemTmuxBackend, TmuxAdapter};
+use crate::app::{AppState, InventorySummary};
 use crate::config::{load_config, resolve_paths, write_default_config, ConfigError, RuntimeConfig};
 use crate::services::logging::{RunLogSummary, RunLogger};
 use clap::Parser;
@@ -30,19 +32,24 @@ pub struct Cli {
 
     #[arg(long, hide = true)]
     pub log_dir: Option<PathBuf>,
+
+    #[arg(long, hide = true)]
+    pub tmux_socket: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunOutcome {
     PrintedConfigPath(PathBuf),
     InitializedConfig(PathBuf),
-    Bootstrapped(BootstrapSummary),
+    Bootstrapped(Box<BootstrapSummary>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BootstrapSummary {
     pub runtime: RuntimeConfig,
     pub logs: RunLogSummary,
+    pub state: AppState,
+    pub inventory: InventorySummary,
 }
 
 #[derive(Debug)]
@@ -89,12 +96,31 @@ pub fn run(cli: Cli) -> Result<RunOutcome, RunError> {
     let mut logger =
         RunLogger::start(&runtime.log_dir, runtime.log_retention).map_err(ConfigError::Io)?;
     logger.log_bootstrap(&runtime).map_err(ConfigError::Io)?;
+    let state = bootstrap_state(&runtime);
+    let inventory = state.inventory_summary();
+    logger.log_inventory(&inventory).map_err(ConfigError::Io)?;
+    if let Some(error) = &state.startup_error {
+        logger.log_tmux_error(error).map_err(ConfigError::Io)?;
+    }
 
     println!("Foreman bootstrap complete.");
-    Ok(RunOutcome::Bootstrapped(BootstrapSummary {
+    Ok(RunOutcome::Bootstrapped(Box::new(BootstrapSummary {
         runtime,
         logs: logger.summary(),
-    }))
+        state,
+        inventory,
+    })))
+}
+
+fn bootstrap_state(runtime: &RuntimeConfig) -> AppState {
+    let adapter = TmuxAdapter::new(SystemTmuxBackend::new(runtime.tmux_socket.clone()));
+    match adapter.load_inventory(runtime.capture_lines) {
+        Ok(inventory) => AppState::with_inventory(inventory),
+        Err(error) => AppState {
+            startup_error: Some(error.to_string()),
+            ..AppState::default()
+        },
+    }
 }
 
 #[cfg(test)]
