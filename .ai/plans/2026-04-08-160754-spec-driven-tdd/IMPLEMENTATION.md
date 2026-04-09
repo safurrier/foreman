@@ -29,6 +29,8 @@ The key rule for each slice is:
 
 See `EXPLORATION.md` for the finished-app sketch and milestone order.
 See `TRACEABILITY.md` for the requirement-to-chunk validation checklist.
+See `CHUNK_SPECS.md` for the detailed acceptance and validation gate for each
+remaining chunk.
 
 ## Target app sketch
 

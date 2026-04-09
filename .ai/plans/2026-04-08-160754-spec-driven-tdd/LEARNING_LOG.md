@@ -60,3 +60,10 @@ The first slice works as intended when kept narrow:
 That validated the core plan choice: put the hard invariants in pure state code
 first, and postpone tmux and Ratatui integration until the reducer semantics are
 stable.
+
+## 2026-04-08 17:10 - Remaining chunks need explicit gates
+
+After the first commit, the next useful planning pass was not more architecture
+theory. It was turning the remaining chunks into concrete acceptance and
+validation gates so each slice has a clear definition of done before coding
+starts.

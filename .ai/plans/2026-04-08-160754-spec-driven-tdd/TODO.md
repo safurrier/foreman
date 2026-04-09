@@ -11,6 +11,7 @@ description: >
 - [x] Sketch the target completed app and primary operator flows
 - [x] Define milestone ordering before implementation starts
 - [x] Create a SPEC traceability and architecture review checklist
+- [x] Add detailed acceptance and validation specs for the remaining chunks
 
 ## Phase 0: Architecture spine
 - [x] Define core app vocabulary: `Command`, `Action`, `Mode`, `Focus`, `SortMode`, `AgentStatus`, `IntegrationMode`
