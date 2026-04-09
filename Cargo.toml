@@ -3,3 +3,11 @@ name = "foreman"
 version = "0.1.0"
 edition = "2021"
 description = "TUI for managing AI agents across tmux"
+
+[dependencies]
+clap = { version = "4.5.4", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+
+[dev-dependencies]
+tempfile = "3.13"

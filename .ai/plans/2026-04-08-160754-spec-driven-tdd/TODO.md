@@ -19,10 +19,10 @@ description: >
 - [x] Add fixture builders for sessions, windows, panes, and agent snapshots
 
 ## Phase 1: CLI, config, and boot
-- [ ] Implement `foreman --config-path`
-- [ ] Implement `foreman --init-config`
-- [ ] Parse runtime overrides for polling, capture depth, popup mode, and notifications
-- [ ] Add boot logging and latest-log pointer behavior
+- [x] Implement `foreman --config-path`
+- [x] Implement `foreman --init-config`
+- [x] Parse runtime overrides for polling, capture depth, popup mode, and notifications
+- [x] Add boot logging and latest-log pointer behavior
 
 ## Phase 2: Render shell
 - [ ] Render header, sidebar, preview, input, footer, and help shell from pure state

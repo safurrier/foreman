@@ -67,3 +67,10 @@ After the first commit, the next useful planning pass was not more architecture
 theory. It was turning the remaining chunks into concrete acceptance and
 validation gates so each slice has a clear definition of done before coding
 starts.
+
+## 2026-04-08 17:29 - Chunk 2 validation pattern is worth repeating
+
+Chunk 2 used both unit tests and real subprocess-driven integration tests
+against the compiled `foreman` binary. That is the right pattern for future
+chunks too: keep pure logic in unit tests, but add at least one real e2e-style
+path whenever the feature crosses a process or adapter boundary.
