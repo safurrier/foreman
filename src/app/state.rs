@@ -269,6 +269,27 @@ impl Inventory {
         }
     }
 
+    pub fn session(&self, session_id: &SessionId) -> Option<&Session> {
+        self.sessions
+            .iter()
+            .find(|session| &session.id == session_id)
+    }
+
+    pub fn window(&self, window_id: &WindowId) -> Option<&Window> {
+        self.sessions
+            .iter()
+            .flat_map(|session| session.windows.iter())
+            .find(|window| &window.id == window_id)
+    }
+
+    pub fn pane(&self, pane_id: &PaneId) -> Option<&Pane> {
+        self.sessions
+            .iter()
+            .flat_map(|session| session.windows.iter())
+            .flat_map(|window| window.panes.iter())
+            .find(|pane| &pane.id == pane_id)
+    }
+
     pub fn visible_targets(
         &self,
         filters: &Filters,
@@ -411,6 +432,7 @@ pub struct AppState {
     pub filters: Filters,
     pub collapsed_sessions: BTreeSet<SessionId>,
     pub search_query: String,
+    pub startup_error: Option<String>,
 }
 
 impl AppState {
@@ -435,6 +457,27 @@ impl AppState {
             &self.collapsed_sessions,
             self.sort_mode,
         );
+    }
+
+    pub fn mode_label(&self) -> &'static str {
+        match self.mode {
+            Mode::Normal => "NORMAL",
+            Mode::PreviewScroll => "PREVIEW",
+            Mode::Input => "INPUT",
+            Mode::Spawn => "SPAWN",
+            Mode::Search => "SEARCH",
+            Mode::FlashNavigate => "FLASH",
+            Mode::Rename => "RENAME",
+            Mode::Help => "HELP",
+        }
+    }
+
+    pub fn focus_label(&self) -> &'static str {
+        match self.focus {
+            Focus::Sidebar => "SIDEBAR",
+            Focus::Preview => "PREVIEW",
+            Focus::Input => "INPUT",
+        }
     }
 }
 

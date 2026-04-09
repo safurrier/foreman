@@ -25,9 +25,9 @@ description: >
 - [x] Add boot logging and latest-log pointer behavior
 
 ## Phase 2: Render shell
-- [ ] Render header, sidebar, preview, input, footer, and help shell from pure state
-- [ ] Add buffer tests for focus styling, mode visibility, and empty-state error shell
-- [ ] Ensure the shell is usable when tmux is missing or empty
+- [x] Render header, sidebar, preview, input, footer, and help shell from pure state
+- [x] Add buffer tests for focus styling, mode visibility, and empty-state error shell
+- [x] Ensure the shell is usable when tmux is missing or empty
 
 ## Phase 3: Inventory and visibility
 - [ ] Add tmux discovery adapter with fake-backed contract tests

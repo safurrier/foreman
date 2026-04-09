@@ -74,3 +74,10 @@ Chunk 2 used both unit tests and real subprocess-driven integration tests
 against the compiled `foreman` binary. That is the right pattern for future
 chunks too: keep pure logic in unit tests, but add at least one real e2e-style
 path whenever the feature crosses a process or adapter boundary.
+
+## 2026-04-08 17:48 - Chunk 3 stayed pure on purpose
+
+The render shell slice worked best as a pure Ratatui layer with buffer tests,
+not as a half-fake interactive app. That keeps the architecture honest:
+rendering can evolve and be tested now, while the eventual event loop and tmux
+integration still arrive as separate chunks.
