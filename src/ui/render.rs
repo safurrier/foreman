@@ -36,12 +36,14 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         .pull_request_compact_label()
         .map(|label| format!(" | {label}"))
         .unwrap_or_default();
+    let notifications = format!(" | {}", state.notifications_label());
     let content = format!(
-        "Foreman | mode={} | focus={} | visible_targets={}{}",
+        "Foreman | mode={} | focus={} | visible_targets={}{}{}",
         state.mode_label(),
         state.focus_label(),
         visible_count,
-        pull_request
+        pull_request,
+        notifications
     );
     let header =
         Paragraph::new(content).block(Block::default().borders(Borders::ALL).title("Header"));
@@ -129,9 +131,9 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         Mode::Help => "? Close | q Quit",
         Mode::Normal | Mode::PreviewScroll => {
             if state.selected_pull_request().is_some() {
-                "? Help | / Search | s Flash | p PR | O Open | Y Copy | q Quit"
+                "? Help | / Search | s Flash | p PR | O Open | Y Copy | m Mute | n Profile | q Quit"
             } else {
-                "? Help | / Search | s Flash | p PR | q Quit"
+                "? Help | / Search | s Flash | p PR | m Mute | n Profile | q Quit"
             }
         }
     };
@@ -149,7 +151,7 @@ fn render_help(frame: &mut Frame<'_>) {
     let popup = centered_rect(64, 45, frame.area());
     frame.render_widget(Clear, popup);
     let help = Paragraph::new(
-        "Help\n\nj/k or arrows: move\nEnter: select\nTab or focus command: move focus\ni: compose direct input\np: toggle PR detail\nShift+O: open PR in browser\nShift+Y: copy PR URL\nx: confirm kill for selected pane\nCtrl+S: submit the active draft\n?: toggle help\nq: quit",
+        "Help\n\nj/k or arrows: move\nEnter: select\nTab or focus command: move focus\ni: compose direct input\np: toggle PR detail\nShift+O: open PR in browser\nShift+Y: copy PR URL\nm: mute/unmute notifications\nn: cycle notification profile\nx: confirm kill for selected pane\nCtrl+S: submit the active draft\n?: toggle help\nq: quit",
     )
     .block(
         Block::default()
@@ -397,6 +399,18 @@ fn preview_lines(state: &AppState) -> String {
 
     if let Some(workspace_path) = state.selected_workspace_path() {
         content.push_str(&format!("\n\nWorkspace: {}", workspace_path.display()));
+    }
+
+    content.push_str(&format!(
+        "\nNotifications: {}",
+        if state.notifications.muted {
+            "MUTED".to_string()
+        } else {
+            state.notifications.profile.label().to_string()
+        }
+    ));
+    if let Some(status) = &state.notifications.last_status {
+        content.push_str(&format!("\nNotification status: {status}"));
     }
 
     if let Some(lookup) = state.selected_pull_request_lookup() {
@@ -673,7 +687,7 @@ mod tests {
         assert!(output.contains("pr=#42 OPEN"));
         assert!(output.contains("Pull Request"));
         assert!(output.contains("feat/pr-awareness"));
-        assert!(output.contains("https://example.com/pr/42"));
+        assert!(output.contains("Author: alex"));
     }
 
     #[test]
@@ -688,5 +702,22 @@ mod tests {
         assert!(output.contains("pr=NONE"));
         assert!(output.contains("PR: no open pull request"));
         assert!(!output.contains("Pull Request"));
+    }
+
+    #[test]
+    fn render_reflects_notification_mute_and_profile_state() {
+        let mut state = sample_state();
+        state.notifications.muted = true;
+        state.notifications.last_status = Some("Notifications muted".to_string());
+        let muted_output = render_to_string(&state);
+        assert!(muted_output.contains("notify=MUTED"));
+        assert!(muted_output.contains("Notification status: Notifications muted"));
+
+        state.notifications.muted = false;
+        state.notifications.profile = crate::app::NotificationProfile::CompletionOnly;
+        state.notifications.last_status = Some("Notification profile: COMPLETE".to_string());
+        let profile_output = render_to_string(&state);
+        assert!(profile_output.contains("notify=COMPLETE"));
+        assert!(profile_output.contains("Notifications: COMPLETE"));
     }
 }

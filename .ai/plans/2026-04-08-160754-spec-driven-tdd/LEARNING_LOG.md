@@ -151,3 +151,13 @@ workspace identity rather than a transient sidebar position. The other useful
 split was between auto-open and manual-open behavior: closing a discovered PR
 should suppress future auto-open for that workspace, but a manual reopen should
 still survive later refreshes.
+
+## 2026-04-09 10:06 - Notification policy should follow visible state, not raw observations
+
+Chunk 11 only settled once notifications were tied to the same debounced,
+operator-visible status model as the dashboard. The first refresh from working
+to idle is still a debounce step, so completion notifications should not fire
+until the visible pane status actually flips to idle. The other useful split
+was policy versus delivery: suppression rules and cooldowns stay pure and
+testable, while backend fallback and shell execution stay in the notification
+service.

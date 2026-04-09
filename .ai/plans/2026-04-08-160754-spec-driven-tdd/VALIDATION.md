@@ -187,3 +187,29 @@ test ladder.
   Result: pass
 - `python3 /Users/alex.furrier/.codex/skills/alex-ai-ai-context-engineering-files/scripts/validate_frontmatter.py .`
   Result: pass
+
+## 2026-04-09 10:06 - Chunk 11 validation
+
+- Notification policy unit tests in `src/services/notifications.rs`
+  Result: pass
+- Reducer integration tests for emit, suppress, mute, and profile state in
+  `src/app/reducer.rs`
+  Result: pass
+- Command and command-to-action coverage for mute/profile shortcuts in
+  `src/app/command.rs` and `src/app/action.rs`
+  Result: pass
+- Ratatui buffer coverage for mute/profile UI reflection in `src/ui/render.rs`
+  Result: pass
+- Logging service tests for decision and backend-selection records in
+  `src/services/logging.rs`
+  Result: pass
+- Shell-backed fallback smoke test in `tests/notifications.rs`
+  Result: pass
+- `cargo test`
+  Result: pass
+- `mise run check`
+  Result: pass
+- `python3 /Users/alex.furrier/.codex/skills/alex-ai-ai-context-engineering-files/scripts/verify_references.py .`
+  Result: pass
+- `python3 /Users/alex.furrier/.codex/skills/alex-ai-ai-context-engineering-files/scripts/validate_frontmatter.py .`
+  Result: pass

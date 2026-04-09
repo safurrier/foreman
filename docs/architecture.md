@@ -48,7 +48,7 @@ testable as the app grows.
 | tmux adapter | Discover sessions/windows/panes, capture pane output, focus panes, send input, rename windows, create windows, and kill panes |
 | Harness integrations | Detect supported harness families, translate compatibility signals, and overlay native signals such as Claude when available |
 | Pull request service | Resolve pull request metadata for the selected workspace, and own browser-open and clipboard-copy seams with graceful degradation |
-| Notification service | Apply suppression, cooldown, and profile rules and dispatch best-effort notifications |
+| Notification service | Apply pure suppression and cooldown policy, dispatch best-effort notifications with backend fallback, and surface observable decisions |
 | Logging + telemetry | Persist structured run logs, latest-run pointer, retention cleanup, and header-level system stats |
 
 ### Primary Data Flows
@@ -122,6 +122,9 @@ testable as the app grows.
   sidebar row indexes or cursor position.
 - Pull request cache entries, detail-panel state, and auto-open suppression are
   keyed by workspace path in `AppState`.
+- Notification mute state, profile, refresh tick, and per-pane cooldowns also
+  live in `AppState`; refresh reconciliation emits notification effects but does
+  not choose notification backends directly.
 - Pull request detail may auto-open on first discovery, but once the operator
   closes it, later refreshes do not auto-reopen it for that same workspace.
 - Refreshes, filtering, and sorting must not leave selection pointing at an
@@ -178,6 +181,9 @@ testable as the app grows.
   transitions; adapters own I/O.
 - **Prefer fake-backed contract tests** - most tmux, pull request, and
   notification behavior should be validated behind seams before live smoke tests.
+- **Prefer pure notification policy** - transition detection, suppression, and
+  cooldown rules should stay deterministic and unit-testable before any shell
+  backend is involved.
 - **Prefer stable logical identity over index-based selection** - selection
   should survive refreshes and reordering whenever possible.
 - **Prefer keyboard-first, instant interaction** - navigation should feel
@@ -262,7 +268,7 @@ boundaries unless an ADR changes them.
 | src/ui/ | Ratatui layout, widgets, rendering, and buffer-test helpers | This document |
 | src/adapters/tmux.rs | tmux discovery, capture, pane working-directory lookup, focus, send-input, rename, spawn, and kill seam; transport only, no status heuristics | `SPEC.md` |
 | src/integrations/ | Harness recognition, compatibility status derivation, debounce logic, and native-over-compatibility precedence overlays | `SPEC.md` |
-| src/services/notifications.rs (planned) | Notification policy, cooldowns, backend dispatch | `SPEC.md` |
+| src/services/notifications.rs | Notification policy, cooldowns, backend fallback, and dispatch seams | `SPEC.md` |
 | src/services/pull_requests.rs | Pull request lookup, browser/copy effects, and degradation behavior | `SPEC.md` |
 | src/services/logging.rs | Run logs, latest-run pointer, retention cleanup, and bootstrap/inventory summaries | `SPEC.md` |
 

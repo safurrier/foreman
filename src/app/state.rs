@@ -100,6 +100,55 @@ pub enum SortMode {
     AttentionFirst,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum NotificationKind {
+    Completion,
+    NeedsAttention,
+}
+
+impl NotificationKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Completion => "completion",
+            Self::NeedsAttention => "needs_attention",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum NotificationProfile {
+    #[default]
+    All,
+    CompletionOnly,
+    AttentionOnly,
+}
+
+impl NotificationProfile {
+    pub fn next(self) -> Self {
+        match self {
+            Self::All => Self::CompletionOnly,
+            Self::CompletionOnly => Self::AttentionOnly,
+            Self::AttentionOnly => Self::All,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::All => "ALL",
+            Self::CompletionOnly => "COMPLETE",
+            Self::AttentionOnly => "ATTENTION",
+        }
+    }
+
+    pub fn allows(self, kind: NotificationKind) -> bool {
+        match self {
+            Self::All => true,
+            Self::CompletionOnly => kind == NotificationKind::Completion,
+            Self::AttentionOnly => kind == NotificationKind::NeedsAttention,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HarnessKind {
     ClaudeCode,
@@ -548,6 +597,21 @@ pub struct FlashTarget {
     pub target: SelectionTarget,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct NotificationCooldownKey {
+    pub pane_id: PaneId,
+    pub kind: NotificationKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct NotificationState {
+    pub muted: bool,
+    pub profile: NotificationProfile,
+    pub refresh_tick: u64,
+    pub cooldowns: BTreeMap<NotificationCooldownKey, u64>,
+    pub last_status: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModalState {
     RenameWindow {
@@ -613,6 +677,7 @@ pub struct AppState {
     pub pull_request_detail_workspace: Option<PathBuf>,
     pub pull_request_detail_manual: bool,
     pub pull_request_auto_open_dismissed: BTreeSet<PathBuf>,
+    pub notifications: NotificationState,
     pub input_draft: TextDraft,
     pub modal: Option<ModalState>,
     pub startup_error: Option<String>,
@@ -860,6 +925,14 @@ impl AppState {
                 pull_request.number,
                 pull_request.status.label()
             )),
+        }
+    }
+
+    pub fn notifications_label(&self) -> String {
+        if self.notifications.muted {
+            "notify=MUTED".to_string()
+        } else {
+            format!("notify={}", self.notifications.profile.label())
         }
     }
 

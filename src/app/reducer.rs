@@ -4,6 +4,9 @@ use crate::app::state::{
     SessionId, WindowId,
 };
 use crate::integrations::stabilize_inventory;
+use crate::services::notifications::{
+    evaluate_inventory_notifications, NotificationDecision, NotificationRequest,
+};
 use crate::services::pull_requests::PullRequestLookup;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,6 +35,12 @@ pub enum Effect {
     },
     CopyToClipboard {
         text: String,
+    },
+    Notify {
+        request: NotificationRequest,
+    },
+    LogNotificationDecision {
+        decision: NotificationDecision,
     },
     Quit,
 }
@@ -78,6 +87,21 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
         } => {
             state.pull_request_cache.insert(workspace_path, lookup);
             reconcile_pull_request_detail(state);
+        }
+        Action::ToggleNotificationsMuted => {
+            state.notifications.muted = !state.notifications.muted;
+            state.notifications.last_status = Some(if state.notifications.muted {
+                "Notifications muted".to_string()
+            } else {
+                "Notifications unmuted".to_string()
+            });
+        }
+        Action::CycleNotificationProfile => {
+            state.notifications.profile = state.notifications.profile.next();
+            state.notifications.last_status = Some(format!(
+                "Notification profile: {}",
+                state.notifications.profile.label()
+            ));
         }
         Action::TogglePullRequestDetail => {
             let Some(workspace_path) = state.selected_workspace_path() else {
@@ -187,6 +211,7 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             reconcile_pull_request_detail(state);
         }
         Action::ReplaceInventory(mut inventory) => {
+            let previous_inventory = state.inventory.clone();
             stabilize_inventory(&state.inventory, &mut inventory);
             state.inventory = inventory;
             state
@@ -195,6 +220,7 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             state.reconcile_selection();
             reconcile_interaction_state(state);
             reconcile_pull_request_detail(state);
+            return notification_effects_for_refresh(state, &previous_inventory);
         }
         Action::FocusSelectedPane => {
             if let Some(SelectionTarget::Pane(pane_id)) = state.selection.as_ref() {
@@ -548,6 +574,44 @@ fn reconcile_pull_request_detail(state: &mut AppState) {
             state.pull_request_detail_manual = false;
         }
     }
+}
+
+fn notification_effects_for_refresh(
+    state: &mut AppState,
+    previous_inventory: &crate::app::Inventory,
+) -> Vec<Effect> {
+    state.notifications.refresh_tick = state.notifications.refresh_tick.saturating_add(1);
+    state
+        .notifications
+        .cooldowns
+        .retain(|key, _| state.inventory.pane(&key.pane_id).is_some());
+
+    let decisions = evaluate_inventory_notifications(
+        previous_inventory,
+        &state.inventory,
+        state.selected_pane_id().as_ref(),
+        state.notifications.muted,
+        state.notifications.profile,
+        state.notifications.refresh_tick,
+        &state.notifications.cooldowns,
+    );
+
+    let mut effects = Vec::new();
+    for decision in decisions {
+        if let Some(request) = decision.request.clone() {
+            state.notifications.cooldowns.insert(
+                crate::app::NotificationCooldownKey {
+                    pane_id: request.pane_id.clone(),
+                    kind: request.kind,
+                },
+                state.notifications.refresh_tick,
+            );
+            effects.push(Effect::Notify { request });
+        }
+        effects.push(Effect::LogNotificationDecision { decision });
+    }
+
+    effects
 }
 
 #[cfg(test)]
@@ -1210,5 +1274,124 @@ mod tests {
                 text: "https://example.com/pr/7".to_string(),
             }]
         );
+    }
+
+    #[test]
+    fn toggle_mute_and_cycle_profile_update_notification_state() {
+        let mut state = AppState::with_inventory(sample_inventory());
+
+        reduce(&mut state, Action::ToggleNotificationsMuted);
+        assert!(state.notifications.muted);
+        assert_eq!(
+            state.notifications.last_status.as_deref(),
+            Some("Notifications muted")
+        );
+
+        reduce(&mut state, Action::CycleNotificationProfile);
+        assert_eq!(
+            state.notifications.profile,
+            crate::app::NotificationProfile::CompletionOnly
+        );
+        assert_eq!(
+            state.notifications.last_status.as_deref(),
+            Some("Notification profile: COMPLETE")
+        );
+    }
+
+    #[test]
+    fn replace_inventory_emits_completion_notification_and_records_cooldown() {
+        let mut state = AppState::with_inventory(inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:agents").pane(
+                PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
+                    .working_dir("/tmp/alpha")
+                    .status(AgentStatus::Working),
+            ),
+        )]));
+        state.selection = Some(SelectionTarget::Session("alpha".into()));
+
+        let refreshed_inventory = inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:agents").pane(
+                PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
+                    .working_dir("/tmp/alpha")
+                    .status(AgentStatus::Idle),
+            ),
+        )]);
+
+        let first_effects = reduce(
+            &mut state,
+            Action::ReplaceInventory(refreshed_inventory.clone()),
+        );
+        assert!(first_effects.is_empty());
+
+        let effects = reduce(&mut state, Action::ReplaceInventory(refreshed_inventory));
+
+        assert_eq!(effects.len(), 2);
+        assert!(matches!(effects[0], super::Effect::Notify { .. }));
+        assert!(matches!(
+            effects[1],
+            super::Effect::LogNotificationDecision { .. }
+        ));
+        assert!(state
+            .notifications
+            .cooldowns
+            .contains_key(&crate::app::NotificationCooldownKey {
+                pane_id: "alpha:claude".into(),
+                kind: crate::app::NotificationKind::Completion,
+            }));
+    }
+
+    #[test]
+    fn replace_inventory_suppresses_notification_when_selected_or_muted() {
+        let initial_inventory = inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:agents").pane(
+                PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
+                    .working_dir("/tmp/alpha")
+                    .status(AgentStatus::Working),
+            ),
+        )]);
+        let refreshed_inventory = inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:agents").pane(
+                PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
+                    .working_dir("/tmp/alpha")
+                    .status(AgentStatus::Idle),
+            ),
+        )]);
+
+        let mut selected_state = AppState::with_inventory(initial_inventory.clone());
+        selected_state.selection = Some(SelectionTarget::Pane("alpha:claude".into()));
+        let first_selected_effects = reduce(
+            &mut selected_state,
+            Action::ReplaceInventory(refreshed_inventory.clone()),
+        );
+        assert!(first_selected_effects.is_empty());
+        let selected_effects = reduce(
+            &mut selected_state,
+            Action::ReplaceInventory(refreshed_inventory.clone()),
+        );
+        assert_eq!(selected_effects.len(), 1);
+        assert!(matches!(
+            &selected_effects[0],
+            super::Effect::LogNotificationDecision { decision }
+                if decision.request.is_none()
+        ));
+
+        let mut muted_state = AppState::with_inventory(initial_inventory);
+        muted_state.selection = Some(SelectionTarget::Session("alpha".into()));
+        muted_state.notifications.muted = true;
+        let first_muted_effects = reduce(
+            &mut muted_state,
+            Action::ReplaceInventory(refreshed_inventory.clone()),
+        );
+        assert!(first_muted_effects.is_empty());
+        let muted_effects = reduce(
+            &mut muted_state,
+            Action::ReplaceInventory(refreshed_inventory),
+        );
+        assert_eq!(muted_effects.len(), 1);
+        assert!(matches!(
+            &muted_effects[0],
+            super::Effect::LogNotificationDecision { decision }
+                if decision.request.is_none()
+        ));
     }
 }

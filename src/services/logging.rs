@@ -1,6 +1,9 @@
 use crate::app::InventorySummary;
 use crate::config::RuntimeConfig;
 use crate::integrations::ClaudeNativeOverlaySummary;
+use crate::services::notifications::{
+    NotificationDecision, NotificationDispatchReceipt, NotificationError, NotificationRequest,
+};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -117,6 +120,56 @@ impl RunLogger {
         self.write_line("WARN", &format!("claude_native_warning {warning}"))
     }
 
+    pub fn log_notification_decision(&mut self, decision: &NotificationDecision) -> io::Result<()> {
+        let action = if decision.request.is_some() {
+            "emit"
+        } else {
+            "suppress"
+        };
+        self.write_line(
+            "INFO",
+            &format!(
+                "notification_decision pane_id={} kind={} action={} reason={}",
+                decision.pane_id.as_str(),
+                decision.kind.label(),
+                action,
+                decision.reason.label()
+            ),
+        )
+    }
+
+    pub fn log_notification_backend_selected(
+        &mut self,
+        request: &NotificationRequest,
+        receipt: &NotificationDispatchReceipt,
+    ) -> io::Result<()> {
+        self.write_line(
+            "INFO",
+            &format!(
+                "notification_backend_selected pane_id={} kind={} backend={}",
+                request.pane_id.as_str(),
+                request.kind.label(),
+                receipt.backend_name
+            ),
+        )
+    }
+
+    pub fn log_notification_backend_failure(
+        &mut self,
+        request: &NotificationRequest,
+        error: &NotificationError,
+    ) -> io::Result<()> {
+        self.write_line(
+            "WARN",
+            &format!(
+                "notification_backend_failure pane_id={} kind={} error={}",
+                request.pane_id.as_str(),
+                request.kind.label(),
+                error
+            ),
+        )
+    }
+
     pub fn summary(&self) -> RunLogSummary {
         RunLogSummary {
             run_path: self.run_path.clone(),
@@ -172,9 +225,13 @@ fn current_run_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::RunLogger;
-    use crate::app::InventorySummary;
+    use crate::app::{InventorySummary, NotificationKind};
     use crate::config::RuntimeConfig;
     use crate::integrations::ClaudeNativeOverlaySummary;
+    use crate::services::notifications::{
+        NotificationDecision, NotificationDecisionReason, NotificationDispatchReceipt,
+        NotificationError, NotificationRequest,
+    };
     use std::path::Path;
     use tempfile::tempdir;
 
@@ -303,5 +360,51 @@ mod tests {
         assert!(contents.contains("claude_native_summary"));
         assert!(contents.contains("applied=1"));
         assert!(contents.contains("fallback_to_compatibility=2"));
+    }
+
+    #[test]
+    fn notification_logs_capture_decisions_and_backend_results() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let mut logger = RunLogger::start(temp_dir.path(), 2).expect("logger should start");
+        let request = NotificationRequest {
+            pane_id: "alpha:claude".into(),
+            pane_title: "claude-main".to_string(),
+            kind: NotificationKind::Completion,
+            title: "Agent ready: claude-main".to_string(),
+            body: "The agent returned to an idle state.".to_string(),
+            workspace_path: None,
+        };
+
+        logger
+            .log_notification_decision(&NotificationDecision {
+                pane_id: "alpha:claude".into(),
+                kind: NotificationKind::Completion,
+                reason: NotificationDecisionReason::WorkingBecameReady,
+                request: Some(request.clone()),
+            })
+            .expect("decision log should succeed");
+        logger
+            .log_notification_backend_selected(
+                &request,
+                &NotificationDispatchReceipt {
+                    backend_name: "fallback".to_string(),
+                },
+            )
+            .expect("backend selected log should succeed");
+        logger
+            .log_notification_backend_failure(
+                &request,
+                &NotificationError::Unavailable("notify-send is not installed".to_string()),
+            )
+            .expect("backend failure log should succeed");
+
+        let contents =
+            std::fs::read_to_string(logger.summary().run_path).expect("run log should be readable");
+        assert!(contents.contains("notification_decision"));
+        assert!(contents.contains("action=emit"));
+        assert!(contents.contains("reason=working_became_ready"));
+        assert!(contents.contains("notification_backend_selected"));
+        assert!(contents.contains("backend=fallback"));
+        assert!(contents.contains("notification_backend_failure"));
     }
 }

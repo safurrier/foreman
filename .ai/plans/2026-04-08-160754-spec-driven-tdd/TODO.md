@@ -66,7 +66,7 @@ description: >
 
 ## Phase 8: Secondary surfaces
 - [x] Implement pull request awareness with graceful degradation
-- [ ] Implement notification suppression, cooldowns, mute, and profile switching
+- [x] Implement notification suppression, cooldowns, mute, and profile switching
 - [ ] Surface operator-visible failures in the UI and logs
 - [ ] Add header stats for local CPU and memory pressure
 

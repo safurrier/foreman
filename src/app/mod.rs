@@ -10,7 +10,8 @@ pub use fixtures::{inventory, AgentSnapshotBuilder, PaneBuilder, SessionBuilder,
 pub use reducer::{reduce, Effect};
 pub use state::{
     AgentSnapshot, AgentStatus, AppState, Filters, FlashNavigateKind, FlashState, FlashTarget,
-    Focus, HarnessKind, IntegrationMode, Inventory, InventorySummary, ModalState, Mode, Pane,
+    Focus, HarnessKind, IntegrationMode, Inventory, InventorySummary, ModalState, Mode,
+    NotificationCooldownKey, NotificationKind, NotificationProfile, NotificationState, Pane,
     PaneId, SearchState, SelectionTarget, Session, SessionId, SortMode, TextDraft, Window,
     WindowId,
 };

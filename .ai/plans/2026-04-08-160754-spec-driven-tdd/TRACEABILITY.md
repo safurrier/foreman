@@ -51,11 +51,11 @@ description: >
   Dominant validation: provider contract tests, reducer tests, Ratatui buffer
   tests, and graceful-degradation smoke tests
 
-- [ ] **Notifications**
+- [x] **Notifications**
   Root spec: R18, A18
   Planned chunks: 11
-  Dominant validation: policy unit tests, backend contract tests, end-to-end
-  suppression checks
+  Dominant validation: policy unit tests, backend contract tests, reducer
+  integration tests, logging tests, and shell-backed fallback smoke tests
 
 - [ ] **Quality gate and definition of done**
   Root spec: R19, A19, Definition of done

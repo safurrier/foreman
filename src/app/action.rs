@@ -31,6 +31,8 @@ pub enum Action {
         workspace_path: PathBuf,
         lookup: PullRequestLookup,
     },
+    ToggleNotificationsMuted,
+    CycleNotificationProfile,
     TogglePullRequestDetail,
     OpenSelectedPullRequest,
     CopySelectedPullRequestUrl,
@@ -124,6 +126,8 @@ pub fn action_for_command(state: &AppState, command: Command) -> Action {
         Command::FlashNavigateFocus => Action::BeginFlash {
             kind: FlashNavigateKind::JumpAndFocus,
         },
+        Command::ToggleNotificationsMuted => Action::ToggleNotificationsMuted,
+        Command::CycleNotificationProfile => Action::CycleNotificationProfile,
         Command::TogglePullRequestDetail => Action::TogglePullRequestDetail,
         Command::OpenPullRequest => {
             if state.selected_pull_request().is_some() {
@@ -335,6 +339,20 @@ mod tests {
         assert_eq!(
             action_for_command(&state, Command::CopyPullRequestUrl),
             Action::CopySelectedPullRequestUrl
+        );
+    }
+
+    #[test]
+    fn notification_commands_map_directly_to_runtime_state_updates() {
+        let state = state_with_selection(Some(SelectionTarget::Pane("alpha:main".into())));
+
+        assert_eq!(
+            action_for_command(&state, Command::ToggleNotificationsMuted),
+            Action::ToggleNotificationsMuted
+        );
+        assert_eq!(
+            action_for_command(&state, Command::CycleNotificationProfile),
+            Action::CycleNotificationProfile
         );
     }
 

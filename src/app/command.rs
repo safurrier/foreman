@@ -27,6 +27,8 @@ pub enum Command {
     TogglePullRequestDetail,
     OpenPullRequest,
     CopyPullRequestUrl,
+    ToggleNotificationsMuted,
+    CycleNotificationProfile,
     RenameWindow,
     SpawnAgent,
     ToggleNonAgentSessions,
@@ -80,6 +82,12 @@ pub fn map_key_event(key: KeyEvent, focus: Focus, mode: Mode) -> Option<Command>
         }
         (Mode::Normal, _, KeyCode::Char('p'), KeyModifiers::NONE) => {
             Some(Command::TogglePullRequestDetail)
+        }
+        (Mode::Normal, _, KeyCode::Char('m'), KeyModifiers::NONE) => {
+            Some(Command::ToggleNotificationsMuted)
+        }
+        (Mode::Normal, _, KeyCode::Char('n'), KeyModifiers::NONE) => {
+            Some(Command::CycleNotificationProfile)
         }
         (Mode::Normal, _, KeyCode::Char('O'), KeyModifiers::SHIFT) => {
             Some(Command::OpenPullRequest)
@@ -288,6 +296,14 @@ mod tests {
         assert_eq!(
             map_key_event(key(KeyCode::Char('p')), Focus::Sidebar, Mode::Normal),
             Some(Command::TogglePullRequestDetail)
+        );
+        assert_eq!(
+            map_key_event(key(KeyCode::Char('m')), Focus::Sidebar, Mode::Normal),
+            Some(Command::ToggleNotificationsMuted)
+        );
+        assert_eq!(
+            map_key_event(key(KeyCode::Char('n')), Focus::Sidebar, Mode::Normal),
+            Some(Command::CycleNotificationProfile)
         );
         assert_eq!(
             map_key_event(

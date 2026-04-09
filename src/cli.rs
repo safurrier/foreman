@@ -141,22 +141,22 @@ fn bootstrap_state(runtime: &RuntimeConfig) -> (AppState, ClaudeNativeOverlaySum
                 ClaudeNativeOverlaySummary::default()
             };
 
-            (
-                AppState {
-                    popup_mode: runtime.popup,
-                    ..AppState::with_inventory(inventory)
-                },
-                claude_native,
-            )
+            let mut state = AppState {
+                popup_mode: runtime.popup,
+                ..AppState::with_inventory(inventory)
+            };
+            state.notifications.muted = !runtime.notifications_enabled;
+            (state, claude_native)
         }
-        Err(error) => (
-            AppState {
+        Err(error) => {
+            let mut state = AppState {
                 popup_mode: runtime.popup,
                 startup_error: Some(error.to_string()),
                 ..AppState::default()
-            },
-            ClaudeNativeOverlaySummary::default(),
-        ),
+            };
+            state.notifications.muted = !runtime.notifications_enabled;
+            (state, ClaudeNativeOverlaySummary::default())
+        }
     }
 }
 
@@ -206,6 +206,32 @@ mod tests {
             RunOutcome::Bootstrapped(summary) => {
                 assert!(summary.logs.run_path.exists());
                 assert!(summary.logs.latest_path.exists());
+            }
+            other => panic!("expected bootstrapped outcome, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bootstrap_respects_no_notify_runtime_flag() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let cli = Cli::parse_from([
+            "foreman",
+            "--config-file",
+            temp_dir
+                .path()
+                .join("config.toml")
+                .to_str()
+                .expect("utf-8 path"),
+            "--log-dir",
+            temp_dir.path().join("logs").to_str().expect("utf-8 path"),
+            "--no-notify",
+        ]);
+
+        let outcome = run(cli).expect("run should succeed");
+
+        match outcome {
+            RunOutcome::Bootstrapped(summary) => {
+                assert!(summary.state.notifications.muted);
             }
             other => panic!("expected bootstrapped outcome, got {other:?}"),
         }

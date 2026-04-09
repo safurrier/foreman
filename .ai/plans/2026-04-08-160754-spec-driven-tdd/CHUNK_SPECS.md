@@ -337,12 +337,12 @@ Close the attention loop and make operational decisions inspectable.
 - observability invariants
 
 **Acceptance checklist**
-- [ ] Completion notifications emit when suppression rules do not apply
-- [ ] Needs-attention notifications emit when suppression rules do not apply
-- [ ] Looking at the relevant pane or agent suppresses redundant notifications
-- [ ] Per-agent cooldowns reduce noise
-- [ ] Runtime mute and profile switching update UI state
-- [ ] Structured run logs, latest-run pointer, and retention cleanup all work
+- [x] Completion notifications emit when suppression rules do not apply
+- [x] Needs-attention notifications emit when suppression rules do not apply
+- [x] Looking at the relevant pane or agent suppresses redundant notifications
+- [x] Per-agent cooldowns reduce noise
+- [x] Runtime mute and profile switching update UI state
+- [x] Structured run logs, latest-run pointer, and retention cleanup all work
 
 **Architecture guardrails**
 - Notification policy is pure or near-pure and unit-testable
