@@ -62,7 +62,7 @@ kebab-case and unique within `.ai/plans/`.
 The task scaffolds META.yaml, TODO.md, LEARNING_LOG.md, and VALIDATION.md.
 Add SPEC.md or IMPLEMENTATION.md if the work is complex.
 
-See `.ai/plans/AGENTS.md` for the full plan structure and `_example/` for a reference.
+See `.ai/plans/AGENTS.md` for the full plan structure and `.ai/plans/_example/` for a reference.
 
 ## Before Pushing
 

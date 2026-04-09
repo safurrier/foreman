@@ -1,0 +1,22 @@
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Command {
+    NavigateUp,
+    NavigateDown,
+    NavigateLeft,
+    NavigateRight,
+    Select,
+    Cancel,
+    FocusSidebar,
+    FocusPreview,
+    FocusInput,
+    FocusSelectedPane,
+    ToggleHelp,
+    Search,
+    FlashNavigate,
+    RenameWindow,
+    SpawnAgent,
+    ToggleNonAgentSessions,
+    ToggleNonAgentPanes,
+    CycleSortMode,
+    Quit,
+}
