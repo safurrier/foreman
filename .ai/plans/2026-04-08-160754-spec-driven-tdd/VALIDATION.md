@@ -14,8 +14,8 @@ description: >
 - Adapter contract tests with fakes for tmux, notifications, and pull requests
 - Real-environment smoke / E2E tests for the highest-value operator journeys
 
-No implementation validation has been run yet. This plan defines the intended
-test ladder.
+Historical note: the ladder above guided implementation. The entries below
+record the actual validation runs.
 
 ## 2026-04-08 16:18 - Planning artifact validation
 
@@ -239,3 +239,19 @@ test ladder.
 - `mise run verify`
   Result: fail, due to local Docker daemon and gcloud credential availability
   rather than Rust code or test failures
+
+## 2026-04-09 14:40 - Chunk 12 runtime delivery validation
+
+- Runtime-loop reducer coverage for observability snapshot actions in `src/app/reducer.rs`
+  Result: pass
+- Binary-level tmux E2E tests for interactive render, direct input, and popup
+  focus in `tests/runtime_dashboard.rs`
+  Result: pass
+- `cargo test`
+  Result: pass
+- `mise run check`
+  Result: pass
+- `mise run verify`
+  Result: fail after Rust checks and smoke tests passed; the local Docker/Colima
+  socket was unavailable and `gcloud.auth.docker-helper` could not refresh
+  registry credentials in non-interactive mode

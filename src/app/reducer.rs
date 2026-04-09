@@ -88,6 +88,15 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             state.pull_request_cache.insert(workspace_path, lookup);
             reconcile_pull_request_detail(state);
         }
+        Action::SetSystemStats(snapshot) => {
+            state.system_stats = snapshot;
+        }
+        Action::SetStartupError(startup_error) => {
+            state.startup_error = startup_error;
+        }
+        Action::SetOperatorAlert(alert) => {
+            state.operator_alert = alert;
+        }
         Action::ToggleNotificationsMuted => {
             state.notifications.muted = !state.notifications.muted;
             state.notifications.last_status = Some(if state.notifications.muted {
@@ -641,6 +650,7 @@ mod tests {
         SelectionDirection, SelectionTarget, SessionBuilder, SortMode, WindowBuilder,
     };
     use crate::services::pull_requests::{PullRequestData, PullRequestLookup, PullRequestStatus};
+    use crate::services::system_stats::SystemStatsSnapshot;
     use std::path::PathBuf;
 
     fn sample_inventory() -> crate::app::Inventory {
@@ -1366,6 +1376,44 @@ mod tests {
         assert_eq!(
             state.notifications.last_status.as_deref(),
             Some("Notification profile: COMPLETE")
+        );
+    }
+
+    #[test]
+    fn runtime_snapshot_actions_update_observability_state() {
+        let mut state = AppState::default();
+
+        reduce(
+            &mut state,
+            Action::SetSystemStats(SystemStatsSnapshot {
+                cpu_pressure_percent: Some(9),
+                memory_pressure_percent: Some(51),
+            }),
+        );
+        reduce(
+            &mut state,
+            Action::SetStartupError(Some("tmux unavailable".to_string())),
+        );
+        reduce(
+            &mut state,
+            Action::SetOperatorAlert(Some(crate::app::OperatorAlert::new(
+                OperatorAlertSource::Tmux,
+                OperatorAlertLevel::Warn,
+                "tmux unavailable: failed to connect",
+            ))),
+        );
+
+        assert_eq!(
+            state.system_stats,
+            SystemStatsSnapshot {
+                cpu_pressure_percent: Some(9),
+                memory_pressure_percent: Some(51),
+            }
+        );
+        assert_eq!(state.startup_error.as_deref(), Some("tmux unavailable"));
+        assert_eq!(
+            state.operator_alert.as_ref().map(|alert| alert.source),
+            Some(OperatorAlertSource::Tmux)
         );
     }
 

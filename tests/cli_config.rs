@@ -53,6 +53,7 @@ fn default_run_creates_run_log_and_latest_log() {
     let log_dir = tempdir().expect("log dir should exist");
 
     let output = Command::new(foreman_bin())
+        .arg("--bootstrap-only")
         .env("FOREMAN_CONFIG_HOME", config_dir.path())
         .env("FOREMAN_LOG_DIR", log_dir.path())
         .output()

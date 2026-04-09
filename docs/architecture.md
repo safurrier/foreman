@@ -43,6 +43,7 @@ testable as the app grows.
 | Component | Purpose |
 |---|---|
 | CLI + config | Parse startup flags, config path/init flows, runtime overrides, popup mode, and notification toggles |
+| Runtime loop | Own terminal setup, event polling, redraw cadence, effect execution, and runtime-level soft-failure alerting during interactive runs |
 | App state core | Own `Command`, `Action`, `Mode`, `Focus`, selection state, filters, sort mode, modal state, and reducer logic |
 | Ratatui renderer | Render header, sidebar, preview, input, footer, help, and overlays from pure state |
 | tmux adapter | Discover sessions/windows/panes, capture pane output, focus panes, send input, rename windows, create windows, and kill panes |
@@ -56,9 +57,9 @@ testable as the app grows.
 
 1. **Startup and boot**
    `foreman` parses config and overrides, starts logging, initializes adapters,
-   builds initial state, captures a system-stats snapshot, and exposes a
-   render-ready shell state. The long-running interactive event loop is still
-   the remaining runtime seam to finish.
+   builds initial state, captures a system-stats snapshot, and then enters the
+   long-running dashboard loop that redraws the shell, polls tmux, and executes
+   reducer-emitted effects.
 2. **Refresh and status loop**
    Poll tick triggers tmux discovery and pane capture, harness interpreters
    derive status signals, reducer updates state, and renderer redraws.
@@ -269,6 +270,7 @@ boundaries unless an ADR changes them.
 | Module | Purpose | Docs |
 |---|---|---|
 | src/cli.rs | CLI flags, config path/init flows, runtime override parsing, and bootstrap wiring | `SPEC.md` |
+| src/runtime.rs | Interactive terminal setup, event polling, redraw cadence, effect execution, and runtime-level soft-failure handling | This document |
 | src/app/ | Core state, commands, actions, reducer, selectors, drafts, modal targets, and UI-facing invariants | This document |
 | src/ui/ | Ratatui layout, widgets, rendering, and buffer-test helpers | This document |
 | src/adapters/tmux.rs | tmux discovery, capture, pane working-directory lookup, focus, send-input, rename, spawn, and kill seam; transport only, no status heuristics | `SPEC.md` |

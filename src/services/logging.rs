@@ -4,6 +4,7 @@ use crate::integrations::ClaudeNativeOverlaySummary;
 use crate::services::notifications::{
     NotificationDecision, NotificationDispatchReceipt, NotificationError, NotificationRequest,
 };
+use crate::services::pull_requests::PullRequestLookup;
 use crate::services::system_stats::SystemStatsSnapshot;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
@@ -117,6 +118,33 @@ impl RunLogger {
 
     pub fn log_tmux_error(&mut self, error: &str) -> io::Result<()> {
         self.write_line("WARN", &format!("tmux_bootstrap_error {error}"))
+    }
+
+    pub fn log_pull_request_lookup(
+        &mut self,
+        workspace_path: &Path,
+        lookup: &PullRequestLookup,
+    ) -> io::Result<()> {
+        let outcome = match lookup {
+            PullRequestLookup::Unknown => "unknown".to_string(),
+            PullRequestLookup::Missing => "missing".to_string(),
+            PullRequestLookup::Unavailable { message } => format!("unavailable:{message}"),
+            PullRequestLookup::Available(pull_request) => {
+                format!(
+                    "available:#{}:{}",
+                    pull_request.number,
+                    pull_request.status.label()
+                )
+            }
+        };
+        self.write_line(
+            "INFO",
+            &format!(
+                "pull_request_lookup workspace={} outcome={}",
+                workspace_path.display(),
+                outcome
+            ),
+        )
     }
 
     pub fn log_operator_alert(&mut self, alert: &OperatorAlert) -> io::Result<()> {
@@ -264,6 +292,7 @@ mod tests {
         NotificationDecision, NotificationDecisionReason, NotificationDispatchReceipt,
         NotificationError, NotificationRequest,
     };
+    use crate::services::pull_requests::{PullRequestData, PullRequestLookup, PullRequestStatus};
     use crate::services::system_stats::SystemStatsSnapshot;
     use std::path::Path;
     use tempfile::tempdir;
@@ -479,5 +508,33 @@ mod tests {
         assert!(contents.contains("source=pull_requests"));
         assert!(contents.contains("level=warn"));
         assert!(contents.contains("GitHub CLI is not installed"));
+    }
+
+    #[test]
+    fn pull_request_lookup_log_records_workspace_and_outcome() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let mut logger = RunLogger::start(temp_dir.path(), 2).expect("logger should start");
+
+        logger
+            .log_pull_request_lookup(
+                Path::new("/tmp/alpha"),
+                &PullRequestLookup::Available(PullRequestData {
+                    number: 42,
+                    title: "Add runtime loop".to_string(),
+                    url: "https://example.com/pr/42".to_string(),
+                    repository: "foreman".to_string(),
+                    branch: "feat/runtime".to_string(),
+                    base_branch: "main".to_string(),
+                    author: "alex".to_string(),
+                    status: PullRequestStatus::Open,
+                }),
+            )
+            .expect("pull request lookup log should succeed");
+
+        let contents =
+            std::fs::read_to_string(logger.summary().run_path).expect("run log should be readable");
+        assert!(contents.contains("pull_request_lookup"));
+        assert!(contents.contains("workspace=/tmp/alpha"));
+        assert!(contents.contains("outcome=available:#42:OPEN"));
     }
 }

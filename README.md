@@ -20,8 +20,9 @@ mise run dev
 - `foreman --config-path` and `foreman --init-config` are live.
 - Normal startup bootstraps config, logging, tmux inventory, native Claude
   overlays, and header-level system stats.
-- The binary currently exits after bootstrap. The long-running interactive TUI
-  loop is still an open implementation item.
+- Normal startup now enters the interactive dashboard loop with live tmux
+  polling, direct input, popup focus-close behavior, and binary-level tmux E2E
+  coverage.
 
 ## Starting New Work
 

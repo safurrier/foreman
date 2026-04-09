@@ -119,6 +119,7 @@ fn binary_bootstrap_logs_claude_native_summary() {
     .expect("native signal should exist");
 
     let output = std::process::Command::new(foreman_bin())
+        .arg("--bootstrap-only")
         .args(["--config-file"])
         .arg(config_dir.path().join("config.toml"))
         .args(["--log-dir"])

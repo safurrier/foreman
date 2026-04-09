@@ -59,10 +59,11 @@ Build the product in this order:
 5. pull requests, notifications, and observability
 6. acceptance sweep and doc sync
 
-The acceptance sweep exposed one missing runtime slice that was too implicit in
-the original plan: the binary still needs a long-running interactive event loop
-and effect executor to turn the reducer/render core into the full dashboard
-contract described in `SPEC.md`.
+The acceptance sweep eventually exposed one missing runtime slice that had been
+too implicit in the original plan. That slice is now implemented in
+`src/runtime.rs`: the binary enters a long-running interactive event loop,
+executes reducer-emitted effects, and is covered by binary-level tmux E2E tests
+for direct input and popup focus.
 
 ## Test ladder
 
@@ -104,6 +105,7 @@ Reserve for:
 - startup logging
 - multi-session tmux discovery
 - filter defaults and reveal toggles against a live tmux fixture
+- interactive dashboard render and navigation
 - popup focus behavior
 - direct input and pane operations
 - end-to-end notification and pull request happy paths

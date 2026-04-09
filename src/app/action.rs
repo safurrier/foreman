@@ -1,9 +1,10 @@
 use crate::app::command::Command;
 use crate::app::state::{
-    AppState, FlashNavigateKind, Focus, Inventory, Mode, PaneId, SelectionTarget, SessionId,
-    SortMode, WindowId,
+    AppState, FlashNavigateKind, Focus, Inventory, Mode, OperatorAlert, PaneId, SelectionTarget,
+    SessionId, SortMode, WindowId,
 };
 use crate::services::pull_requests::PullRequestLookup;
+use crate::services::system_stats::SystemStatsSnapshot;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,6 +32,9 @@ pub enum Action {
         workspace_path: PathBuf,
         lookup: PullRequestLookup,
     },
+    SetSystemStats(SystemStatsSnapshot),
+    SetStartupError(Option<String>),
+    SetOperatorAlert(Option<OperatorAlert>),
     ToggleNotificationsMuted,
     CycleNotificationProfile,
     TogglePullRequestDetail,

@@ -76,4 +76,4 @@ description: >
 - [x] Sync runtime behavior back into `README.md`, `SPEC.md`, and `docs/architecture.md` as needed
 
 ## Phase 10: Remaining runtime delivery gap
-- [ ] Implement the long-running interactive event loop and effect executor so the binary matches the full dashboard contract instead of bootstrap-and-exit behavior
+- [x] Implement the long-running interactive event loop and effect executor so the binary matches the full dashboard contract instead of bootstrap-and-exit behavior

@@ -171,3 +171,23 @@ the crate has a real reducer, renderer, and smoke suite, but the compiled
 binary still bootstraps and exits instead of running the persistent interactive
 dashboard loop. That means chunk 12 cannot honestly be called complete until
 the event loop and effect executor exist as first-class runtime code.
+
+## 2026-04-09 14:40 - Runtime delivery closed the last product gap
+
+The runtime slice stayed clean once it reused the existing
+`Command -> Action -> Reducer -> Effects -> Render` path instead of inventing a
+second control flow just for the binary. `src/cli.rs` now prepares typed
+bootstrap state, and `src/runtime.rs` owns terminal setup, event polling,
+redraw cadence, and effect execution.
+
+The useful E2E lessons were both test-shape issues, not product regressions:
+
+- detached tmux panes can return a successful but blank alternate-screen
+  capture, so the fixture needed a primary-screen fallback for dashboard
+  assertions
+- runtime input smoke tests must target a pane that is actually recognized as
+  an agent, otherwise the visibility rules correctly hide it and the navigation
+  assertions fail
+
+Those failures were worth keeping because they proved the runtime loop and the
+visibility contract were finally meeting at a real process boundary.

@@ -12,6 +12,7 @@ fn binary_bootstrap_logs_system_stats_and_tmux_failure_alert() {
     let missing_socket = config_dir.path().join("missing.sock");
 
     let output = Command::new(foreman_bin())
+        .arg("--bootstrap-only")
         .args(["--config-file"])
         .arg(config_dir.path().join("config.toml"))
         .args(["--log-dir"])

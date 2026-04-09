@@ -96,6 +96,7 @@ fn binary_bootstrap_logs_real_tmux_inventory_summary() {
     let log_dir = tempdir().expect("log dir should exist");
 
     let output = std::process::Command::new(foreman_bin())
+        .arg("--bootstrap-only")
         .args(["--config-file"])
         .arg(config_dir.path().join("config.toml"))
         .args(["--log-dir"])

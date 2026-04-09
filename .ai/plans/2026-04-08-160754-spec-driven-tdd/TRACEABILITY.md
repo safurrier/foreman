@@ -10,10 +10,11 @@ description: >
 
 ## Coverage checklist
 
-- [ ] **CLI, config, and logging bootstrap**
+- [x] **CLI, config, and logging bootstrap**
   Root spec: R1-R3, A1-A2
   Planned chunks: 2, 11, 12
-  Dominant validation: CLI tests, shell smoke, `mise run check`
+  Dominant validation: CLI tests, shell smoke, binary runtime smoke, and
+  `mise run check`
 
 - [x] **tmux inventory and visibility controls**
   Root spec: R4, R7, A3, A6
@@ -57,15 +58,14 @@ description: >
   Dominant validation: policy unit tests, backend contract tests, reducer
   integration tests, logging tests, and shell-backed fallback smoke tests
 
-- [ ] **Quality gate and definition of done**
+- [x] **Quality gate and definition of done**
   Root spec: R19, A19, Definition of done
   Planned chunks: 12
   Dominant validation: `cargo fmt`, `cargo clippy`, `cargo test`,
   `mise run check`, `mise run verify`
-  Current gap: the repo now has shell-backed smoke coverage for bootstrap,
-  tmux, notifications, and pane actions, but the compiled binary still lacks
-  the long-running interactive event loop required to treat chunk 12 as fully
-  closed.
+  Current note: the code-side acceptance gap is closed. `mise run verify` still
+  depends on local Docker and gcloud registry credentials after the Rust checks
+  and smoke tests complete.
 
 ## Architecture review checklist
 

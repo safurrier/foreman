@@ -44,6 +44,9 @@ pub struct Cli {
 
     #[arg(long, hide = true)]
     pub claude_native_dir: Option<PathBuf>,
+
+    #[arg(long, hide = true)]
+    pub bootstrap_only: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,15 +65,36 @@ pub struct BootstrapSummary {
     pub claude_native: ClaudeNativeOverlaySummary,
 }
 
+pub(crate) struct PreparedBootstrap {
+    pub runtime: RuntimeConfig,
+    pub logger: RunLogger,
+    pub state: AppState,
+    pub claude_native: ClaudeNativeOverlaySummary,
+}
+
+impl PreparedBootstrap {
+    fn into_summary(self) -> BootstrapSummary {
+        BootstrapSummary {
+            inventory: self.state.inventory_summary(),
+            runtime: self.runtime,
+            logs: self.logger.summary(),
+            state: self.state,
+            claude_native: self.claude_native,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum RunError {
     Config(ConfigError),
+    Runtime(crate::runtime::RuntimeError),
 }
 
 impl fmt::Display for RunError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Config(error) => write!(f, "{error}"),
+            Self::Runtime(error) => write!(f, "{error}"),
         }
     }
 }
@@ -83,12 +107,49 @@ impl From<ConfigError> for RunError {
     }
 }
 
+impl From<crate::runtime::RuntimeError> for RunError {
+    fn from(error: crate::runtime::RuntimeError) -> Self {
+        Self::Runtime(error)
+    }
+}
+
 pub fn run(cli: Cli) -> Result<RunOutcome, RunError> {
     let paths = resolve_paths(cli.config_file.as_deref(), cli.log_dir.as_deref())?;
+    if let Some(outcome) = maybe_handle_utility_command(&cli, &paths)? {
+        return Ok(outcome);
+    }
 
+    let prepared = prepare_bootstrap(&cli, paths)?;
+
+    println!("Foreman bootstrap complete.");
+    Ok(RunOutcome::Bootstrapped(Box::new(prepared.into_summary())))
+}
+
+pub fn run_main(cli: Cli) -> Result<(), RunError> {
+    if cli.bootstrap_only {
+        run(cli)?;
+        return Ok(());
+    }
+
+    let paths = resolve_paths(cli.config_file.as_deref(), cli.log_dir.as_deref())?;
+    if maybe_handle_utility_command(&cli, &paths)?.is_some() {
+        return Ok(());
+    }
+
+    let prepared = prepare_bootstrap(&cli, paths)?;
+    crate::runtime::run(prepared)?;
+    Ok(())
+}
+
+fn maybe_handle_utility_command(
+    cli: &Cli,
+    paths: &crate::config::AppPaths,
+) -> Result<Option<RunOutcome>, RunError> {
     if cli.config_path {
         println!("{}", paths.config_file.display());
-        return Ok(RunOutcome::PrintedConfigPath(paths.config_file));
+        return Ok(Some(RunOutcome::PrintedConfigPath(
+            paths.config_file.clone(),
+        )));
     }
 
     if cli.init_config {
@@ -97,11 +158,20 @@ pub fn run(cli: Cli) -> Result<RunOutcome, RunError> {
             "Initialized default config at {}",
             paths.config_file.display()
         );
-        return Ok(RunOutcome::InitializedConfig(paths.config_file));
+        return Ok(Some(RunOutcome::InitializedConfig(
+            paths.config_file.clone(),
+        )));
     }
 
+    Ok(None)
+}
+
+pub(crate) fn prepare_bootstrap(
+    cli: &Cli,
+    paths: crate::config::AppPaths,
+) -> Result<PreparedBootstrap, RunError> {
     let file_config = load_config(&paths.config_file)?;
-    let runtime = RuntimeConfig::from_sources(paths, file_config, &cli);
+    let runtime = RuntimeConfig::from_sources(paths, file_config, cli);
 
     let mut logger =
         RunLogger::start(&runtime.log_dir, runtime.log_retention).map_err(ConfigError::Io)?;
@@ -127,17 +197,15 @@ pub fn run(cli: Cli) -> Result<RunOutcome, RunError> {
             .map_err(ConfigError::Io)?;
     }
 
-    println!("Foreman bootstrap complete.");
-    Ok(RunOutcome::Bootstrapped(Box::new(BootstrapSummary {
+    Ok(PreparedBootstrap {
         runtime,
-        logs: logger.summary(),
+        logger,
         state,
-        inventory,
         claude_native,
-    })))
+    })
 }
 
-fn bootstrap_state(runtime: &RuntimeConfig) -> (AppState, ClaudeNativeOverlaySummary) {
+pub(crate) fn bootstrap_state(runtime: &RuntimeConfig) -> (AppState, ClaudeNativeOverlaySummary) {
     let system_stats = SystemStatsService::new(SysinfoSystemStatsBackend::new())
         .snapshot()
         .unwrap_or_default();
