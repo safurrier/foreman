@@ -1,8 +1,9 @@
 use crate::app::{Inventory, Pane, PaneId, Session, SessionId, Window, WindowId};
 use crate::integrations::{compatibility_snapshot, CompatibilityObservation};
 use std::fmt;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 const LIST_PANES_FORMAT: &str = "#{session_id}\t#{session_name}\t#{window_id}\t#{window_name}\t#{pane_id}\t#{pane_title}\t#{pane_current_command}";
 
@@ -44,12 +45,52 @@ pub struct TmuxPaneRecord {
     pub current_command: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SendInputResult {
+    pub pane_id: PaneId,
+    pub bytes_sent: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenameWindowResult {
+    pub window_id: WindowId,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpawnWindowResult {
+    pub session_id: SessionId,
+    pub window_id: WindowId,
+    pub pane_id: PaneId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KillPaneResult {
+    pub pane_id: PaneId,
+}
+
 pub trait TmuxBackend {
     fn list_panes(&self) -> Result<Vec<TmuxPaneRecord>, TmuxError>;
 
     fn capture_pane(&self, pane_id: &PaneId, lines: usize) -> Result<String, TmuxError>;
 
     fn focus_pane(&self, pane_id: &PaneId) -> Result<(), TmuxError>;
+
+    fn send_input(&self, pane_id: &PaneId, text: &str) -> Result<SendInputResult, TmuxError>;
+
+    fn rename_window(
+        &self,
+        window_id: &WindowId,
+        name: &str,
+    ) -> Result<RenameWindowResult, TmuxError>;
+
+    fn spawn_window(
+        &self,
+        session_id: &SessionId,
+        command: &str,
+    ) -> Result<SpawnWindowResult, TmuxError>;
+
+    fn kill_pane(&self, pane_id: &PaneId) -> Result<KillPaneResult, TmuxError>;
 }
 
 #[derive(Debug, Clone, Default)]
@@ -125,6 +166,30 @@ impl<B: TmuxBackend> TmuxAdapter<B> {
     pub fn focus_pane(&self, pane_id: &PaneId) -> Result<(), TmuxError> {
         self.backend.focus_pane(pane_id)
     }
+
+    pub fn send_input(&self, pane_id: &PaneId, text: &str) -> Result<SendInputResult, TmuxError> {
+        self.backend.send_input(pane_id, text)
+    }
+
+    pub fn rename_window(
+        &self,
+        window_id: &WindowId,
+        name: &str,
+    ) -> Result<RenameWindowResult, TmuxError> {
+        self.backend.rename_window(window_id, name)
+    }
+
+    pub fn spawn_window(
+        &self,
+        session_id: &SessionId,
+        command: &str,
+    ) -> Result<SpawnWindowResult, TmuxError> {
+        self.backend.spawn_window(session_id, command)
+    }
+
+    pub fn kill_pane(&self, pane_id: &PaneId) -> Result<KillPaneResult, TmuxError> {
+        self.backend.kill_pane(pane_id)
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -145,6 +210,38 @@ impl SystemTmuxBackend {
         command.args(args);
 
         let output = command.output()?;
+        if output.status.success() {
+            return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
+        }
+
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let rendered_command = render_tmux_command(self.socket_path.as_deref(), args);
+        if is_unavailable_message(&stderr) {
+            return Err(TmuxError::Unavailable(stderr));
+        }
+
+        Err(TmuxError::CommandFailed {
+            command: rendered_command,
+            stderr,
+        })
+    }
+
+    fn run_tmux_with_input(&self, args: &[&str], input: &str) -> Result<String, TmuxError> {
+        let mut command = Command::new("tmux");
+        if let Some(socket_path) = &self.socket_path {
+            command.arg("-S").arg(socket_path);
+        }
+        command.args(args);
+        command.stdin(Stdio::piped());
+        command.stdout(Stdio::piped());
+        command.stderr(Stdio::piped());
+
+        let mut child = command.spawn()?;
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(input.as_bytes())?;
+        }
+
+        let output = child.wait_with_output()?;
         if output.status.success() {
             return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
         }
@@ -200,6 +297,62 @@ impl TmuxBackend for SystemTmuxBackend {
         self.run_tmux(&["select-pane", "-t", pane_id.as_str()])?;
         Ok(())
     }
+
+    fn send_input(&self, pane_id: &PaneId, text: &str) -> Result<SendInputResult, TmuxError> {
+        let buffer_name = format!("foreman-input-{}", sanitize_tmux_name(pane_id.as_str()));
+        self.run_tmux_with_input(&["load-buffer", "-b", &buffer_name, "-"], text)?;
+        self.run_tmux(&[
+            "paste-buffer",
+            "-d",
+            "-b",
+            &buffer_name,
+            "-t",
+            pane_id.as_str(),
+        ])?;
+        self.run_tmux(&["send-keys", "-t", pane_id.as_str(), "Enter"])?;
+
+        Ok(SendInputResult {
+            pane_id: pane_id.clone(),
+            bytes_sent: text.len(),
+        })
+    }
+
+    fn rename_window(
+        &self,
+        window_id: &WindowId,
+        name: &str,
+    ) -> Result<RenameWindowResult, TmuxError> {
+        self.run_tmux(&["rename-window", "-t", window_id.as_str(), name])?;
+        Ok(RenameWindowResult {
+            window_id: window_id.clone(),
+            name: name.to_string(),
+        })
+    }
+
+    fn spawn_window(
+        &self,
+        session_id: &SessionId,
+        command: &str,
+    ) -> Result<SpawnWindowResult, TmuxError> {
+        let output = self.run_tmux(&[
+            "new-window",
+            "-d",
+            "-P",
+            "-F",
+            "#{window_id}\t#{pane_id}",
+            "-t",
+            session_id.as_str(),
+            command,
+        ])?;
+        parse_spawn_result(&output, session_id)
+    }
+
+    fn kill_pane(&self, pane_id: &PaneId) -> Result<KillPaneResult, TmuxError> {
+        self.run_tmux(&["kill-pane", "-t", pane_id.as_str()])?;
+        Ok(KillPaneResult {
+            pane_id: pane_id.clone(),
+        })
+    }
 }
 
 fn parse_pane_record(line: &str) -> Result<TmuxPaneRecord, TmuxError> {
@@ -250,6 +403,23 @@ fn render_tmux_command(socket_path: Option<&Path>, args: &[&str]) -> String {
     rendered
 }
 
+fn parse_spawn_result(
+    output: &str,
+    session_id: &SessionId,
+) -> Result<SpawnWindowResult, TmuxError> {
+    let (window_id, pane_id) = output.trim().split_once('\t').ok_or_else(|| {
+        TmuxError::Parse(format!(
+            "missing window_id or pane_id in spawn result: {output}"
+        ))
+    })?;
+
+    Ok(SpawnWindowResult {
+        session_id: session_id.clone(),
+        window_id: WindowId::new(window_id),
+        pane_id: PaneId::new(pane_id),
+    })
+}
+
 fn is_unavailable_message(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
     lower.contains("failed to connect to server")
@@ -266,10 +436,20 @@ fn non_empty(value: String, fallback: &str) -> String {
     }
 }
 
+fn sanitize_tmux_name(raw: &str) -> String {
+    raw.chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{TmuxAdapter, TmuxBackend, TmuxError, TmuxPaneRecord};
+    use super::{
+        KillPaneResult, RenameWindowResult, SendInputResult, SpawnWindowResult, TmuxAdapter,
+        TmuxBackend, TmuxError, TmuxPaneRecord,
+    };
     use crate::app::{AgentStatus, AppState, PaneId, SelectionTarget, SessionId, WindowId};
+    use std::cell::RefCell;
     use std::collections::BTreeMap;
 
     #[derive(Debug, Default)]
@@ -278,6 +458,10 @@ mod tests {
         captures: BTreeMap<PaneId, Result<String, String>>,
         list_error: Option<String>,
         focused_pane: Option<PaneId>,
+        sent_input: RefCell<Vec<(PaneId, String)>>,
+        renamed_windows: RefCell<Vec<(WindowId, String)>>,
+        spawned_windows: RefCell<Vec<(SessionId, String)>>,
+        killed_panes: RefCell<Vec<PaneId>>,
     }
 
     impl FakeTmuxBackend {
@@ -312,6 +496,52 @@ mod tests {
             } else {
                 Err(TmuxError::Unavailable("focus failed".to_string()))
             }
+        }
+
+        fn send_input(&self, pane_id: &PaneId, text: &str) -> Result<SendInputResult, TmuxError> {
+            self.sent_input
+                .borrow_mut()
+                .push((pane_id.clone(), text.to_string()));
+            Ok(SendInputResult {
+                pane_id: pane_id.clone(),
+                bytes_sent: text.len(),
+            })
+        }
+
+        fn rename_window(
+            &self,
+            window_id: &WindowId,
+            name: &str,
+        ) -> Result<RenameWindowResult, TmuxError> {
+            self.renamed_windows
+                .borrow_mut()
+                .push((window_id.clone(), name.to_string()));
+            Ok(RenameWindowResult {
+                window_id: window_id.clone(),
+                name: name.to_string(),
+            })
+        }
+
+        fn spawn_window(
+            &self,
+            session_id: &SessionId,
+            command: &str,
+        ) -> Result<SpawnWindowResult, TmuxError> {
+            self.spawned_windows
+                .borrow_mut()
+                .push((session_id.clone(), command.to_string()));
+            Ok(SpawnWindowResult {
+                session_id: session_id.clone(),
+                window_id: WindowId::new("@spawned"),
+                pane_id: PaneId::new("%spawned"),
+            })
+        }
+
+        fn kill_pane(&self, pane_id: &PaneId) -> Result<KillPaneResult, TmuxError> {
+            self.killed_panes.borrow_mut().push(pane_id.clone());
+            Ok(KillPaneResult {
+                pane_id: pane_id.clone(),
+            })
         }
     }
 
@@ -522,5 +752,53 @@ mod tests {
         let result = adapter.focus_pane(&PaneId::new("%1"));
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn action_methods_delegate_to_backend_with_structured_results() {
+        let backend = FakeTmuxBackend::default();
+        let adapter = TmuxAdapter::new(backend);
+
+        let send_result = adapter
+            .send_input(&PaneId::new("%1"), "hello\nworld")
+            .expect("send input should succeed");
+        let rename_result = adapter
+            .rename_window(&WindowId::new("@1"), "renamed")
+            .expect("rename should succeed");
+        let spawn_result = adapter
+            .spawn_window(&SessionId::new("$1"), "claude")
+            .expect("spawn should succeed");
+        let kill_result = adapter
+            .kill_pane(&PaneId::new("%1"))
+            .expect("kill should succeed");
+
+        assert_eq!(
+            send_result,
+            SendInputResult {
+                pane_id: PaneId::new("%1"),
+                bytes_sent: "hello\nworld".len(),
+            }
+        );
+        assert_eq!(
+            rename_result,
+            RenameWindowResult {
+                window_id: WindowId::new("@1"),
+                name: "renamed".to_string(),
+            }
+        );
+        assert_eq!(
+            spawn_result,
+            SpawnWindowResult {
+                session_id: SessionId::new("$1"),
+                window_id: WindowId::new("@spawned"),
+                pane_id: PaneId::new("%spawned"),
+            }
+        );
+        assert_eq!(
+            kill_result,
+            KillPaneResult {
+                pane_id: PaneId::new("%1"),
+            }
+        );
     }
 }

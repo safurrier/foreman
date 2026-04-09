@@ -45,6 +45,7 @@ pub enum Mode {
     FlashNavigate,
     Rename,
     Help,
+    ConfirmKill,
 }
 
 impl Mode {
@@ -58,6 +59,7 @@ impl Mode {
             Self::FlashNavigate => 5,
             Self::Rename => 6,
             Self::Help => 7,
+            Self::ConfirmKill => 8,
         }
     }
 }
@@ -464,6 +466,90 @@ pub struct Filters {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TextDraft {
+    pub text: String,
+}
+
+impl TextDraft {
+    pub fn from_text(text: impl Into<String>) -> Self {
+        Self { text: text.into() }
+    }
+
+    pub fn push_char(&mut self, ch: char) {
+        self.text.push(ch);
+    }
+
+    pub fn insert_newline(&mut self) {
+        self.text.push('\n');
+    }
+
+    pub fn backspace(&mut self) {
+        self.text.pop();
+    }
+
+    pub fn clear(&mut self) {
+        self.text.clear();
+    }
+
+    pub fn take(&mut self) -> String {
+        std::mem::take(&mut self.text)
+    }
+
+    pub fn is_blank(&self) -> bool {
+        self.text.trim().is_empty()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModalState {
+    RenameWindow {
+        window_id: WindowId,
+        draft: TextDraft,
+    },
+    SpawnWindow {
+        session_id: SessionId,
+        draft: TextDraft,
+    },
+    ConfirmKill {
+        pane_id: PaneId,
+    },
+}
+
+impl ModalState {
+    pub fn rename_window(window_id: WindowId, draft: impl Into<String>) -> Self {
+        Self::RenameWindow {
+            window_id,
+            draft: TextDraft::from_text(draft),
+        }
+    }
+
+    pub fn spawn_window(session_id: SessionId) -> Self {
+        Self::SpawnWindow {
+            session_id,
+            draft: TextDraft::default(),
+        }
+    }
+
+    pub fn confirm_kill(pane_id: PaneId) -> Self {
+        Self::ConfirmKill { pane_id }
+    }
+
+    pub fn draft(&self) -> Option<&TextDraft> {
+        match self {
+            Self::RenameWindow { draft, .. } | Self::SpawnWindow { draft, .. } => Some(draft),
+            Self::ConfirmKill { .. } => None,
+        }
+    }
+
+    pub fn draft_mut(&mut self) -> Option<&mut TextDraft> {
+        match self {
+            Self::RenameWindow { draft, .. } | Self::SpawnWindow { draft, .. } => Some(draft),
+            Self::ConfirmKill { .. } => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct AppState {
     pub inventory: Inventory,
     pub selection: Option<SelectionTarget>,
@@ -474,6 +560,8 @@ pub struct AppState {
     pub filters: Filters,
     pub collapsed_sessions: BTreeSet<SessionId>,
     pub search_query: String,
+    pub input_draft: TextDraft,
+    pub modal: Option<ModalState>,
     pub startup_error: Option<String>,
 }
 
@@ -522,6 +610,7 @@ impl AppState {
             Mode::FlashNavigate => "FLASH",
             Mode::Rename => "RENAME",
             Mode::Help => "HELP",
+            Mode::ConfirmKill => "CONFIRM KILL",
         }
     }
 
@@ -552,6 +641,45 @@ impl AppState {
                 .filter(|target| matches!(target, SelectionTarget::Pane(_)))
                 .count(),
             startup_error: self.startup_error.clone(),
+        }
+    }
+
+    pub fn selected_pane_id(&self) -> Option<PaneId> {
+        match self.selection.as_ref()? {
+            SelectionTarget::Pane(pane_id) => Some(pane_id.clone()),
+            SelectionTarget::Session(_) | SelectionTarget::Window(_) => None,
+        }
+    }
+
+    pub fn selected_window_id(&self) -> Option<WindowId> {
+        match self.selection.as_ref()? {
+            SelectionTarget::Window(window_id) => Some(window_id.clone()),
+            SelectionTarget::Pane(pane_id) => self
+                .inventory
+                .parent_for_pane(pane_id)
+                .map(|(_, window)| window.id.clone()),
+            SelectionTarget::Session(_) => None,
+        }
+    }
+
+    pub fn selected_window_name(&self) -> Option<String> {
+        let window_id = self.selected_window_id()?;
+        self.inventory
+            .window(&window_id)
+            .map(|window| window.name.clone())
+    }
+
+    pub fn selected_session_id(&self) -> Option<SessionId> {
+        match self.selection.as_ref()? {
+            SelectionTarget::Session(session_id) => Some(session_id.clone()),
+            SelectionTarget::Window(window_id) => self
+                .inventory
+                .parent_for_window(window_id)
+                .map(|session| session.id.clone()),
+            SelectionTarget::Pane(pane_id) => self
+                .inventory
+                .parent_for_pane(pane_id)
+                .map(|(session, _)| session.id.clone()),
         }
     }
 }

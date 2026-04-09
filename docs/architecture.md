@@ -61,7 +61,8 @@ testable as the app grows.
    derive status signals, reducer updates state, and renderer redraws.
 3. **Operator action loop**
    Key or mouse input maps to `Command`, then `Action`, then reducer state
-   transition, then optional Effects through adapters, then redraw.
+   transition, then optional Effects through adapters, then redraw. Draft text
+   and modal targets stay in reducer-owned state rather than widget-local state.
 4. **Attention loop**
    Status transitions flow through notification policy, which decides whether to
    emit, suppress, or debounce a notification and logs the decision.
@@ -113,6 +114,8 @@ testable as the app grows.
   derive hidden side effects.
 - Exactly one focus target is active at a time.
 - Only one high-priority mode consumes input at a time.
+- Direct-input drafts and rename/spawn/kill modal targets live in `AppState`;
+  widgets render them but do not own them.
 - Refreshes, filtering, and sorting must not leave selection pointing at an
   invalid target.
 - Collapsed session state persists across refreshes.
@@ -125,6 +128,8 @@ testable as the app grows.
   fail soft rather than hide the pane entirely.
 - All tmux, GitHub, browser, clipboard, and notification effects flow through
   adapters or services, never the renderer or reducer.
+- tmux action adapters return structured success/failure results rather than
+  leaking subprocess text into reducer-facing code.
 - Destructive pane actions require explicit confirmation.
 
 ### Persistence and runtime boundaries
@@ -242,9 +247,9 @@ boundaries unless an ADR changes them.
 | Module | Purpose | Docs |
 |---|---|---|
 | src/cli.rs | CLI flags, config path/init flows, runtime override parsing, and bootstrap wiring | `SPEC.md` |
-| src/app/ | Core state, commands, actions, reducer, selectors, and UI-facing invariants | This document |
+| src/app/ | Core state, commands, actions, reducer, selectors, drafts, modal targets, and UI-facing invariants | This document |
 | src/ui/ | Ratatui layout, widgets, rendering, and buffer-test helpers | This document |
-| src/adapters/tmux.rs | tmux discovery, capture, and focus seam; transport only, no status heuristics | `SPEC.md` |
+| src/adapters/tmux.rs | tmux discovery, capture, focus, send-input, rename, spawn, and kill seam; transport only, no status heuristics | `SPEC.md` |
 | src/integrations/ | Harness recognition, compatibility status derivation, debounce logic, and native-over-compatibility precedence overlays | `SPEC.md` |
 | src/services/notifications.rs (planned) | Notification policy, cooldowns, backend dispatch | `SPEC.md` |
 | src/services/pull_requests.rs (planned) | Pull request lookup, caching, degradation behavior | `SPEC.md` |

@@ -1,4 +1,4 @@
-use crate::app::{AgentStatus, AppState, Focus, SelectionTarget};
+use crate::app::{AgentStatus, AppState, Focus, ModalState, Mode, SelectionTarget};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
@@ -18,8 +18,10 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
     render_body(frame, vertical[1], state);
     render_footer(frame, vertical[2], state);
 
-    if state.mode == crate::app::Mode::Help {
+    if state.mode == Mode::Help {
         render_help(frame);
+    } else if state.modal.is_some() {
+        render_modal(frame, state);
     }
 }
 
@@ -87,21 +89,41 @@ fn render_preview(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
 }
 
 fn render_input(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
-    let hint = match state.focus {
-        Focus::Input => "Input focused. Multiline compose will land here.",
-        _ => "Direct input is available for the selected pane.",
+    let content = if state.mode == Mode::Input || !state.input_draft.text.is_empty() {
+        if state.input_draft.text.is_empty() {
+            "Compose text for the selected pane.\n\nCtrl+S: send | Esc: cancel".to_string()
+        } else {
+            format!("{}\n\nCtrl+S: send | Esc: cancel", state.input_draft.text)
+        }
+    } else {
+        match state.focus {
+            Focus::Input => "Input focused. Press Enter or i to compose.".to_string(),
+            _ => "Direct input is available for the selected pane.".to_string(),
+        }
     };
-    let input = Paragraph::new(hint)
+
+    let input = Paragraph::new(content)
         .block(focused_block("Input", state.focus == Focus::Input))
         .wrap(Wrap { trim: false });
     frame.render_widget(input, area);
 }
 
 fn render_footer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
+    let hint = match state.mode {
+        Mode::Input => "Ctrl+S Send | Esc Cancel",
+        Mode::Rename => "Enter Apply | Esc Cancel",
+        Mode::Spawn => "Enter Spawn | Esc Cancel",
+        Mode::ConfirmKill => "Enter/Y Confirm | Esc Cancel",
+        Mode::Help => "? Close | q Quit",
+        Mode::Normal | Mode::PreviewScroll | Mode::Search | Mode::FlashNavigate => {
+            "? Help | i Compose | x Kill | q Quit"
+        }
+    };
     let footer = Paragraph::new(format!(
-        "MODE: {} | FOCUS: {} | ? Help | q Quit",
+        "MODE: {} | FOCUS: {} | {}",
         state.mode_label(),
-        state.focus_label()
+        state.focus_label(),
+        hint
     ))
     .block(Block::default().borders(Borders::ALL).title("Footer"));
     frame.render_widget(footer, area);
@@ -111,7 +133,7 @@ fn render_help(frame: &mut Frame<'_>) {
     let popup = centered_rect(64, 45, frame.area());
     frame.render_widget(Clear, popup);
     let help = Paragraph::new(
-        "Help\n\nj/k or arrows: move\nEnter: select\nTab or focus command: move focus\n?: toggle help\nq: quit",
+        "Help\n\nj/k or arrows: move\nEnter: select\nTab or focus command: move focus\ni: compose direct input\nx: confirm kill for selected pane\nCtrl+S: submit the active draft\n?: toggle help\nq: quit",
     )
     .block(
         Block::default()
@@ -121,6 +143,66 @@ fn render_help(frame: &mut Frame<'_>) {
     )
     .wrap(Wrap { trim: false });
     frame.render_widget(help, popup);
+}
+
+fn render_modal(frame: &mut Frame<'_>, state: &AppState) {
+    let Some(modal) = state.modal.as_ref() else {
+        return;
+    };
+
+    let popup = centered_rect(62, 38, frame.area());
+    frame.render_widget(Clear, popup);
+
+    let (title, body, border_color) = match modal {
+        ModalState::RenameWindow { window_id, draft } => (
+            "Rename Window",
+            format!(
+                "Target window: {}\n\n{}\n\nEnter or Ctrl+S: apply\nEsc: cancel",
+                window_id.as_str(),
+                modal_draft_text(draft, "Type a new window name.")
+            ),
+            Color::Cyan,
+        ),
+        ModalState::SpawnWindow { session_id, draft } => (
+            "Spawn Agent",
+            format!(
+                "Target session: {}\n\n{}\n\nEnter or Ctrl+S: spawn\nEsc: cancel",
+                session_id.as_str(),
+                modal_draft_text(draft, "Type the command to run in the new window.")
+            ),
+            Color::Cyan,
+        ),
+        ModalState::ConfirmKill { pane_id } => (
+            "Confirm Kill",
+            format!(
+                "Kill pane {}?\n\nEnter or y: confirm\nEsc or n: cancel",
+                pane_id.as_str()
+            ),
+            Color::Yellow,
+        ),
+    };
+
+    let modal = Paragraph::new(body)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(title)
+                .border_style(
+                    Style::default()
+                        .fg(border_color)
+                        .add_modifier(Modifier::BOLD),
+                ),
+        )
+        .wrap(Wrap { trim: false });
+    frame.render_widget(modal, popup);
+}
+
+fn modal_draft_text(draft: &crate::app::TextDraft, placeholder: &str) -> String {
+    if draft.text.is_empty() {
+        placeholder.to_string()
+    } else {
+        draft.text.clone()
+    }
 }
 
 fn focused_block(title: &str, focused: bool) -> Block<'static> {
@@ -283,8 +365,8 @@ fn centered_rect(width_percent: u16, height_percent: u16, area: Rect) -> Rect {
 mod tests {
     use super::render;
     use crate::app::{
-        inventory, AgentStatus, AppState, Focus, HarnessKind, Mode, PaneBuilder, SelectionTarget,
-        SessionBuilder, WindowBuilder,
+        inventory, AgentStatus, AppState, Focus, HarnessKind, ModalState, Mode, PaneBuilder,
+        SelectionTarget, SessionBuilder, WindowBuilder,
     };
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
@@ -395,5 +477,30 @@ mod tests {
 
         assert!(output.contains("Help"));
         assert!(output.contains("j/k or arrows"));
+    }
+
+    #[test]
+    fn render_shows_input_draft_and_submit_hint() {
+        let mut state = sample_state();
+        state.focus = Focus::Input;
+        state.mode = Mode::Input;
+        state.input_draft.text = "hello\nworld".to_string();
+        let output = render_to_string(&state);
+
+        assert!(output.contains("hello"));
+        assert!(output.contains("world"));
+        assert!(output.contains("Ctrl+S: send"));
+    }
+
+    #[test]
+    fn render_displays_confirm_kill_modal() {
+        let mut state = sample_state();
+        state.mode = Mode::ConfirmKill;
+        state.modal = Some(ModalState::confirm_kill("alpha:claude".into()));
+        let output = render_to_string(&state);
+
+        assert!(output.contains("Confirm Kill"));
+        assert!(output.contains("alpha:claude"));
+        assert!(output.contains("Enter or y"));
     }
 }

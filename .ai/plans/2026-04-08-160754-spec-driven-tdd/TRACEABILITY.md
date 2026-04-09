@@ -33,7 +33,7 @@ description: >
   Dominant validation: Ratatui buffer tests, command mapping tests, focused
   smoke tests
 
-- [ ] **Direct input and pane actions**
+- [x] **Direct input and pane actions**
   Root spec: R12-R13, A10, A12
   Planned chunks: 8
   Dominant validation: reducer tests for modal state, tmux adapter contract
@@ -65,8 +65,8 @@ description: >
 
 ## Architecture review checklist
 
-- [ ] `Command -> Action -> Reducer -> Effects -> Render` remains the control flow
-- [ ] Render stays pure and side-effect free
+- [x] `Command -> Action -> Reducer -> Effects -> Render` remains the control flow
+- [x] Render stays pure and side-effect free
 - [ ] Only adapters and services talk to tmux, Git, browser, clipboard, or
   notification backends
 - [ ] Every new feature names its dominant test layer before implementation
@@ -76,5 +76,5 @@ description: >
 - [ ] Selection stability is validated for refresh, filter, sort, and collapse
   transitions
 - [ ] Status does not rely on color alone
-- [ ] Destructive actions require explicit confirmation
+- [x] Destructive actions require explicit confirmation
 - [ ] Contract changes flow back into `SPEC.md` and `docs/architecture.md`

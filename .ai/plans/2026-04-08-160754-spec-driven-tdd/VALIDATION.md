@@ -124,3 +124,24 @@ test ladder.
   Result: pass
 - `mise run check`
   Result: pass
+
+## 2026-04-08 22:19 - Chunk 8 validation
+
+- Reducer draft and modal tests in `src/app/reducer.rs`
+  Result: pass
+- Command and command-to-action tests in `src/app/command.rs` and `src/app/action.rs`
+  Result: pass
+- tmux action contract tests in `src/adapters/tmux.rs`
+  Result: pass
+- Ratatui buffer coverage for input drafts and kill confirmation in `src/ui/render.rs`
+  Result: pass
+- Real tmux action smoke tests in `tests/tmux_actions.rs`
+  Result: pass
+- `cargo test`
+  Result: pass
+- `mise run check`
+  Result: pass
+- `python3 /Users/alex.furrier/.codex/skills/alex-ai-ai-context-engineering-files/scripts/verify_references.py .`
+  Result: pass
+- `python3 /Users/alex.furrier/.codex/skills/alex-ai-ai-context-engineering-files/scripts/validate_frontmatter.py .`
+  Result: pass

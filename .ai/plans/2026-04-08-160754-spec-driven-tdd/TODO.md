@@ -51,10 +51,11 @@ description: >
 - [x] Add real tmux + native-shim coverage for precedence and fallback behavior
 
 ## Phase 6: Direct actions
-- [ ] Implement multiline direct input to selected pane
-- [ ] Implement confirmed kill action
-- [ ] Implement window rename action
-- [ ] Implement spawn-new-agent action in selected session
+- [x] Implement multiline direct input to selected pane
+- [x] Implement confirmed kill action
+- [x] Implement window rename action
+- [x] Implement spawn-new-agent action in selected session
+- [x] Add real tmux action coverage for send, rename, spawn, and kill
 
 ## Phase 7: Discovery tools
 - [ ] Implement interactive search with cancel-and-restore semantics

@@ -1,5 +1,7 @@
 use crate::app::command::Command;
-use crate::app::state::{AppState, Focus, Inventory, Mode, SelectionTarget, SessionId, SortMode};
+use crate::app::state::{
+    AppState, Focus, Inventory, Mode, PaneId, SelectionTarget, SessionId, SortMode, WindowId,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectionDirection {
@@ -8,8 +10,16 @@ pub enum SelectionDirection {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DraftEdit {
+    InsertChar(char),
+    Backspace,
+    InsertNewline,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     RequestMode(Mode),
+    BeginInput,
     CancelMode,
     RequestQuit,
     SetFocus(Focus),
@@ -17,6 +27,19 @@ pub enum Action {
     MoveSelection(SelectionDirection),
     ReplaceInventory(Inventory),
     FocusSelectedPane,
+    OpenRenameModal {
+        window_id: WindowId,
+        current_name: String,
+    },
+    OpenSpawnModal {
+        session_id: SessionId,
+    },
+    OpenKillConfirmation {
+        pane_id: PaneId,
+    },
+    EditDraft(DraftEdit),
+    SubmitActiveDraft,
+    ConfirmKill,
     ToggleShowNonAgentSessions,
     ToggleShowNonAgentPanes,
     ToggleSessionCollapsed(SessionId),
@@ -32,6 +55,13 @@ pub fn action_for_command(state: &AppState, command: Command) -> Action {
         Command::NavigateDown => Action::MoveSelection(SelectionDirection::Next),
         Command::NavigateLeft => Action::SetFocus(state.focus.previous()),
         Command::NavigateRight => Action::SetFocus(state.focus.next()),
+        Command::StartInput => {
+            if state.selected_pane_id().is_some() {
+                Action::BeginInput
+            } else {
+                Action::Noop
+            }
+        }
         Command::Select => match state.selection.as_ref() {
             Some(SelectionTarget::Session(session_id)) => {
                 Action::ToggleSessionCollapsed(session_id.clone())
@@ -52,6 +82,15 @@ pub fn action_for_command(state: &AppState, command: Command) -> Action {
         Command::FocusPreview => Action::SetFocus(Focus::Preview),
         Command::FocusInput => Action::SetFocus(Focus::Input),
         Command::FocusSelectedPane => Action::FocusSelectedPane,
+        Command::RequestKill => match state.selected_pane_id() {
+            Some(pane_id) => Action::OpenKillConfirmation { pane_id },
+            None => Action::Noop,
+        },
+        Command::InsertChar(ch) => Action::EditDraft(DraftEdit::InsertChar(ch)),
+        Command::Backspace => Action::EditDraft(DraftEdit::Backspace),
+        Command::InsertNewline => Action::EditDraft(DraftEdit::InsertNewline),
+        Command::SubmitDraft => Action::SubmitActiveDraft,
+        Command::Confirm => Action::ConfirmKill,
         Command::ToggleHelp => {
             if state.mode == Mode::Help {
                 Action::CancelMode
@@ -61,8 +100,17 @@ pub fn action_for_command(state: &AppState, command: Command) -> Action {
         }
         Command::Search => Action::RequestMode(Mode::Search),
         Command::FlashNavigate => Action::RequestMode(Mode::FlashNavigate),
-        Command::RenameWindow => Action::RequestMode(Mode::Rename),
-        Command::SpawnAgent => Action::RequestMode(Mode::Spawn),
+        Command::RenameWindow => match (state.selected_window_id(), state.selected_window_name()) {
+            (Some(window_id), Some(current_name)) => Action::OpenRenameModal {
+                window_id,
+                current_name,
+            },
+            _ => Action::Noop,
+        },
+        Command::SpawnAgent => match state.selected_session_id() {
+            Some(session_id) => Action::OpenSpawnModal { session_id },
+            None => Action::Noop,
+        },
         Command::ToggleNonAgentSessions => Action::ToggleShowNonAgentSessions,
         Command::ToggleNonAgentPanes => Action::ToggleShowNonAgentPanes,
         Command::CycleSortMode => Action::SetSortMode(match state.sort_mode {
@@ -75,7 +123,7 @@ pub fn action_for_command(state: &AppState, command: Command) -> Action {
 
 #[cfg(test)]
 mod tests {
-    use super::{action_for_command, Action};
+    use super::{action_for_command, Action, DraftEdit};
     use crate::app::{
         inventory, AppState, Command, Focus, Mode, PaneBuilder, SelectionTarget, SessionBuilder,
         WindowBuilder,
@@ -137,6 +185,49 @@ mod tests {
         assert_eq!(
             action_for_command(&state, Command::NavigateLeft),
             Action::SetFocus(Focus::Preview)
+        );
+    }
+
+    #[test]
+    fn editing_commands_route_to_draft_actions() {
+        let state = state_with_selection(Some(SelectionTarget::Pane("alpha:main".into())));
+
+        assert_eq!(
+            action_for_command(&state, Command::StartInput),
+            Action::BeginInput
+        );
+        assert_eq!(
+            action_for_command(&state, Command::InsertChar('x')),
+            Action::EditDraft(DraftEdit::InsertChar('x'))
+        );
+        assert_eq!(
+            action_for_command(&state, Command::SubmitDraft),
+            Action::SubmitActiveDraft
+        );
+    }
+
+    #[test]
+    fn rename_spawn_and_kill_actions_capture_selected_targets() {
+        let state = state_with_selection(Some(SelectionTarget::Pane("alpha:main".into())));
+
+        assert_eq!(
+            action_for_command(&state, Command::RenameWindow),
+            Action::OpenRenameModal {
+                window_id: "alpha:agents".into(),
+                current_name: "alpha:agents".to_string(),
+            }
+        );
+        assert_eq!(
+            action_for_command(&state, Command::SpawnAgent),
+            Action::OpenSpawnModal {
+                session_id: "alpha".into(),
+            }
+        );
+        assert_eq!(
+            action_for_command(&state, Command::RequestKill),
+            Action::OpenKillConfirmation {
+                pane_id: "alpha:main".into(),
+            }
         );
     }
 }

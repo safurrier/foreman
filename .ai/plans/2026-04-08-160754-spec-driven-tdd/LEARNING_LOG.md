@@ -120,3 +120,13 @@ inventory. `src/integrations/claude.rs` then overlays native Claude signals on
 top, replaces the normalized snapshot when present, and leaves compatibility in
 place when the native file disappears or errors. That keeps precedence
 enforcement in one place and made the tmux + file-shim E2E test straightforward.
+
+## 2026-04-08 22:18 - Direct actions needed target-aware modal state
+
+Chunk 8 stayed clean once the modal state owned both the target identity and
+the draft text. `AppState` now keeps input composition separate from
+rename/spawn/confirm modals, so reducer tests can assert exact `Effect` payloads
+without touching tmux. That also made the real tmux smoke tests straightforward:
+the adapter only has to prove send, rename, spawn, and kill work against a live
+server, while the reducer remains the source of truth for confirmation and draft
+behavior.
