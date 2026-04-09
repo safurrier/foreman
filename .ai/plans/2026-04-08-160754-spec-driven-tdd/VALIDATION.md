@@ -85,3 +85,18 @@ test ladder.
   Result: pass
 - `python3 /Users/alex.furrier/.codex/skills/alex-ai-ai-context-engineering-files/scripts/validate_frontmatter.py .`
   Result: pass
+
+## 2026-04-08 19:21 - Chunk 5 validation
+
+- Command-mapping unit tests in `src/app/command.rs`
+  Result: pass
+- Command-to-action tests in `src/app/action.rs`
+  Result: pass
+- Reducer effect tests for focus and popup behavior in `src/app/reducer.rs`
+  Result: pass
+- Real tmux focus contract tests in `tests/tmux_focus.rs`
+  Result: pass
+- `cargo test`
+  Result: pass
+- `mise run check`
+  Result: pass

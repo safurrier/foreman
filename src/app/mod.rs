@@ -4,8 +4,8 @@ pub mod fixtures;
 pub mod reducer;
 pub mod state;
 
-pub use action::{Action, SelectionDirection};
-pub use command::Command;
+pub use action::{action_for_command, Action, SelectionDirection};
+pub use command::{map_key_event, Command};
 pub use fixtures::{inventory, AgentSnapshotBuilder, PaneBuilder, SessionBuilder, WindowBuilder};
 pub use reducer::{reduce, Effect};
 pub use state::{

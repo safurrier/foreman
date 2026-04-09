@@ -15,7 +15,7 @@ description: >
   Planned chunks: 2, 11, 12
   Dominant validation: CLI tests, shell smoke, `mise run check`
 
-- [ ] **tmux inventory and visibility controls**
+- [x] **tmux inventory and visibility controls**
   Root spec: R4, R7, A3, A6
   Planned chunks: 4, 5
   Dominant validation: adapter contract tests, reducer tests, and real tmux
@@ -27,7 +27,7 @@ description: >
   Dominant validation: status-engine unit tests, fake capture/native-signal
   contract tests
 
-- [ ] **Main UI surfaces and keyboard-first behavior**
+- [x] **Main UI surfaces and keyboard-first behavior**
   Root spec: R9-R11, A8-A9
   Planned chunks: 3, 5
   Dominant validation: Ratatui buffer tests, command mapping tests, focused

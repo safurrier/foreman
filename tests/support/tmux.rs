@@ -85,6 +85,23 @@ impl TmuxFixture {
         )
     }
 
+    #[allow(dead_code)]
+    pub fn active_pane_in(&self, target: &str) -> String {
+        self.run_checked(&[
+            "list-panes",
+            "-t",
+            target,
+            "-F",
+            "#{pane_id}\t#{pane_active}",
+        ])
+        .lines()
+        .find_map(|line| {
+            let (pane_id, active) = line.split_once('\t')?;
+            (active == "1").then(|| pane_id.to_string())
+        })
+        .expect("active pane should exist")
+    }
+
     fn capture(&self, target: &str) -> String {
         self.run_checked(&["capture-pane", "-p", "-J", "-t", target, "-S", "-20"])
     }

@@ -37,10 +37,11 @@ description: >
 - [x] Add real tmux fixture smoke / E2E coverage for startup inventory and visibility rules
 
 ## Phase 4: Navigation and focus
-- [ ] Implement keyboard navigation through visible targets
-- [ ] Implement panel focus changes and escape semantics
-- [ ] Implement tmux focus action
-- [ ] Close automatically after successful focus in popup mode
+- [x] Implement keyboard navigation through visible targets
+- [x] Implement panel focus changes and escape semantics
+- [x] Implement tmux focus action
+- [x] Close automatically after successful focus in popup mode
+- [x] Add real tmux focus coverage and popup-close effect assertions
 
 ## Phase 5: Agent detection and status
 - [ ] Add compatibility-mode harness detection for supported families

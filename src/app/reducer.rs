@@ -1,8 +1,11 @@
 use crate::app::action::{Action, SelectionDirection};
-use crate::app::state::{AppState, Focus, Mode};
+use crate::app::state::{AppState, Focus, Mode, PaneId, SelectionTarget};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Effect {}
+pub enum Effect {
+    FocusPane { pane_id: PaneId, close_after: bool },
+    Quit,
+}
 
 pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
     match action {
@@ -16,6 +19,10 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
         }
         Action::CancelMode => {
             state.mode = Mode::Normal;
+            state.focus = Focus::Sidebar;
+        }
+        Action::RequestQuit => {
+            return vec![Effect::Quit];
         }
         Action::SetFocus(focus) => {
             state.focus = focus;
@@ -56,6 +63,14 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
                 .collapsed_sessions
                 .retain(|session_id| state.inventory.contains_session(session_id));
             state.reconcile_selection();
+        }
+        Action::FocusSelectedPane => {
+            if let Some(SelectionTarget::Pane(pane_id)) = state.selection.as_ref() {
+                return vec![Effect::FocusPane {
+                    pane_id: pane_id.clone(),
+                    close_after: state.popup_mode,
+                }];
+            }
         }
         Action::ToggleShowNonAgentSessions => {
             state.filters.show_non_agent_sessions = !state.filters.show_non_agent_sessions;
@@ -220,6 +235,35 @@ mod tests {
         assert_eq!(
             state.selection,
             Some(SelectionTarget::Window("beta:agents".into()))
+        );
+    }
+
+    #[test]
+    fn cancel_mode_resets_to_normal_sidebar() {
+        let mut state = AppState::with_inventory(sample_inventory());
+        state.mode = Mode::Help;
+        state.focus = Focus::Preview;
+
+        reduce(&mut state, Action::CancelMode);
+
+        assert_eq!(state.mode, Mode::Normal);
+        assert_eq!(state.focus, Focus::Sidebar);
+    }
+
+    #[test]
+    fn focus_selected_pane_emits_tmux_effect_and_respects_popup_mode() {
+        let mut state = AppState::with_inventory(sample_inventory());
+        state.selection = Some(SelectionTarget::Pane("alpha:claude".into()));
+        state.popup_mode = true;
+
+        let effects = reduce(&mut state, Action::FocusSelectedPane);
+
+        assert_eq!(
+            effects,
+            vec![super::Effect::FocusPane {
+                pane_id: "alpha:claude".into(),
+                close_after: true,
+            }]
         );
     }
 }

@@ -357,6 +357,16 @@ mod tests {
     }
 
     #[test]
+    fn render_marks_input_focus() {
+        let mut state = sample_state();
+        state.focus = Focus::Input;
+        let output = render_to_string(&state);
+
+        assert!(output.contains("* Input"));
+        assert!(!output.contains("* Sidebar"));
+    }
+
+    #[test]
     fn render_shows_mode_in_footer() {
         let mut state = sample_state();
         state.mode = Mode::Search;

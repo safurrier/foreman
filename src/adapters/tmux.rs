@@ -51,6 +51,8 @@ pub trait TmuxBackend {
     fn list_panes(&self) -> Result<Vec<TmuxPaneRecord>, TmuxError>;
 
     fn capture_pane(&self, pane_id: &PaneId, lines: usize) -> Result<String, TmuxError>;
+
+    fn focus_pane(&self, pane_id: &PaneId) -> Result<(), TmuxError>;
 }
 
 #[derive(Debug, Clone, Default)]
@@ -126,6 +128,10 @@ impl<B: TmuxBackend> TmuxAdapter<B> {
 
         Ok(Inventory::new(sessions))
     }
+
+    pub fn focus_pane(&self, pane_id: &PaneId) -> Result<(), TmuxError> {
+        self.backend.focus_pane(pane_id)
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -185,6 +191,21 @@ impl TmuxBackend for SystemTmuxBackend {
             &start,
         ])?;
         Ok(output.trim_end_matches('\n').to_string())
+    }
+
+    fn focus_pane(&self, pane_id: &PaneId) -> Result<(), TmuxError> {
+        let window_id = self.run_tmux(&[
+            "display-message",
+            "-p",
+            "-t",
+            pane_id.as_str(),
+            "#{window_id}",
+        ])?;
+        let window_id = window_id.trim();
+
+        self.run_tmux(&["select-window", "-t", window_id])?;
+        self.run_tmux(&["select-pane", "-t", pane_id.as_str()])?;
+        Ok(())
     }
 }
 
@@ -263,6 +284,7 @@ mod tests {
         panes: Vec<TmuxPaneRecord>,
         captures: BTreeMap<PaneId, Result<String, String>>,
         list_error: Option<String>,
+        focused_pane: Option<PaneId>,
     }
 
     impl FakeTmuxBackend {
@@ -288,6 +310,14 @@ mod tests {
                 Some(Ok(capture)) => Ok(capture.clone()),
                 Some(Err(message)) => Err(TmuxError::Unavailable(message.clone())),
                 None => Ok(String::new()),
+            }
+        }
+
+        fn focus_pane(&self, pane_id: &PaneId) -> Result<(), TmuxError> {
+            if self.focused_pane.as_ref() == Some(pane_id) || self.focused_pane.is_none() {
+                Ok(())
+            } else {
+                Err(TmuxError::Unavailable("focus failed".to_string()))
             }
         }
     }
@@ -436,5 +466,14 @@ mod tests {
             .expect_err("inventory should fail");
 
         assert!(matches!(error, TmuxError::Unavailable(_)));
+    }
+
+    #[test]
+    fn focus_pane_delegates_to_backend() {
+        let adapter = TmuxAdapter::new(FakeTmuxBackend::default());
+
+        let result = adapter.focus_pane(&PaneId::new("%1"));
+
+        assert!(result.is_ok());
     }
 }

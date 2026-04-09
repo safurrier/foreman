@@ -70,6 +70,24 @@ pub enum Focus {
     Input,
 }
 
+impl Focus {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Sidebar => Self::Preview,
+            Self::Preview => Self::Input,
+            Self::Input => Self::Sidebar,
+        }
+    }
+
+    pub fn previous(self) -> Self {
+        match self {
+            Self::Sidebar => Self::Input,
+            Self::Preview => Self::Sidebar,
+            Self::Input => Self::Preview,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SortMode {
     #[default]
@@ -449,6 +467,7 @@ pub struct AppState {
     pub selection: Option<SelectionTarget>,
     pub focus: Focus,
     pub mode: Mode,
+    pub popup_mode: bool,
     pub sort_mode: SortMode,
     pub filters: Filters,
     pub collapsed_sessions: BTreeSet<SessionId>,

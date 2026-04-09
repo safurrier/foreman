@@ -115,8 +115,12 @@ pub fn run(cli: Cli) -> Result<RunOutcome, RunError> {
 fn bootstrap_state(runtime: &RuntimeConfig) -> AppState {
     let adapter = TmuxAdapter::new(SystemTmuxBackend::new(runtime.tmux_socket.clone()));
     match adapter.load_inventory(runtime.capture_lines) {
-        Ok(inventory) => AppState::with_inventory(inventory),
+        Ok(inventory) => AppState {
+            popup_mode: runtime.popup,
+            ..AppState::with_inventory(inventory)
+        },
         Err(error) => AppState {
+            popup_mode: runtime.popup,
             startup_error: Some(error.to_string()),
             ..AppState::default()
         },

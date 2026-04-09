@@ -94,3 +94,11 @@ convincing. The useful pattern was:
 
 That combination gives fast local feedback without pretending the subprocess and
 socket boundary are already covered.
+
+## 2026-04-08 19:18 - Popup behavior belongs in effects, not rendering
+
+Chunk 5 clarified an important boundary: popup auto-exit is not a UI rendering
+concern and not a tmux adapter concern by itself. The reducer needs to emit a
+focus effect that carries `close_after` intent, and the eventual runtime loop
+will honor that after successful tmux focus. That keeps popup behavior testable
+before the full interactive event loop exists.
