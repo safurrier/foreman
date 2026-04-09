@@ -100,3 +100,16 @@ test ladder.
   Result: pass
 - `mise run check`
   Result: pass
+
+## 2026-04-08 20:03 - Chunk 6 validation
+
+- Compatibility detection and debounce tests in `src/integrations/mod.rs`
+  Result: pass
+- Fake capture contract tests in `src/adapters/tmux.rs`
+  Result: pass
+- Reducer refresh debounce test in `src/app/reducer.rs`
+  Result: pass
+- `cargo test`
+  Result: pass
+- `mise run check`
+  Result: pass

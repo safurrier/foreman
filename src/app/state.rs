@@ -135,8 +135,10 @@ pub enum IntegrationMode {
 pub struct AgentSnapshot {
     pub harness: HarnessKind,
     pub status: AgentStatus,
+    pub observed_status: AgentStatus,
     pub integration_mode: IntegrationMode,
     pub activity_score: u64,
+    pub debounce_ticks: u8,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

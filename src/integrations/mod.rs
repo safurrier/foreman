@@ -1,49 +1,242 @@
-use crate::app::HarnessKind;
+mod claude;
+mod codex;
+mod gemini;
+mod opencode;
+
+use crate::app::{AgentSnapshot, AgentStatus, HarnessKind, IntegrationMode, Inventory};
+
+const WORKING_STATUS_DEBOUNCE_POLLS: u8 = 2;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CompatibilityObservation<'a> {
+    pub current_command: Option<&'a str>,
+    pub title: &'a str,
+    pub preview: &'a str,
+}
+
+impl<'a> CompatibilityObservation<'a> {
+    pub fn new(current_command: Option<&'a str>, title: &'a str, preview: &'a str) -> Self {
+        Self {
+            current_command,
+            title,
+            preview,
+        }
+    }
+
+    fn haystack(self) -> String {
+        format!(
+            "{}\n{}\n{}",
+            self.current_command.unwrap_or_default(),
+            self.title,
+            self.preview
+        )
+        .to_ascii_lowercase()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct StatusHints {
+    pub attention: &'static [&'static str],
+    pub error: &'static [&'static str],
+    pub working: &'static [&'static str],
+    pub idle: &'static [&'static str],
+}
+
+pub fn compatibility_snapshot(observation: CompatibilityObservation<'_>) -> Option<AgentSnapshot> {
+    let harness = recognize_harness(
+        observation.current_command,
+        observation.title,
+        observation.preview,
+    )?;
+    let observed_status = compatibility_status(harness, observation);
+
+    Some(AgentSnapshot {
+        harness,
+        status: observed_status,
+        observed_status,
+        integration_mode: IntegrationMode::Compatibility,
+        activity_score: activity_score_for_status(observed_status),
+        debounce_ticks: 0,
+    })
+}
+
+pub fn stabilize_inventory(previous: &Inventory, next: &mut Inventory) {
+    for session in &mut next.sessions {
+        for window in &mut session.windows {
+            for pane in &mut window.panes {
+                let Some(current) = pane.agent.as_mut() else {
+                    continue;
+                };
+                let Some(previous_agent) =
+                    previous.pane(&pane.id).and_then(|pane| pane.agent.as_ref())
+                else {
+                    continue;
+                };
+
+                debounce_snapshot(previous_agent, current);
+            }
+        }
+    }
+}
 
 pub fn recognize_harness(
     current_command: Option<&str>,
     title: &str,
     preview: &str,
 ) -> Option<HarnessKind> {
-    let current_command = current_command.unwrap_or_default();
+    let observation = CompatibilityObservation::new(current_command, title, preview);
 
-    if matches_any([current_command, title, preview], ["claude", "claude code"]) {
+    if matches_any(observation, claude::recognition_tokens()) {
         return Some(HarnessKind::ClaudeCode);
     }
 
-    if matches_any([current_command, title, preview], ["codex", "codex cli"]) {
+    if matches_any(observation, codex::recognition_tokens()) {
         return Some(HarnessKind::CodexCli);
     }
 
-    if matches_any([current_command, title, preview], ["gemini", "gemini cli"]) {
+    if matches_any(observation, gemini::recognition_tokens()) {
         return Some(HarnessKind::GeminiCli);
     }
 
-    if matches_any([current_command, title, preview], ["opencode"]) {
+    if matches_any(observation, opencode::recognition_tokens()) {
         return Some(HarnessKind::OpenCode);
     }
 
     None
 }
 
-fn matches_any<'a>(
-    haystacks: impl IntoIterator<Item = &'a str>,
-    needles: impl IntoIterator<Item = &'a str>,
-) -> bool {
-    let haystacks = haystacks
+pub fn compatibility_status(
+    harness: HarnessKind,
+    observation: CompatibilityObservation<'_>,
+) -> AgentStatus {
+    match harness {
+        HarnessKind::ClaudeCode => claude::compatibility_status(observation),
+        HarnessKind::CodexCli => codex::compatibility_status(observation),
+        HarnessKind::GeminiCli => gemini::compatibility_status(observation),
+        HarnessKind::OpenCode => opencode::compatibility_status(observation),
+    }
+}
+
+pub(crate) fn status_from_hints(
+    observation: CompatibilityObservation<'_>,
+    hints: StatusHints,
+) -> AgentStatus {
+    if matches_any(observation, hints.attention) {
+        return AgentStatus::NeedsAttention;
+    }
+
+    if matches_any(observation, hints.error) {
+        return AgentStatus::Error;
+    }
+
+    if matches_any(observation, hints.working) {
+        return AgentStatus::Working;
+    }
+
+    if matches_any(observation, hints.idle) {
+        return AgentStatus::Idle;
+    }
+
+    AgentStatus::Unknown
+}
+
+fn debounce_snapshot(previous: &AgentSnapshot, current: &mut AgentSnapshot) {
+    if previous.integration_mode != IntegrationMode::Compatibility
+        || current.integration_mode != IntegrationMode::Compatibility
+        || previous.harness != current.harness
+    {
+        current.status = current.observed_status;
+        current.debounce_ticks = 0;
+        return;
+    }
+
+    if previous.status == AgentStatus::Working
+        && matches!(
+            current.observed_status,
+            AgentStatus::Idle | AgentStatus::Unknown
+        )
+    {
+        let next_ticks = if matches!(
+            previous.observed_status,
+            AgentStatus::Idle | AgentStatus::Unknown
+        ) {
+            previous.debounce_ticks.saturating_add(1)
+        } else {
+            1
+        };
+
+        if next_ticks < WORKING_STATUS_DEBOUNCE_POLLS {
+            current.status = AgentStatus::Working;
+            current.debounce_ticks = next_ticks;
+            current.activity_score = previous
+                .activity_score
+                .max(activity_score_for_status(AgentStatus::Working));
+            return;
+        }
+    }
+
+    current.status = current.observed_status;
+    current.debounce_ticks = 0;
+    current.activity_score = activity_score_for_status(current.status);
+}
+
+fn activity_score_for_status(status: AgentStatus) -> u64 {
+    match status {
+        AgentStatus::Working => 100,
+        AgentStatus::NeedsAttention => 80,
+        AgentStatus::Error => 60,
+        AgentStatus::Idle => 30,
+        AgentStatus::Unknown => 0,
+    }
+}
+
+fn matches_any<T>(
+    observation: CompatibilityObservation<'_>,
+    needles: impl IntoIterator<Item = T>,
+) -> bool
+where
+    T: AsRef<str>,
+{
+    let haystack = observation.haystack();
+    needles
         .into_iter()
-        .map(str::to_ascii_lowercase)
-        .collect::<Vec<_>>();
-    needles.into_iter().any(|needle| {
-        let needle = needle.to_ascii_lowercase();
-        haystacks.iter().any(|haystack| haystack.contains(&needle))
-    })
+        .any(|needle| haystack.contains(&needle.as_ref().to_ascii_lowercase()))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::recognize_harness;
-    use crate::app::HarnessKind;
+    use super::{
+        compatibility_snapshot, compatibility_status, recognize_harness, stabilize_inventory,
+        CompatibilityObservation,
+    };
+    use crate::app::{
+        inventory, AgentStatus, HarnessKind, Inventory, PaneBuilder, SessionBuilder, WindowBuilder,
+    };
+
+    fn observation<'a>(
+        current_command: Option<&'a str>,
+        title: &'a str,
+        preview: &'a str,
+    ) -> CompatibilityObservation<'a> {
+        CompatibilityObservation::new(current_command, title, preview)
+    }
+
+    fn single_pane_inventory(
+        pane_id: &str,
+        harness: HarnessKind,
+        status: AgentStatus,
+        observed_status: AgentStatus,
+        debounce_ticks: u8,
+    ) -> Inventory {
+        inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:agents").pane(
+                PaneBuilder::agent(pane_id, harness)
+                    .status(status)
+                    .observed_status(observed_status)
+                    .debounce_ticks(debounce_ticks),
+            ),
+        )])
+    }
 
     #[test]
     fn recognizes_supported_harnesses_from_command_title_and_preview() {
@@ -68,5 +261,167 @@ mod tests {
     #[test]
     fn returns_none_for_unrecognized_panes() {
         assert_eq!(recognize_harness(Some("zsh"), "notes", "plain shell"), None);
+    }
+
+    #[test]
+    fn compatibility_snapshot_maps_supported_harness_statuses() {
+        let claude = compatibility_snapshot(observation(
+            Some("zsh"),
+            "claude",
+            "Claude Code is thinking about the next patch",
+        ))
+        .expect("snapshot should exist");
+        assert_eq!(claude.harness, HarnessKind::ClaudeCode);
+        assert_eq!(claude.status, AgentStatus::Working);
+
+        let codex = compatibility_snapshot(observation(
+            Some("zsh"),
+            "codex",
+            "Codex CLI waiting for your input before continuing",
+        ))
+        .expect("snapshot should exist");
+        assert_eq!(codex.status, AgentStatus::NeedsAttention);
+
+        let gemini = compatibility_snapshot(observation(
+            Some("zsh"),
+            "gemini",
+            "Gemini CLI ready for the next task",
+        ))
+        .expect("snapshot should exist");
+        assert_eq!(gemini.status, AgentStatus::Idle);
+
+        let opencode = compatibility_snapshot(observation(
+            Some("zsh"),
+            "opencode",
+            "OpenCode panic: transport failed",
+        ))
+        .expect("snapshot should exist");
+        assert_eq!(opencode.status, AgentStatus::Error);
+    }
+
+    #[test]
+    fn compatibility_status_returns_unknown_without_status_cues() {
+        let status = compatibility_status(
+            HarnessKind::ClaudeCode,
+            observation(Some("claude"), "shell", "session attached"),
+        );
+
+        assert_eq!(status, AgentStatus::Unknown);
+    }
+
+    #[test]
+    fn stabilize_inventory_debounces_brief_working_signal_loss() {
+        let previous = single_pane_inventory(
+            "alpha:claude",
+            HarnessKind::ClaudeCode,
+            AgentStatus::Working,
+            AgentStatus::Working,
+            0,
+        );
+        let mut next = single_pane_inventory(
+            "alpha:claude",
+            HarnessKind::ClaudeCode,
+            AgentStatus::Idle,
+            AgentStatus::Idle,
+            0,
+        );
+
+        stabilize_inventory(&previous, &mut next);
+
+        let pane = next
+            .pane(&"alpha:claude".into())
+            .expect("pane should exist")
+            .agent
+            .as_ref()
+            .expect("agent should exist");
+        assert_eq!(pane.status, AgentStatus::Working);
+        assert_eq!(pane.observed_status, AgentStatus::Idle);
+        assert_eq!(pane.debounce_ticks, 1);
+    }
+
+    #[test]
+    fn stabilize_inventory_allows_idle_after_second_consecutive_loss() {
+        let previous = single_pane_inventory(
+            "alpha:claude",
+            HarnessKind::ClaudeCode,
+            AgentStatus::Working,
+            AgentStatus::Idle,
+            1,
+        );
+        let mut next = single_pane_inventory(
+            "alpha:claude",
+            HarnessKind::ClaudeCode,
+            AgentStatus::Idle,
+            AgentStatus::Idle,
+            0,
+        );
+
+        stabilize_inventory(&previous, &mut next);
+
+        let pane = next
+            .pane(&"alpha:claude".into())
+            .expect("pane should exist")
+            .agent
+            .as_ref()
+            .expect("agent should exist");
+        assert_eq!(pane.status, AgentStatus::Idle);
+        assert_eq!(pane.debounce_ticks, 0);
+    }
+
+    #[test]
+    fn stabilize_inventory_surfaces_attention_immediately() {
+        let previous = single_pane_inventory(
+            "alpha:claude",
+            HarnessKind::ClaudeCode,
+            AgentStatus::Working,
+            AgentStatus::Working,
+            0,
+        );
+        let mut next = single_pane_inventory(
+            "alpha:claude",
+            HarnessKind::ClaudeCode,
+            AgentStatus::NeedsAttention,
+            AgentStatus::NeedsAttention,
+            0,
+        );
+
+        stabilize_inventory(&previous, &mut next);
+
+        let pane = next
+            .pane(&"alpha:claude".into())
+            .expect("pane should exist")
+            .agent
+            .as_ref()
+            .expect("agent should exist");
+        assert_eq!(pane.status, AgentStatus::NeedsAttention);
+        assert_eq!(pane.debounce_ticks, 0);
+    }
+
+    #[test]
+    fn stabilize_inventory_ignores_non_compatibility_agents() {
+        let previous = inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:agents").pane(
+                PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
+                    .integration_mode(crate::app::IntegrationMode::Native)
+                    .status(AgentStatus::Working),
+            ),
+        )]);
+        let mut next = inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:agents").pane(
+                PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
+                    .integration_mode(crate::app::IntegrationMode::Native)
+                    .status(AgentStatus::Idle),
+            ),
+        )]);
+
+        stabilize_inventory(&previous, &mut next);
+
+        let pane = next
+            .pane(&"alpha:claude".into())
+            .expect("pane should exist")
+            .agent
+            .as_ref()
+            .expect("agent should exist");
+        assert_eq!(pane.status, AgentStatus::Idle);
     }
 }

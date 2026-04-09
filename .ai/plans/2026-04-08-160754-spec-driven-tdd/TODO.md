@@ -44,9 +44,9 @@ description: >
 - [x] Add real tmux focus coverage and popup-close effect assertions
 
 ## Phase 5: Agent detection and status
-- [ ] Add compatibility-mode harness detection for supported families
-- [ ] Implement coarse status model: working, needs attention, idle, error, unknown
-- [ ] Add status debouncing to prevent flicker
+- [x] Add compatibility-mode harness detection for supported families
+- [x] Implement coarse status model: working, needs attention, idle, error, unknown
+- [x] Add status debouncing to prevent flicker
 - [ ] Add Claude Code native integration and native-over-compatibility precedence
 
 ## Phase 6: Direct actions

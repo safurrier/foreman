@@ -1,8 +1,5 @@
-use crate::app::{
-    AgentSnapshot, AgentStatus, IntegrationMode, Inventory, Pane, PaneId, Session, SessionId,
-    Window, WindowId,
-};
-use crate::integrations::recognize_harness;
+use crate::app::{Inventory, Pane, PaneId, Session, SessionId, Window, WindowId};
+use crate::integrations::{compatibility_snapshot, CompatibilityObservation};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -76,23 +73,19 @@ impl<B: TmuxBackend> TmuxAdapter<B> {
                 .backend
                 .capture_pane(&record.pane_id, capture_lines)
                 .unwrap_or_default();
-            let harness = recognize_harness(
-                record.current_command.as_deref(),
-                &record.pane_title,
+            let pane_title = record.pane_title.clone();
+            let current_command = record.current_command.clone();
+            let agent = compatibility_snapshot(CompatibilityObservation::new(
+                current_command.as_deref(),
+                &pane_title,
                 &preview,
-            );
-
+            ));
             let pane = Pane {
                 id: record.pane_id.clone(),
-                title: non_empty(record.pane_title, record.pane_id.as_str()),
-                current_command: record.current_command,
+                title: non_empty(pane_title, record.pane_id.as_str()),
+                current_command,
                 preview,
-                agent: harness.map(|harness| AgentSnapshot {
-                    harness,
-                    status: AgentStatus::Unknown,
-                    integration_mode: IntegrationMode::Compatibility,
-                    activity_score: 0,
-                }),
+                agent,
             };
 
             let session_index = sessions
@@ -276,7 +269,7 @@ fn non_empty(value: String, fallback: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{TmuxAdapter, TmuxBackend, TmuxError, TmuxPaneRecord};
-    use crate::app::{AppState, PaneId, SelectionTarget, SessionId, WindowId};
+    use crate::app::{AgentStatus, AppState, PaneId, SelectionTarget, SessionId, WindowId};
     use std::collections::BTreeMap;
 
     #[derive(Debug, Default)]
@@ -383,6 +376,56 @@ mod tests {
     }
 
     #[test]
+    fn load_inventory_maps_statuses_from_capture_preview() {
+        let backend = FakeTmuxBackend {
+            panes: vec![
+                pane_record("$1", "alpha", "@1", "agents", "%1", "claude", Some("zsh")),
+                pane_record("$1", "alpha", "@1", "agents", "%2", "codex", Some("zsh")),
+                pane_record("$1", "alpha", "@1", "agents", "%3", "gemini", Some("zsh")),
+                pane_record("$1", "alpha", "@1", "agents", "%4", "opencode", Some("zsh")),
+            ],
+            ..FakeTmuxBackend::default()
+        }
+        .with_capture("%1", Ok("Claude Code is thinking through the patch"))
+        .with_capture("%2", Ok("Codex CLI waiting for your input"))
+        .with_capture("%3", Ok("Gemini CLI ready for the next task"))
+        .with_capture("%4", Ok("OpenCode exception: transport failed"));
+
+        let inventory = TmuxAdapter::new(backend)
+            .load_inventory(50)
+            .expect("inventory should load");
+
+        assert_eq!(
+            inventory
+                .pane(&PaneId::new("%1"))
+                .and_then(|pane| pane.agent.as_ref())
+                .map(|agent| agent.status),
+            Some(AgentStatus::Working)
+        );
+        assert_eq!(
+            inventory
+                .pane(&PaneId::new("%2"))
+                .and_then(|pane| pane.agent.as_ref())
+                .map(|agent| agent.status),
+            Some(AgentStatus::NeedsAttention)
+        );
+        assert_eq!(
+            inventory
+                .pane(&PaneId::new("%3"))
+                .and_then(|pane| pane.agent.as_ref())
+                .map(|agent| agent.status),
+            Some(AgentStatus::Idle)
+        );
+        assert_eq!(
+            inventory
+                .pane(&PaneId::new("%4"))
+                .and_then(|pane| pane.agent.as_ref())
+                .map(|agent| agent.status),
+            Some(AgentStatus::Error)
+        );
+    }
+
+    #[test]
     fn load_inventory_keeps_panes_visible_when_capture_fails() {
         let backend = FakeTmuxBackend {
             panes: vec![pane_record(
@@ -407,6 +450,10 @@ mod tests {
 
         assert_eq!(pane.preview, "");
         assert!(pane.agent.is_some());
+        assert_eq!(
+            pane.agent.as_ref().map(|agent| agent.status),
+            Some(AgentStatus::Unknown)
+        );
     }
 
     #[test]

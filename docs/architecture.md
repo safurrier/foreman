@@ -236,19 +236,19 @@ decisions that materially constrain work.
 
 ## Module Map
 
-Current code is still a scaffold. This table describes the target module seams
-to build toward.
+The codebase now has the core runtime seams below. Keep new work inside these
+boundaries unless an ADR changes them.
 
 | Module | Purpose | Docs |
 |---|---|---|
-| src/cli.rs (planned) | CLI flags, config path/init flows, runtime override parsing | `SPEC.md` |
-| src/app/ (planned) | Core state, commands, actions, reducer, selectors | This document |
-| src/ui/ (planned) | Ratatui layout, widgets, rendering, buffer-test helpers | This document |
-| src/adapters/tmux.rs (planned) | tmux discovery and control seam | `SPEC.md` |
-| src/integrations/ (planned) | Harness detection and native/compatibility signal translation | `SPEC.md` |
+| src/cli.rs | CLI flags, config path/init flows, runtime override parsing, and bootstrap wiring | `SPEC.md` |
+| src/app/ | Core state, commands, actions, reducer, selectors, and UI-facing invariants | This document |
+| src/ui/ | Ratatui layout, widgets, rendering, and buffer-test helpers | This document |
+| src/adapters/tmux.rs | tmux discovery, capture, and focus seam; transport only, no status heuristics | `SPEC.md` |
+| src/integrations/ | Harness recognition, compatibility status derivation, and debounce logic for refresh replacement | `SPEC.md` |
 | src/services/notifications.rs (planned) | Notification policy, cooldowns, backend dispatch | `SPEC.md` |
 | src/services/pull_requests.rs (planned) | Pull request lookup, caching, degradation behavior | `SPEC.md` |
-| src/services/logging.rs (planned) | Run logs, latest-run pointer, retention cleanup | `SPEC.md` |
+| src/services/logging.rs | Run logs, latest-run pointer, retention cleanup, and bootstrap/inventory summaries | `SPEC.md` |
 
 ---
 

@@ -1,5 +1,6 @@
 use crate::app::action::{Action, SelectionDirection};
 use crate::app::state::{AppState, Focus, Mode, PaneId, SelectionTarget};
+use crate::integrations::stabilize_inventory;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
@@ -57,7 +58,8 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
 
             state.selection = Some(visible_targets[next_index].clone());
         }
-        Action::ReplaceInventory(inventory) => {
+        Action::ReplaceInventory(mut inventory) => {
+            stabilize_inventory(&state.inventory, &mut inventory);
             state.inventory = inventory;
             state
                 .collapsed_sessions
@@ -265,5 +267,40 @@ mod tests {
                 close_after: true,
             }]
         );
+    }
+
+    #[test]
+    fn replace_inventory_debounces_brief_loss_of_working_status() {
+        let mut state = AppState::with_inventory(inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:agents").pane(
+                PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
+                    .status(AgentStatus::Working)
+                    .observed_status(AgentStatus::Working)
+                    .activity_score(100),
+            ),
+        )]));
+        state.selection = Some(SelectionTarget::Pane("alpha:claude".into()));
+
+        let refreshed_inventory = inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:agents").pane(
+                PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
+                    .status(AgentStatus::Idle)
+                    .observed_status(AgentStatus::Idle)
+                    .activity_score(30),
+            ),
+        )]);
+
+        reduce(&mut state, Action::ReplaceInventory(refreshed_inventory));
+
+        let pane = state
+            .inventory
+            .pane(&"alpha:claude".into())
+            .expect("pane should exist")
+            .agent
+            .as_ref()
+            .expect("agent should exist");
+        assert_eq!(pane.status, AgentStatus::Working);
+        assert_eq!(pane.observed_status, AgentStatus::Idle);
+        assert_eq!(pane.debounce_ticks, 1);
     }
 }

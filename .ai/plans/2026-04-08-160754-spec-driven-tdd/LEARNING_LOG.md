@@ -102,3 +102,12 @@ concern and not a tmux adapter concern by itself. The reducer needs to emit a
 focus effect that carries `close_after` intent, and the eventual runtime loop
 will honor that after successful tmux focus. That keeps popup behavior testable
 before the full interactive event loop exists.
+
+## 2026-04-08 20:02 - Compatibility status needed a separate observation layer
+
+Chunk 6 worked cleanly only after separating tmux transport from compatibility
+interpretation. The adapter now gathers pane observations, `src/integrations/`
+derives compatibility snapshots from those observations, and reducer refresh
+logic applies the debounce policy during inventory replacement. That split keeps
+status heuristics pure and makes the eventual native-precedence work a
+targeted follow-up instead of another tmux refactor.

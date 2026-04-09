@@ -7,8 +7,10 @@ use crate::app::state::{
 pub struct AgentSnapshotBuilder {
     harness: HarnessKind,
     status: AgentStatus,
+    observed_status: AgentStatus,
     integration_mode: IntegrationMode,
     activity_score: u64,
+    debounce_ticks: u8,
 }
 
 impl AgentSnapshotBuilder {
@@ -16,13 +18,21 @@ impl AgentSnapshotBuilder {
         Self {
             harness,
             status: AgentStatus::Unknown,
+            observed_status: AgentStatus::Unknown,
             integration_mode: IntegrationMode::Compatibility,
             activity_score: 0,
+            debounce_ticks: 0,
         }
     }
 
     pub fn status(mut self, status: AgentStatus) -> Self {
         self.status = status;
+        self.observed_status = status;
+        self
+    }
+
+    pub fn observed_status(mut self, observed_status: AgentStatus) -> Self {
+        self.observed_status = observed_status;
         self
     }
 
@@ -36,12 +46,19 @@ impl AgentSnapshotBuilder {
         self
     }
 
+    pub fn debounce_ticks(mut self, debounce_ticks: u8) -> Self {
+        self.debounce_ticks = debounce_ticks;
+        self
+    }
+
     pub fn build(self) -> AgentSnapshot {
         AgentSnapshot {
             harness: self.harness,
             status: self.status,
+            observed_status: self.observed_status,
             integration_mode: self.integration_mode,
             activity_score: self.activity_score,
+            debounce_ticks: self.debounce_ticks,
         }
     }
 }
@@ -93,6 +110,12 @@ impl PaneBuilder {
 
     pub fn status(mut self, status: AgentStatus) -> Self {
         self.agent_mut().status = status;
+        self.agent_mut().observed_status = status;
+        self
+    }
+
+    pub fn observed_status(mut self, observed_status: AgentStatus) -> Self {
+        self.agent_mut().observed_status = observed_status;
         self
     }
 
@@ -103,6 +126,11 @@ impl PaneBuilder {
 
     pub fn activity_score(mut self, activity_score: u64) -> Self {
         self.agent_mut().activity_score = activity_score;
+        self
+    }
+
+    pub fn debounce_ticks(mut self, debounce_ticks: u8) -> Self {
+        self.agent_mut().debounce_ticks = debounce_ticks;
         self
     }
 
