@@ -1,6 +1,7 @@
 use crate::app::action::{Action, DraftEdit, SelectionDirection};
 use crate::app::state::{
-    AppState, Focus, ModalState, Mode, PaneId, SelectionTarget, SessionId, WindowId,
+    AppState, FlashNavigateKind, Focus, ModalState, Mode, PaneId, SearchState, SelectionTarget,
+    SessionId, WindowId,
 };
 use crate::integrations::stabilize_inventory;
 
@@ -44,9 +45,55 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
                 state.focus = Focus::Input;
             }
         }
+        Action::BeginSearch => {
+            state.mode = Mode::Search;
+            state.focus = Focus::Sidebar;
+            state.modal = None;
+            state.flash = None;
+            state.search = Some(SearchState::new(state.selection.clone()));
+            reconcile_visible_selection(state);
+        }
+        Action::BeginFlash { kind } => {
+            if state.base_visible_targets().is_empty() {
+                return Vec::new();
+            }
+
+            state.mode = Mode::FlashNavigate;
+            state.focus = Focus::Sidebar;
+            state.modal = None;
+            state.search = None;
+            state.flash = Some(crate::app::FlashState::new(state.selection.clone(), kind));
+            reconcile_flash_selection(state);
+        }
         Action::CancelMode => {
-            if state.mode == Mode::Input {
-                state.input_draft.clear();
+            match state.mode {
+                Mode::Input => {
+                    state.input_draft.clear();
+                }
+                Mode::Search => {
+                    let restore_selection = state
+                        .search
+                        .take()
+                        .and_then(|search| search.restore_selection);
+                    state.mode = Mode::Normal;
+                    state.focus = Focus::Sidebar;
+                    restore_base_selection(state, restore_selection);
+                    return Vec::new();
+                }
+                Mode::FlashNavigate => {
+                    let restore_selection =
+                        state.flash.take().and_then(|flash| flash.restore_selection);
+                    state.mode = Mode::Normal;
+                    state.focus = Focus::Sidebar;
+                    restore_base_selection(state, restore_selection);
+                    return Vec::new();
+                }
+                Mode::Normal
+                | Mode::PreviewScroll
+                | Mode::Spawn
+                | Mode::Rename
+                | Mode::Help
+                | Mode::ConfirmKill => {}
             }
             state.mode = Mode::Normal;
             state.focus = Focus::Sidebar;
@@ -105,6 +152,25 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
                 }];
             }
         }
+        Action::CommitSearchSelection => {
+            let selected = state.selection.clone();
+            state.mode = Mode::Normal;
+            state.search = None;
+
+            match selected {
+                Some(SelectionTarget::Session(session_id)) => {
+                    state.collapsed_sessions.remove(&session_id);
+                    reconcile_visible_selection(state);
+                }
+                Some(SelectionTarget::Pane(pane_id)) => {
+                    return vec![Effect::FocusPane {
+                        pane_id,
+                        close_after: state.popup_mode,
+                    }];
+                }
+                Some(SelectionTarget::Window(_)) | None => {}
+            }
+        }
         Action::OpenRenameModal {
             window_id,
             current_name,
@@ -127,7 +193,18 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             }
         }
         Action::EditDraft(edit) => {
-            if state.mode == Mode::Input {
+            if state.mode == Mode::Search {
+                if let Some(search) = state.search.as_mut() {
+                    if !matches!(edit, DraftEdit::InsertNewline) {
+                        apply_draft_edit(&mut search.draft, edit);
+                        reconcile_visible_selection(state);
+                    }
+                }
+            } else if state.mode == Mode::FlashNavigate {
+                if !matches!(edit, DraftEdit::InsertNewline) {
+                    return apply_flash_edit(state, edit);
+                }
+            } else if state.mode == Mode::Input {
                 apply_draft_edit(&mut state.input_draft, edit);
             } else if let Some(draft) = state.modal.as_mut().and_then(ModalState::draft_mut) {
                 apply_draft_edit(draft, edit);
@@ -189,10 +266,12 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
         Action::ToggleShowNonAgentSessions => {
             state.filters.show_non_agent_sessions = !state.filters.show_non_agent_sessions;
             state.reconcile_selection();
+            reconcile_visible_selection(state);
         }
         Action::ToggleShowNonAgentPanes => {
             state.filters.show_non_agent_panes = !state.filters.show_non_agent_panes;
             state.reconcile_selection();
+            reconcile_visible_selection(state);
         }
         Action::ToggleSessionCollapsed(session_id) => {
             if !state.inventory.contains_session(&session_id) {
@@ -204,16 +283,12 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             }
 
             state.reconcile_selection();
+            reconcile_visible_selection(state);
         }
         Action::SetSortMode(sort_mode) => {
             state.sort_mode = sort_mode;
             state.reconcile_selection();
-        }
-        Action::SetSearchQuery(search_query) => {
-            state.search_query = search_query;
-        }
-        Action::ClearSearchQuery => {
-            state.search_query.clear();
+            reconcile_visible_selection(state);
         }
         Action::Noop => {}
     }
@@ -229,11 +304,129 @@ fn apply_draft_edit(draft: &mut crate::app::TextDraft, edit: DraftEdit) {
     }
 }
 
+fn apply_flash_edit(state: &mut AppState, edit: DraftEdit) -> Vec<Effect> {
+    let previous_input = state
+        .flash
+        .as_ref()
+        .map(|flash| flash.draft.text.clone())
+        .unwrap_or_default();
+
+    if let Some(flash) = state.flash.as_mut() {
+        apply_draft_edit(&mut flash.draft, edit);
+    }
+
+    let matches = state.matching_flash_targets();
+    if matches.is_empty() {
+        if let Some(flash) = state.flash.as_mut() {
+            flash.draft = crate::app::TextDraft::from_text(previous_input);
+        }
+        reconcile_flash_selection(state);
+        return Vec::new();
+    }
+
+    state.selection = Some(matches[0].target.clone());
+
+    let input = state
+        .flash
+        .as_ref()
+        .map(|flash| flash.draft.text.to_ascii_lowercase())
+        .unwrap_or_default();
+    let label_width = state
+        .flash_targets()
+        .first()
+        .map(|candidate| candidate.label.len())
+        .unwrap_or_default();
+    if input.len() == label_width {
+        if let Some(exact_match) = matches
+            .into_iter()
+            .find(|candidate| candidate.label == input)
+        {
+            return finish_flash_selection(state, exact_match.target);
+        }
+    }
+
+    Vec::new()
+}
+
+fn finish_flash_selection(state: &mut AppState, target: SelectionTarget) -> Vec<Effect> {
+    let kind = state
+        .flash
+        .take()
+        .map(|flash| flash.kind)
+        .unwrap_or(FlashNavigateKind::Jump);
+    state.mode = Mode::Normal;
+    state.selection = Some(target.clone());
+
+    if kind == FlashNavigateKind::JumpAndFocus {
+        if let SelectionTarget::Pane(pane_id) = target {
+            return vec![Effect::FocusPane {
+                pane_id,
+                close_after: state.popup_mode,
+            }];
+        }
+    }
+
+    Vec::new()
+}
+
+fn restore_base_selection(state: &mut AppState, restore_selection: Option<SelectionTarget>) {
+    state.selection = state.inventory.reconcile_selection(
+        restore_selection.as_ref(),
+        &state.filters,
+        &state.collapsed_sessions,
+        state.sort_mode,
+    );
+}
+
+fn reconcile_visible_selection(state: &mut AppState) {
+    let visible_targets = state.visible_targets();
+    if visible_targets.is_empty() {
+        state.selection = None;
+        return;
+    }
+
+    if state
+        .selection
+        .as_ref()
+        .is_some_and(|selection| visible_targets.contains(selection))
+    {
+        return;
+    }
+
+    state.selection = Some(visible_targets[0].clone());
+}
+
+fn reconcile_flash_selection(state: &mut AppState) {
+    let Some(flash) = state.flash.as_ref() else {
+        return;
+    };
+
+    if flash.draft.text.is_empty() {
+        restore_base_selection(state, flash.restore_selection.clone());
+        return;
+    }
+
+    let matches = state.matching_flash_targets();
+    if let Some(target) = matches.first().map(|candidate| candidate.target.clone()) {
+        state.selection = Some(target);
+    } else {
+        restore_base_selection(state, flash.restore_selection.clone());
+    }
+}
+
 fn reconcile_interaction_state(state: &mut AppState) {
     if state.mode == Mode::Input && state.selected_pane_id().is_none() {
         state.mode = Mode::Normal;
         state.focus = Focus::Sidebar;
         state.input_draft.clear();
+    }
+
+    if state.mode != Mode::Search {
+        state.search = None;
+    }
+
+    if state.mode != Mode::FlashNavigate {
+        state.flash = None;
     }
 
     let modal_is_valid = match state.modal.as_ref() {
@@ -251,14 +444,22 @@ fn reconcile_interaction_state(state: &mut AppState) {
         state.mode = Mode::Normal;
         state.modal = None;
     }
+
+    if state.mode == Mode::Search {
+        reconcile_visible_selection(state);
+    }
+
+    if state.mode == Mode::FlashNavigate {
+        reconcile_flash_selection(state);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::app::{
-        inventory, reduce, Action, AgentStatus, AppState, DraftEdit, Focus, HarnessKind,
-        ModalState, Mode, PaneBuilder, SelectionDirection, SelectionTarget, SessionBuilder,
-        SortMode, WindowBuilder,
+        inventory, reduce, Action, AgentStatus, AppState, DraftEdit, FlashNavigateKind, Focus,
+        HarnessKind, ModalState, Mode, PaneBuilder, SelectionDirection, SelectionTarget,
+        SessionBuilder, SortMode, WindowBuilder,
     };
 
     fn sample_inventory() -> crate::app::Inventory {
@@ -382,6 +583,19 @@ mod tests {
         assert_eq!(
             state.selection,
             Some(SelectionTarget::Window("beta:agents".into()))
+        );
+    }
+
+    #[test]
+    fn sort_mode_change_preserves_logical_selection() {
+        let mut state = AppState::with_inventory(sample_inventory());
+        state.selection = Some(SelectionTarget::Pane("alpha:claude".into()));
+
+        reduce(&mut state, Action::SetSortMode(SortMode::AttentionFirst));
+
+        assert_eq!(
+            state.selection,
+            Some(SelectionTarget::Pane("alpha:claude".into()))
         );
     }
 
@@ -606,5 +820,196 @@ mod tests {
 
         assert_eq!(state.mode, Mode::Normal);
         assert_eq!(state.modal, None);
+    }
+
+    #[test]
+    fn search_filters_matches_and_cancel_restores_previous_selection() {
+        let mut state = AppState::with_inventory(sample_inventory());
+        state.selection = Some(SelectionTarget::Pane("alpha:claude".into()));
+
+        reduce(&mut state, Action::BeginSearch);
+        for ch in "codex".chars() {
+            reduce(&mut state, Action::EditDraft(DraftEdit::InsertChar(ch)));
+        }
+
+        assert_eq!(state.mode, Mode::Search);
+        assert_eq!(
+            state
+                .search
+                .as_ref()
+                .map(|search| search.draft.text.as_str()),
+            Some("codex")
+        );
+        assert_eq!(
+            state.visible_targets(),
+            vec![SelectionTarget::Pane("beta:codex".into())]
+        );
+        assert_eq!(
+            state.selection,
+            Some(SelectionTarget::Pane("beta:codex".into()))
+        );
+
+        reduce(&mut state, Action::CancelMode);
+
+        assert_eq!(state.mode, Mode::Normal);
+        assert_eq!(state.search, None);
+        assert_eq!(
+            state.selection,
+            Some(SelectionTarget::Pane("alpha:claude".into()))
+        );
+    }
+
+    #[test]
+    fn search_navigation_moves_between_filtered_matches() {
+        let mut state = AppState::with_inventory(sample_inventory());
+        state.selection = Some(SelectionTarget::Pane("beta:codex".into()));
+
+        reduce(&mut state, Action::BeginSearch);
+        for ch in "alpha".chars() {
+            reduce(&mut state, Action::EditDraft(DraftEdit::InsertChar(ch)));
+        }
+
+        assert_eq!(
+            state.visible_targets(),
+            vec![
+                SelectionTarget::Session("alpha".into()),
+                SelectionTarget::Window("alpha:agents".into()),
+                SelectionTarget::Pane("alpha:claude".into()),
+            ]
+        );
+        assert_eq!(
+            state.selection,
+            Some(SelectionTarget::Session("alpha".into()))
+        );
+
+        reduce(&mut state, Action::MoveSelection(SelectionDirection::Next));
+        assert_eq!(
+            state.selection,
+            Some(SelectionTarget::Window("alpha:agents".into()))
+        );
+
+        reduce(&mut state, Action::MoveSelection(SelectionDirection::Next));
+        assert_eq!(
+            state.selection,
+            Some(SelectionTarget::Pane("alpha:claude".into()))
+        );
+    }
+
+    #[test]
+    fn search_commit_focuses_selected_pane() {
+        let mut state = AppState::with_inventory(sample_inventory());
+        state.selection = Some(SelectionTarget::Pane("alpha:claude".into()));
+
+        reduce(&mut state, Action::BeginSearch);
+        for ch in "codex".chars() {
+            reduce(&mut state, Action::EditDraft(DraftEdit::InsertChar(ch)));
+        }
+
+        let effects = reduce(&mut state, Action::CommitSearchSelection);
+
+        assert_eq!(
+            effects,
+            vec![super::Effect::FocusPane {
+                pane_id: "beta:codex".into(),
+                close_after: false,
+            }]
+        );
+        assert_eq!(state.mode, Mode::Normal);
+        assert_eq!(state.search, None);
+    }
+
+    #[test]
+    fn flash_jump_only_selects_target_and_exits_mode() {
+        let mut state = AppState::with_inventory(sample_inventory());
+
+        reduce(
+            &mut state,
+            Action::BeginFlash {
+                kind: FlashNavigateKind::Jump,
+            },
+        );
+        let label = state
+            .flash_label_for_target(&SelectionTarget::Pane("beta:codex".into()))
+            .expect("flash label should exist");
+
+        let mut effects = Vec::new();
+        for ch in label.chars() {
+            effects = reduce(&mut state, Action::EditDraft(DraftEdit::InsertChar(ch)));
+        }
+
+        assert!(effects.is_empty());
+        assert_eq!(state.mode, Mode::Normal);
+        assert_eq!(state.flash, None);
+        assert_eq!(
+            state.selection,
+            Some(SelectionTarget::Pane("beta:codex".into()))
+        );
+    }
+
+    #[test]
+    fn flash_jump_and_focus_emits_focus_effect() {
+        let mut state = AppState::with_inventory(sample_inventory());
+
+        reduce(
+            &mut state,
+            Action::BeginFlash {
+                kind: FlashNavigateKind::JumpAndFocus,
+            },
+        );
+        let label = state
+            .flash_label_for_target(&SelectionTarget::Pane("alpha:claude".into()))
+            .expect("flash label should exist");
+
+        let mut effects = Vec::new();
+        for ch in label.chars() {
+            effects = reduce(&mut state, Action::EditDraft(DraftEdit::InsertChar(ch)));
+        }
+
+        assert_eq!(
+            effects,
+            vec![super::Effect::FocusPane {
+                pane_id: "alpha:claude".into(),
+                close_after: false,
+            }]
+        );
+        assert_eq!(state.mode, Mode::Normal);
+        assert_eq!(state.flash, None);
+    }
+
+    #[test]
+    fn flash_labels_expand_to_fixed_width_beyond_single_character_capacity() {
+        let inventory = inventory([SessionBuilder::new("alpha").window({
+            let mut window = WindowBuilder::new("alpha:agents");
+            for index in 0..27 {
+                window = window.pane(
+                    PaneBuilder::agent(format!("alpha:pane:{index}"), HarnessKind::ClaudeCode)
+                        .status(AgentStatus::Working)
+                        .title(format!("pane-{index}")),
+                );
+            }
+            window
+        })]);
+        let mut state = AppState::with_inventory(inventory);
+
+        reduce(
+            &mut state,
+            Action::BeginFlash {
+                kind: FlashNavigateKind::Jump,
+            },
+        );
+
+        let labels = state.flash_targets();
+        assert_eq!(
+            labels.first().map(|candidate| candidate.label.as_str()),
+            Some("aa")
+        );
+        assert_eq!(
+            labels.get(25).map(|candidate| candidate.label.as_str()),
+            Some("az")
+        );
+        assert_eq!(
+            labels.get(26).map(|candidate| candidate.label.as_str()),
+            Some("ba")
+        );
     }
 }

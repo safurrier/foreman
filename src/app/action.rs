@@ -1,6 +1,7 @@
 use crate::app::command::Command;
 use crate::app::state::{
-    AppState, Focus, Inventory, Mode, PaneId, SelectionTarget, SessionId, SortMode, WindowId,
+    AppState, FlashNavigateKind, Focus, Inventory, Mode, PaneId, SelectionTarget, SessionId,
+    SortMode, WindowId,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,6 +21,10 @@ pub enum DraftEdit {
 pub enum Action {
     RequestMode(Mode),
     BeginInput,
+    BeginSearch,
+    BeginFlash {
+        kind: FlashNavigateKind,
+    },
     CancelMode,
     RequestQuit,
     SetFocus(Focus),
@@ -27,6 +32,7 @@ pub enum Action {
     MoveSelection(SelectionDirection),
     ReplaceInventory(Inventory),
     FocusSelectedPane,
+    CommitSearchSelection,
     OpenRenameModal {
         window_id: WindowId,
         current_name: String,
@@ -44,8 +50,6 @@ pub enum Action {
     ToggleShowNonAgentPanes,
     ToggleSessionCollapsed(SessionId),
     SetSortMode(SortMode),
-    SetSearchQuery(String),
-    ClearSearchQuery,
     Noop,
 }
 
@@ -62,13 +66,19 @@ pub fn action_for_command(state: &AppState, command: Command) -> Action {
                 Action::Noop
             }
         }
-        Command::Select => match state.selection.as_ref() {
-            Some(SelectionTarget::Session(session_id)) => {
-                Action::ToggleSessionCollapsed(session_id.clone())
+        Command::Select => {
+            if state.mode == Mode::Search {
+                Action::CommitSearchSelection
+            } else {
+                match state.selection.as_ref() {
+                    Some(SelectionTarget::Session(session_id)) => {
+                        Action::ToggleSessionCollapsed(session_id.clone())
+                    }
+                    Some(SelectionTarget::Pane(_)) => Action::FocusSelectedPane,
+                    _ => Action::Noop,
+                }
             }
-            Some(SelectionTarget::Pane(_)) => Action::FocusSelectedPane,
-            _ => Action::Noop,
-        },
+        }
         Command::Cancel => {
             if state.mode != Mode::Normal {
                 Action::CancelMode
@@ -98,8 +108,13 @@ pub fn action_for_command(state: &AppState, command: Command) -> Action {
                 Action::RequestMode(Mode::Help)
             }
         }
-        Command::Search => Action::RequestMode(Mode::Search),
-        Command::FlashNavigate => Action::RequestMode(Mode::FlashNavigate),
+        Command::Search => Action::BeginSearch,
+        Command::FlashNavigate => Action::BeginFlash {
+            kind: FlashNavigateKind::Jump,
+        },
+        Command::FlashNavigateFocus => Action::BeginFlash {
+            kind: FlashNavigateKind::JumpAndFocus,
+        },
         Command::RenameWindow => match (state.selected_window_id(), state.selected_window_name()) {
             (Some(window_id), Some(current_name)) => Action::OpenRenameModal {
                 window_id,
@@ -125,8 +140,8 @@ pub fn action_for_command(state: &AppState, command: Command) -> Action {
 mod tests {
     use super::{action_for_command, Action, DraftEdit};
     use crate::app::{
-        inventory, AppState, Command, Focus, Mode, PaneBuilder, SelectionTarget, SessionBuilder,
-        WindowBuilder,
+        inventory, AppState, Command, FlashNavigateKind, Focus, Mode, PaneBuilder, SelectionTarget,
+        SessionBuilder, WindowBuilder,
     };
 
     fn state_with_selection(selection: Option<SelectionTarget>) -> AppState {
@@ -228,6 +243,39 @@ mod tests {
             Action::OpenKillConfirmation {
                 pane_id: "alpha:main".into(),
             }
+        );
+    }
+
+    #[test]
+    fn search_and_flash_commands_open_navigation_modes() {
+        let state = state_with_selection(Some(SelectionTarget::Pane("alpha:main".into())));
+
+        assert_eq!(
+            action_for_command(&state, Command::Search),
+            Action::BeginSearch
+        );
+        assert_eq!(
+            action_for_command(&state, Command::FlashNavigate),
+            Action::BeginFlash {
+                kind: FlashNavigateKind::Jump,
+            }
+        );
+        assert_eq!(
+            action_for_command(&state, Command::FlashNavigateFocus),
+            Action::BeginFlash {
+                kind: FlashNavigateKind::JumpAndFocus,
+            }
+        );
+    }
+
+    #[test]
+    fn select_commits_search_mode() {
+        let mut state = state_with_selection(Some(SelectionTarget::Pane("alpha:main".into())));
+        state.mode = Mode::Search;
+
+        assert_eq!(
+            action_for_command(&state, Command::Select),
+            Action::CommitSearchSelection
         );
     }
 }

@@ -145,3 +145,22 @@ test ladder.
   Result: pass
 - `python3 /Users/alex.furrier/.codex/skills/alex-ai-ai-context-engineering-files/scripts/validate_frontmatter.py .`
   Result: pass
+
+## 2026-04-08 23:02 - Chunk 9 validation
+
+- Search, flash, and sort reducer tests in `src/app/reducer.rs`
+  Result: pass
+- Command and command-to-action coverage for search and flash in `src/app/command.rs` and `src/app/action.rs`
+  Result: pass
+- Ratatui buffer coverage for search overlays and flash labels in `src/ui/render.rs`
+  Result: pass
+- Real tmux flash jump-and-focus smoke test in `tests/tmux_flash.rs`
+  Result: pass
+- `cargo test`
+  Result: pass
+- `mise run check`
+  Result: pass
+- `python3 /Users/alex.furrier/.codex/skills/alex-ai-ai-context-engineering-files/scripts/verify_references.py .`
+  Result: pass
+- `python3 /Users/alex.furrier/.codex/skills/alex-ai-ai-context-engineering-files/scripts/validate_frontmatter.py .`
+  Result: pass

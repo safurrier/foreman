@@ -116,6 +116,8 @@ testable as the app grows.
 - Only one high-priority mode consumes input at a time.
 - Direct-input drafts and rename/spawn/kill modal targets live in `AppState`;
   widgets render them but do not own them.
+- Search queries, flash prefixes, and their restore-selection targets also live
+  in `AppState`; cancel behavior is reducer-owned rather than widget-local.
 - Refreshes, filtering, and sorting must not leave selection pointing at an
   invalid target.
 - Collapsed session state persists across refreshes.
@@ -179,6 +181,9 @@ testable as the app grows.
   surfaces.
 - **Prefer monochrome-safe status cues** - color may help, but labels and
   symbols must carry meaning on their own.
+- **Prefer deterministic jump labels** - flash navigation labels should be
+  stable for a given visible target set and avoid prefix ambiguity within one
+  invocation.
 
 ---
 

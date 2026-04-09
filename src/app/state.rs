@@ -501,6 +501,50 @@ impl TextDraft {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchState {
+    pub draft: TextDraft,
+    pub restore_selection: Option<SelectionTarget>,
+}
+
+impl SearchState {
+    pub fn new(restore_selection: Option<SelectionTarget>) -> Self {
+        Self {
+            draft: TextDraft::default(),
+            restore_selection,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlashNavigateKind {
+    Jump,
+    JumpAndFocus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FlashState {
+    pub draft: TextDraft,
+    pub restore_selection: Option<SelectionTarget>,
+    pub kind: FlashNavigateKind,
+}
+
+impl FlashState {
+    pub fn new(restore_selection: Option<SelectionTarget>, kind: FlashNavigateKind) -> Self {
+        Self {
+            draft: TextDraft::default(),
+            restore_selection,
+            kind,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FlashTarget {
+    pub label: String,
+    pub target: SelectionTarget,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModalState {
     RenameWindow {
         window_id: WindowId,
@@ -559,7 +603,8 @@ pub struct AppState {
     pub sort_mode: SortMode,
     pub filters: Filters,
     pub collapsed_sessions: BTreeSet<SessionId>,
-    pub search_query: String,
+    pub search: Option<SearchState>,
+    pub flash: Option<FlashState>,
     pub input_draft: TextDraft,
     pub modal: Option<ModalState>,
     pub startup_error: Option<String>,
@@ -587,6 +632,11 @@ impl AppState {
     }
 
     pub fn visible_targets(&self) -> Vec<SelectionTarget> {
+        let targets = self.base_visible_targets();
+        self.filter_search_targets(targets)
+    }
+
+    pub fn base_visible_targets(&self) -> Vec<SelectionTarget> {
         self.inventory
             .visible_targets(&self.filters, &self.collapsed_sessions, self.sort_mode)
     }
@@ -644,6 +694,81 @@ impl AppState {
         }
     }
 
+    pub fn search_query(&self) -> Option<&str> {
+        self.search
+            .as_ref()
+            .map(|search| search.draft.text.as_str())
+    }
+
+    pub fn target_label(&self, target: &SelectionTarget) -> String {
+        match target {
+            SelectionTarget::Session(session_id) => self
+                .inventory
+                .session(session_id)
+                .map(|session| format!("Session  {}", session.name))
+                .unwrap_or_else(|| format!("Session  {}", session_id.as_str())),
+            SelectionTarget::Window(window_id) => self
+                .inventory
+                .window(window_id)
+                .map(|window| format!("Window   {}", window.name))
+                .unwrap_or_else(|| format!("Window   {}", window_id.as_str())),
+            SelectionTarget::Pane(pane_id) => self
+                .inventory
+                .pane(pane_id)
+                .map(|pane| {
+                    let status = pane
+                        .agent
+                        .as_ref()
+                        .map(|agent| match agent.status {
+                            AgentStatus::Working => "WORKING",
+                            AgentStatus::NeedsAttention => "ATTN",
+                            AgentStatus::Idle => "IDLE",
+                            AgentStatus::Error => "ERROR",
+                            AgentStatus::Unknown => "UNKNOWN",
+                        })
+                        .unwrap_or("NON-AGENT");
+                    format!("Pane     {} [{}]", pane.title, status)
+                })
+                .unwrap_or_else(|| format!("Pane     {}", pane_id.as_str())),
+        }
+    }
+
+    pub fn flash_targets(&self) -> Vec<FlashTarget> {
+        let targets = self.base_visible_targets();
+        let width = flash_label_width(targets.len());
+        targets
+            .into_iter()
+            .enumerate()
+            .map(|(index, target)| FlashTarget {
+                label: flash_label_for_index(index, width),
+                target,
+            })
+            .collect()
+    }
+
+    pub fn flash_label_for_target(&self, target: &SelectionTarget) -> Option<String> {
+        self.flash_targets()
+            .into_iter()
+            .find(|candidate| &candidate.target == target)
+            .map(|candidate| candidate.label)
+    }
+
+    pub fn matching_flash_targets(&self) -> Vec<FlashTarget> {
+        let Some(flash) = self.flash.as_ref() else {
+            return Vec::new();
+        };
+
+        let input = flash.draft.text.to_ascii_lowercase();
+        if input.is_empty() {
+            return self.flash_targets();
+        }
+
+        self.flash_targets()
+            .into_iter()
+            .filter(|candidate| candidate.label.starts_with(&input))
+            .collect()
+    }
+
     pub fn selected_pane_id(&self) -> Option<PaneId> {
         match self.selection.as_ref()? {
             SelectionTarget::Pane(pane_id) => Some(pane_id.clone()),
@@ -681,6 +806,25 @@ impl AppState {
                 .parent_for_pane(pane_id)
                 .map(|(session, _)| session.id.clone()),
         }
+    }
+
+    fn filter_search_targets(&self, targets: Vec<SelectionTarget>) -> Vec<SelectionTarget> {
+        let Some(query) = self.search_query().map(str::trim) else {
+            return targets;
+        };
+        if query.is_empty() {
+            return targets;
+        }
+
+        let needle = query.to_ascii_lowercase();
+        targets
+            .into_iter()
+            .filter(|target| {
+                self.target_label(target)
+                    .to_ascii_lowercase()
+                    .contains(&needle)
+            })
+            .collect()
     }
 }
 
@@ -730,4 +874,23 @@ fn pane_cmp(left: &Pane, right: &Pane, sort_mode: SortMode) -> Ordering {
             .then_with(|| left.title.cmp(&right.title))
             .then_with(|| left.id.as_str().cmp(right.id.as_str())),
     }
+}
+
+fn flash_label_width(count: usize) -> usize {
+    let mut width = 1;
+    let mut capacity = 26usize;
+    while count > capacity {
+        width += 1;
+        capacity *= 26;
+    }
+    width
+}
+
+fn flash_label_for_index(mut index: usize, width: usize) -> String {
+    let mut chars = vec!['a'; width];
+    for position in (0..width).rev() {
+        chars[position] = ((index % 26) as u8 + b'a') as char;
+        index /= 26;
+    }
+    chars.into_iter().collect()
 }

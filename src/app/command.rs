@@ -23,6 +23,7 @@ pub enum Command {
     ToggleHelp,
     Search,
     FlashNavigate,
+    FlashNavigateFocus,
     RenameWindow,
     SpawnAgent,
     ToggleNonAgentSessions,
@@ -71,6 +72,9 @@ pub fn map_key_event(key: KeyEvent, focus: Focus, mode: Mode) -> Option<Command>
         (Mode::Normal, _, KeyCode::Char('x'), KeyModifiers::NONE) => Some(Command::RequestKill),
         (Mode::Normal, _, KeyCode::Char('/'), KeyModifiers::NONE) => Some(Command::Search),
         (Mode::Normal, _, KeyCode::Char('s'), KeyModifiers::NONE) => Some(Command::FlashNavigate),
+        (Mode::Normal, _, KeyCode::Char('S'), KeyModifiers::SHIFT) => {
+            Some(Command::FlashNavigateFocus)
+        }
         (Mode::Normal, _, KeyCode::Char('R'), KeyModifiers::SHIFT) => Some(Command::RenameWindow),
         (Mode::Normal, _, KeyCode::Char('N'), KeyModifiers::SHIFT) => Some(Command::SpawnAgent),
         (Mode::Normal, _, KeyCode::Char('H'), KeyModifiers::SHIFT) => {
@@ -105,14 +109,27 @@ fn map_modal_key_event(key: KeyEvent, mode: Mode) -> Option<Command> {
             }
             _ => None,
         },
+        Mode::Search => match (key.code, key.modifiers) {
+            (KeyCode::Enter, _) => Some(Command::Select),
+            (KeyCode::Backspace, _) => Some(Command::Backspace),
+            (KeyCode::Char(ch), modifiers) if is_text_input_modifiers(modifiers) => {
+                Some(Command::InsertChar(ch))
+            }
+            _ => None,
+        },
+        Mode::FlashNavigate => match (key.code, key.modifiers) {
+            (KeyCode::Backspace, _) => Some(Command::Backspace),
+            (KeyCode::Char(ch), modifiers) if is_text_input_modifiers(modifiers) => {
+                Some(Command::InsertChar(ch))
+            }
+            _ => None,
+        },
         Mode::ConfirmKill => match key.code {
             KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => Some(Command::Confirm),
             KeyCode::Char('n') | KeyCode::Char('N') => Some(Command::Cancel),
             _ => None,
         },
-        Mode::Normal | Mode::PreviewScroll | Mode::Search | Mode::FlashNavigate | Mode::Help => {
-            None
-        }
+        Mode::Normal | Mode::PreviewScroll | Mode::Help => None,
     }
 }
 
@@ -223,6 +240,34 @@ mod tests {
         assert_eq!(
             map_key_event(key(KeyCode::Char('n')), Focus::Sidebar, Mode::ConfirmKill),
             Some(Command::Cancel)
+        );
+    }
+
+    #[test]
+    fn search_mode_captures_text_and_enter() {
+        assert_eq!(
+            map_key_event(key(KeyCode::Char('q')), Focus::Sidebar, Mode::Search),
+            Some(Command::InsertChar('q'))
+        );
+        assert_eq!(
+            map_key_event(key(KeyCode::Enter), Focus::Sidebar, Mode::Search),
+            Some(Command::Select)
+        );
+    }
+
+    #[test]
+    fn normal_mode_exposes_both_flash_variants() {
+        assert_eq!(
+            map_key_event(key(KeyCode::Char('s')), Focus::Sidebar, Mode::Normal),
+            Some(Command::FlashNavigate)
+        );
+        assert_eq!(
+            map_key_event(
+                KeyEvent::new(KeyCode::Char('S'), KeyModifiers::SHIFT),
+                Focus::Sidebar,
+                Mode::Normal
+            ),
+            Some(Command::FlashNavigateFocus)
         );
     }
 }

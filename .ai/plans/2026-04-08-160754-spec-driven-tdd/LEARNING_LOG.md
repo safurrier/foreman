@@ -130,3 +130,13 @@ without touching tmux. That also made the real tmux smoke tests straightforward:
 the adapter only has to prove send, rename, spawn, and kill work against a live
 server, while the reducer remains the source of truth for confirmation and draft
 behavior.
+
+## 2026-04-08 23:01 - Flash labels needed to be fixed-width, not prefix-based
+
+Chunk 9 only became reliable once flash labels stopped mixing one-character and
+two-character forms in the same invocation. Fixed-width labels avoid the
+classic `a` versus `aa` ambiguity, which means the reducer can treat a complete
+typed label as an immediate selection or focus action without waiting on extra
+confirmation. Search used the same lesson in a different direction: the query
+and restore-selection target belong in reducer-owned state so cancel can always
+return the cursor to a stable logical target.

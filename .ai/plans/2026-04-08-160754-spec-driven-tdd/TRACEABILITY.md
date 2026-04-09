@@ -39,7 +39,7 @@ description: >
   Dominant validation: reducer tests for modal state, tmux adapter contract
   tests, real tmux smoke/E2E tests
 
-- [ ] **Search, flash navigation, and sorting**
+- [x] **Search, flash navigation, and sorting**
   Root spec: R14-R16, A13-A15
   Planned chunks: 9
   Dominant validation: reducer tests, buffer tests for overlays,
@@ -67,14 +67,14 @@ description: >
 
 - [x] `Command -> Action -> Reducer -> Effects -> Render` remains the control flow
 - [x] Render stays pure and side-effect free
-- [ ] Only adapters and services talk to tmux, Git, browser, clipboard, or
+- [x] Only adapters and services talk to tmux, Git, browser, clipboard, or
   notification backends
-- [ ] Every new feature names its dominant test layer before implementation
+- [x] Every new feature names its dominant test layer before implementation
   starts
-- [ ] State invariants land in tests before live integration wiring
-- [ ] Native-over-compatibility precedence is enforced in one place
-- [ ] Selection stability is validated for refresh, filter, sort, and collapse
+- [x] State invariants land in tests before live integration wiring
+- [x] Native-over-compatibility precedence is enforced in one place
+- [x] Selection stability is validated for refresh, filter, sort, and collapse
   transitions
-- [ ] Status does not rely on color alone
+- [x] Status does not rely on color alone
 - [x] Destructive actions require explicit confirmation
-- [ ] Contract changes flow back into `SPEC.md` and `docs/architecture.md`
+- [x] Contract changes flow back into `SPEC.md` and `docs/architecture.md`

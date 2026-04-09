@@ -22,6 +22,10 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
         render_help(frame);
     } else if state.modal.is_some() {
         render_modal(frame, state);
+    } else if state.mode == Mode::Search {
+        render_search_overlay(frame, state);
+    } else if state.mode == Mode::FlashNavigate {
+        render_flash_overlay(frame, state);
     }
 }
 
@@ -111,13 +115,13 @@ fn render_input(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
 fn render_footer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     let hint = match state.mode {
         Mode::Input => "Ctrl+S Send | Esc Cancel",
+        Mode::Search => "Type Filter | Enter Confirm | Esc Restore",
+        Mode::FlashNavigate => "Type Label | Esc Cancel",
         Mode::Rename => "Enter Apply | Esc Cancel",
         Mode::Spawn => "Enter Spawn | Esc Cancel",
         Mode::ConfirmKill => "Enter/Y Confirm | Esc Cancel",
         Mode::Help => "? Close | q Quit",
-        Mode::Normal | Mode::PreviewScroll | Mode::Search | Mode::FlashNavigate => {
-            "? Help | i Compose | x Kill | q Quit"
-        }
+        Mode::Normal | Mode::PreviewScroll => "? Help | / Search | s Flash | q Quit",
     };
     let footer = Paragraph::new(format!(
         "MODE: {} | FOCUS: {} | {}",
@@ -143,6 +147,70 @@ fn render_help(frame: &mut Frame<'_>) {
     )
     .wrap(Wrap { trim: false });
     frame.render_widget(help, popup);
+}
+
+fn render_search_overlay(frame: &mut Frame<'_>, state: &AppState) {
+    let popup = centered_rect(56, 28, frame.area());
+    frame.render_widget(Clear, popup);
+    let query = state.search_query().unwrap_or("");
+    let body = format!(
+        "Query: {}\nMatches: {}\n\nType to filter\nEnter: confirm\nEsc: restore previous selection",
+        if query.is_empty() { "<empty>" } else { query },
+        state.visible_targets().len()
+    );
+    let overlay = Paragraph::new(body)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Search")
+                .border_style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+        )
+        .wrap(Wrap { trim: false });
+    frame.render_widget(overlay, popup);
+}
+
+fn render_flash_overlay(frame: &mut Frame<'_>, state: &AppState) {
+    let popup = centered_rect(56, 28, frame.area());
+    frame.render_widget(Clear, popup);
+    let (mode_name, typed) = state
+        .flash
+        .as_ref()
+        .map(|flash| {
+            let mode_name = match flash.kind {
+                crate::app::FlashNavigateKind::Jump => "Jump",
+                crate::app::FlashNavigateKind::JumpAndFocus => "Jump + Focus",
+            };
+            let typed = if flash.draft.text.is_empty() {
+                "<empty>".to_string()
+            } else {
+                flash.draft.text.clone()
+            };
+            (mode_name, typed)
+        })
+        .unwrap_or(("Jump", "<empty>".to_string()));
+    let body = format!(
+        "Mode: {}\nTyped: {}\nLabels: {}\n\nType the visible label\nEsc: cancel",
+        mode_name,
+        typed,
+        state.flash_targets().len()
+    );
+    let overlay = Paragraph::new(body)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Flash")
+                .border_style(
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
+        )
+        .wrap(Wrap { trim: false });
+    frame.render_widget(overlay, popup);
 }
 
 fn render_modal(frame: &mut Frame<'_>, state: &AppState) {
@@ -229,7 +297,11 @@ fn focused_block(title: &str, focused: bool) -> Block<'static> {
 fn sidebar_lines(state: &AppState) -> String {
     let visible_targets = state.visible_targets();
     if visible_targets.is_empty() {
-        return "No panes discovered yet.".to_string();
+        return if state.mode == Mode::Search {
+            "No search matches.\nEsc: restore previous selection.".to_string()
+        } else {
+            "No panes discovered yet.".to_string()
+        };
     }
 
     visible_targets
@@ -240,7 +312,15 @@ fn sidebar_lines(state: &AppState) -> String {
             } else {
                 " "
             };
-            format!("{selected} {}", label_for_target(state, target))
+            let flash_label = if state.mode == Mode::FlashNavigate {
+                state
+                    .flash_label_for_target(target)
+                    .map(|label| format!("[{label}] "))
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+            format!("{selected} {flash_label}{}", state.target_label(target))
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -304,33 +384,6 @@ fn preview_lines(state: &AppState) -> String {
     }
 }
 
-fn label_for_target(state: &AppState, target: &SelectionTarget) -> String {
-    match target {
-        SelectionTarget::Session(session_id) => state
-            .inventory
-            .session(session_id)
-            .map(|session| format!("Session  {}", session.name))
-            .unwrap_or_else(|| format!("Session  {}", session_id.as_str())),
-        SelectionTarget::Window(window_id) => state
-            .inventory
-            .window(window_id)
-            .map(|window| format!("Window   {}", window.name))
-            .unwrap_or_else(|| format!("Window   {}", window_id.as_str())),
-        SelectionTarget::Pane(pane_id) => state
-            .inventory
-            .pane(pane_id)
-            .map(|pane| {
-                let status = pane
-                    .agent
-                    .as_ref()
-                    .map(|agent| status_label(agent.status))
-                    .unwrap_or("NON-AGENT");
-                format!("Pane     {} [{}]", pane.title, status)
-            })
-            .unwrap_or_else(|| format!("Pane     {}", pane_id.as_str())),
-    }
-}
-
 fn status_label(status: AgentStatus) -> &'static str {
     match status {
         AgentStatus::Working => "WORKING",
@@ -365,8 +418,8 @@ fn centered_rect(width_percent: u16, height_percent: u16, area: Rect) -> Rect {
 mod tests {
     use super::render;
     use crate::app::{
-        inventory, AgentStatus, AppState, Focus, HarnessKind, ModalState, Mode, PaneBuilder,
-        SelectionTarget, SessionBuilder, WindowBuilder,
+        inventory, AgentStatus, AppState, FlashNavigateKind, FlashState, Focus, HarnessKind,
+        ModalState, Mode, PaneBuilder, SearchState, SelectionTarget, SessionBuilder, WindowBuilder,
     };
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
@@ -502,5 +555,46 @@ mod tests {
         assert!(output.contains("Confirm Kill"));
         assert!(output.contains("alpha:claude"));
         assert!(output.contains("Enter or y"));
+    }
+
+    #[test]
+    fn render_displays_search_overlay_and_match_count() {
+        let mut state = sample_state();
+        state.mode = Mode::Search;
+        let mut search = SearchState::new(state.selection.clone());
+        search.draft.text = "codex".to_string();
+        state.search = Some(search);
+        state.selection = Some(SelectionTarget::Pane("beta:codex".into()));
+        let output = render_to_string(&state);
+
+        assert!(output.contains("Search"));
+        assert!(output.contains("codex"));
+        assert!(output.contains("Matches: 1"));
+    }
+
+    #[test]
+    fn render_shows_fixed_width_flash_labels() {
+        let inventory = inventory([SessionBuilder::new("alpha").window({
+            let mut window = WindowBuilder::new("alpha:agents");
+            for index in 0..27 {
+                window = window.pane(
+                    PaneBuilder::agent(format!("alpha:pane:{index}"), HarnessKind::ClaudeCode)
+                        .title(format!("pane-{index}"))
+                        .status(AgentStatus::Working),
+                );
+            }
+            window
+        })]);
+        let mut state = AppState::with_inventory(inventory);
+        state.mode = Mode::FlashNavigate;
+        state.flash = Some(FlashState::new(
+            state.selection.clone(),
+            FlashNavigateKind::Jump,
+        ));
+        let output = render_to_string(&state);
+
+        assert!(output.contains("Flash"));
+        assert!(output.contains("[aa]"));
+        assert!(output.contains("[ab]"));
     }
 }

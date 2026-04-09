@@ -58,10 +58,11 @@ description: >
 - [x] Add real tmux action coverage for send, rename, spawn, and kill
 
 ## Phase 7: Discovery tools
-- [ ] Implement interactive search with cancel-and-restore semantics
-- [ ] Implement flash navigation with overflow labels
-- [ ] Implement sort modes: recent activity and attention-first
-- [ ] Preserve logical selection across sort changes where possible
+- [x] Implement interactive search with cancel-and-restore semantics
+- [x] Implement flash navigation with overflow labels
+- [x] Implement sort modes: recent activity and attention-first
+- [x] Preserve logical selection across sort changes where possible
+- [x] Add focused real tmux coverage for flash jump-and-focus behavior
 
 ## Phase 8: Secondary surfaces
 - [ ] Implement pull request awareness with graceful degradation
