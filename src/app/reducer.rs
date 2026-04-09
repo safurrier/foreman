@@ -4,6 +4,7 @@ use crate::app::state::{
     SessionId, WindowId,
 };
 use crate::integrations::stabilize_inventory;
+use crate::services::pull_requests::PullRequestLookup;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
@@ -25,6 +26,12 @@ pub enum Effect {
     },
     KillPane {
         pane_id: PaneId,
+    },
+    OpenBrowser {
+        url: String,
+    },
+    CopyToClipboard {
+        text: String,
     },
     Quit,
 }
@@ -65,6 +72,32 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             state.flash = Some(crate::app::FlashState::new(state.selection.clone(), kind));
             reconcile_flash_selection(state);
         }
+        Action::SetPullRequestLookup {
+            workspace_path,
+            lookup,
+        } => {
+            state.pull_request_cache.insert(workspace_path, lookup);
+            reconcile_pull_request_detail(state);
+        }
+        Action::TogglePullRequestDetail => {
+            let Some(workspace_path) = state.selected_workspace_path() else {
+                return Vec::new();
+            };
+            if state.selected_pull_request().is_none() {
+                return Vec::new();
+            }
+
+            if state.is_pull_request_detail_open() {
+                state.pull_request_detail_workspace = None;
+                state.pull_request_detail_manual = false;
+                state
+                    .pull_request_auto_open_dismissed
+                    .insert(workspace_path);
+            } else {
+                state.pull_request_detail_workspace = Some(workspace_path);
+                state.pull_request_detail_manual = true;
+            }
+        }
         Action::CancelMode => {
             match state.mode {
                 Mode::Input => {
@@ -78,6 +111,7 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
                     state.mode = Mode::Normal;
                     state.focus = Focus::Sidebar;
                     restore_base_selection(state, restore_selection);
+                    reconcile_pull_request_detail(state);
                     return Vec::new();
                 }
                 Mode::FlashNavigate => {
@@ -86,6 +120,7 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
                     state.mode = Mode::Normal;
                     state.focus = Focus::Sidebar;
                     restore_base_selection(state, restore_selection);
+                    reconcile_pull_request_detail(state);
                     return Vec::new();
                 }
                 Mode::Normal
@@ -99,6 +134,20 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             state.focus = Focus::Sidebar;
             state.modal = None;
         }
+        Action::OpenSelectedPullRequest => {
+            if let Some(pull_request) = state.selected_pull_request() {
+                return vec![Effect::OpenBrowser {
+                    url: pull_request.url.clone(),
+                }];
+            }
+        }
+        Action::CopySelectedPullRequestUrl => {
+            if let Some(pull_request) = state.selected_pull_request() {
+                return vec![Effect::CopyToClipboard {
+                    text: pull_request.url.clone(),
+                }];
+            }
+        }
         Action::RequestQuit => {
             return vec![Effect::Quit];
         }
@@ -109,6 +158,7 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             if state.visible_targets().contains(&target) {
                 state.selection = Some(target);
                 state.focus = Focus::Sidebar;
+                reconcile_pull_request_detail(state);
             }
         }
         Action::MoveSelection(direction) => {
@@ -134,6 +184,7 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             };
 
             state.selection = Some(visible_targets[next_index].clone());
+            reconcile_pull_request_detail(state);
         }
         Action::ReplaceInventory(mut inventory) => {
             stabilize_inventory(&state.inventory, &mut inventory);
@@ -143,6 +194,7 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
                 .retain(|session_id| state.inventory.contains_session(session_id));
             state.reconcile_selection();
             reconcile_interaction_state(state);
+            reconcile_pull_request_detail(state);
         }
         Action::FocusSelectedPane => {
             if let Some(SelectionTarget::Pane(pane_id)) = state.selection.as_ref() {
@@ -161,6 +213,7 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
                 Some(SelectionTarget::Session(session_id)) => {
                     state.collapsed_sessions.remove(&session_id);
                     reconcile_visible_selection(state);
+                    reconcile_pull_request_detail(state);
                 }
                 Some(SelectionTarget::Pane(pane_id)) => {
                     return vec![Effect::FocusPane {
@@ -198,6 +251,7 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
                     if !matches!(edit, DraftEdit::InsertNewline) {
                         apply_draft_edit(&mut search.draft, edit);
                         reconcile_visible_selection(state);
+                        reconcile_pull_request_detail(state);
                     }
                 }
             } else if state.mode == Mode::FlashNavigate {
@@ -267,11 +321,13 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             state.filters.show_non_agent_sessions = !state.filters.show_non_agent_sessions;
             state.reconcile_selection();
             reconcile_visible_selection(state);
+            reconcile_pull_request_detail(state);
         }
         Action::ToggleShowNonAgentPanes => {
             state.filters.show_non_agent_panes = !state.filters.show_non_agent_panes;
             state.reconcile_selection();
             reconcile_visible_selection(state);
+            reconcile_pull_request_detail(state);
         }
         Action::ToggleSessionCollapsed(session_id) => {
             if !state.inventory.contains_session(&session_id) {
@@ -284,11 +340,13 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
 
             state.reconcile_selection();
             reconcile_visible_selection(state);
+            reconcile_pull_request_detail(state);
         }
         Action::SetSortMode(sort_mode) => {
             state.sort_mode = sort_mode;
             state.reconcile_selection();
             reconcile_visible_selection(state);
+            reconcile_pull_request_detail(state);
         }
         Action::Noop => {}
     }
@@ -366,6 +424,8 @@ fn finish_flash_selection(state: &mut AppState, target: SelectionTarget) -> Vec<
         }
     }
 
+    reconcile_pull_request_detail(state);
+
     Vec::new()
 }
 
@@ -403,6 +463,7 @@ fn reconcile_flash_selection(state: &mut AppState) {
 
     if flash.draft.text.is_empty() {
         restore_base_selection(state, flash.restore_selection.clone());
+        reconcile_pull_request_detail(state);
         return;
     }
 
@@ -412,6 +473,8 @@ fn reconcile_flash_selection(state: &mut AppState) {
     } else {
         restore_base_selection(state, flash.restore_selection.clone());
     }
+
+    reconcile_pull_request_detail(state);
 }
 
 fn reconcile_interaction_state(state: &mut AppState) {
@@ -454,6 +517,39 @@ fn reconcile_interaction_state(state: &mut AppState) {
     }
 }
 
+fn reconcile_pull_request_detail(state: &mut AppState) {
+    let Some(selected_workspace) = state.selected_workspace_path() else {
+        state.pull_request_detail_workspace = None;
+        state.pull_request_detail_manual = false;
+        return;
+    };
+
+    match state.pull_request_cache.get(&selected_workspace) {
+        Some(PullRequestLookup::Available(_))
+            if state.pull_request_detail_workspace.as_ref() == Some(&selected_workspace)
+                && state.pull_request_detail_manual => {}
+        Some(PullRequestLookup::Available(_)) => {
+            if state
+                .pull_request_auto_open_dismissed
+                .contains(&selected_workspace)
+            {
+                state.pull_request_detail_workspace = None;
+                state.pull_request_detail_manual = false;
+            } else {
+                state.pull_request_detail_workspace = Some(selected_workspace);
+                state.pull_request_detail_manual = false;
+            }
+        }
+        Some(PullRequestLookup::Unknown)
+        | Some(PullRequestLookup::Missing)
+        | Some(PullRequestLookup::Unavailable { .. })
+        | None => {
+            state.pull_request_detail_workspace = None;
+            state.pull_request_detail_manual = false;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::app::{
@@ -461,12 +557,15 @@ mod tests {
         HarnessKind, ModalState, Mode, PaneBuilder, SelectionDirection, SelectionTarget,
         SessionBuilder, SortMode, WindowBuilder,
     };
+    use crate::services::pull_requests::{PullRequestData, PullRequestLookup, PullRequestStatus};
+    use std::path::PathBuf;
 
     fn sample_inventory() -> crate::app::Inventory {
         inventory([
             SessionBuilder::new("alpha").window(
                 WindowBuilder::new("alpha:agents").pane(
                     PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
+                        .working_dir("/tmp/alpha")
                         .status(AgentStatus::Working)
                         .activity_score(10),
                 ),
@@ -474,13 +573,29 @@ mod tests {
             SessionBuilder::new("beta").window(
                 WindowBuilder::new("beta:agents").pane(
                     PaneBuilder::agent("beta:codex", HarnessKind::CodexCli)
+                        .working_dir("/tmp/beta")
                         .status(AgentStatus::NeedsAttention)
                         .activity_score(4),
                 ),
             ),
-            SessionBuilder::new("notes")
-                .window(WindowBuilder::new("notes:window").pane(PaneBuilder::new("notes:pane"))),
+            SessionBuilder::new("notes").window(
+                WindowBuilder::new("notes:window")
+                    .pane(PaneBuilder::new("notes:pane").working_dir("/tmp/notes")),
+            ),
         ])
+    }
+
+    fn sample_pull_request(number: u64, title: &str, url: &str) -> PullRequestLookup {
+        PullRequestLookup::Available(PullRequestData {
+            number,
+            title: title.to_string(),
+            url: url.to_string(),
+            repository: "foreman".to_string(),
+            branch: "feat/pr-awareness".to_string(),
+            base_branch: "main".to_string(),
+            author: "alex".to_string(),
+            status: PullRequestStatus::Open,
+        })
     }
 
     #[test]
@@ -984,6 +1099,7 @@ mod tests {
                 window = window.pane(
                     PaneBuilder::agent(format!("alpha:pane:{index}"), HarnessKind::ClaudeCode)
                         .status(AgentStatus::Working)
+                        .working_dir("/tmp/alpha")
                         .title(format!("pane-{index}")),
                 );
             }
@@ -1010,6 +1126,89 @@ mod tests {
         assert_eq!(
             labels.get(26).map(|candidate| candidate.label.as_str()),
             Some("ba")
+        );
+    }
+
+    #[test]
+    fn pull_request_detail_auto_opens_once_and_close_suppresses_auto_reopen() {
+        let mut state = AppState::with_inventory(sample_inventory());
+        state.selection = Some(SelectionTarget::Pane("alpha:claude".into()));
+
+        reduce(
+            &mut state,
+            Action::SetPullRequestLookup {
+                workspace_path: PathBuf::from("/tmp/alpha"),
+                lookup: sample_pull_request(42, "Add PR awareness", "https://example.com/pr/42"),
+            },
+        );
+
+        assert!(state.is_pull_request_detail_open());
+        assert_eq!(
+            state.pull_request_detail_workspace.as_ref(),
+            Some(&PathBuf::from("/tmp/alpha"))
+        );
+        assert!(!state.pull_request_detail_manual);
+
+        reduce(&mut state, Action::TogglePullRequestDetail);
+
+        assert!(!state.is_pull_request_detail_open());
+        assert!(state
+            .pull_request_auto_open_dismissed
+            .contains(&PathBuf::from("/tmp/alpha")));
+
+        reduce(
+            &mut state,
+            Action::SetPullRequestLookup {
+                workspace_path: PathBuf::from("/tmp/alpha"),
+                lookup: sample_pull_request(42, "Add PR awareness", "https://example.com/pr/42"),
+            },
+        );
+
+        assert!(!state.is_pull_request_detail_open());
+
+        reduce(&mut state, Action::TogglePullRequestDetail);
+
+        assert!(state.is_pull_request_detail_open());
+        assert!(state.pull_request_detail_manual);
+
+        reduce(
+            &mut state,
+            Action::SetPullRequestLookup {
+                workspace_path: PathBuf::from("/tmp/alpha"),
+                lookup: sample_pull_request(42, "Add PR awareness", "https://example.com/pr/42"),
+            },
+        );
+
+        assert!(state.is_pull_request_detail_open());
+        assert!(state.pull_request_detail_manual);
+    }
+
+    #[test]
+    fn pull_request_open_and_copy_actions_emit_effects() {
+        let mut state = AppState::with_inventory(sample_inventory());
+        state.selection = Some(SelectionTarget::Pane("alpha:claude".into()));
+        reduce(
+            &mut state,
+            Action::SetPullRequestLookup {
+                workspace_path: PathBuf::from("/tmp/alpha"),
+                lookup: sample_pull_request(7, "Wire browser actions", "https://example.com/pr/7"),
+            },
+        );
+
+        let open_effects = reduce(&mut state, Action::OpenSelectedPullRequest);
+        let copy_effects = reduce(&mut state, Action::CopySelectedPullRequestUrl);
+
+        assert_eq!(
+            open_effects,
+            vec![super::Effect::OpenBrowser {
+                url: "https://example.com/pr/7".to_string(),
+            }]
+        );
+        assert_eq!(
+            copy_effects,
+            vec![super::Effect::CopyToClipboard {
+                text: "https://example.com/pr/7".to_string(),
+            }]
         );
     }
 }

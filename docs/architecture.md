@@ -47,7 +47,7 @@ testable as the app grows.
 | Ratatui renderer | Render header, sidebar, preview, input, footer, help, and overlays from pure state |
 | tmux adapter | Discover sessions/windows/panes, capture pane output, focus panes, send input, rename windows, create windows, and kill panes |
 | Harness integrations | Detect supported harness families, translate compatibility signals, and overlay native signals such as Claude when available |
-| Pull request service | Resolve pull request metadata for the selected workspace with caching and graceful degradation |
+| Pull request service | Resolve pull request metadata for the selected workspace, and own browser-open and clipboard-copy seams with graceful degradation |
 | Notification service | Apply suppression, cooldown, and profile rules and dispatch best-effort notifications |
 | Logging + telemetry | Persist structured run logs, latest-run pointer, retention cleanup, and header-level system stats |
 
@@ -118,6 +118,12 @@ testable as the app grows.
   widgets render them but do not own them.
 - Search queries, flash prefixes, and their restore-selection targets also live
   in `AppState`; cancel behavior is reducer-owned rather than widget-local.
+- Selected workspace identity is derived from tmux pane working directories, not
+  sidebar row indexes or cursor position.
+- Pull request cache entries, detail-panel state, and auto-open suppression are
+  keyed by workspace path in `AppState`.
+- Pull request detail may auto-open on first discovery, but once the operator
+  closes it, later refreshes do not auto-reopen it for that same workspace.
 - Refreshes, filtering, and sorting must not leave selection pointing at an
   invalid target.
 - Collapsed session state persists across refreshes.
@@ -254,10 +260,10 @@ boundaries unless an ADR changes them.
 | src/cli.rs | CLI flags, config path/init flows, runtime override parsing, and bootstrap wiring | `SPEC.md` |
 | src/app/ | Core state, commands, actions, reducer, selectors, drafts, modal targets, and UI-facing invariants | This document |
 | src/ui/ | Ratatui layout, widgets, rendering, and buffer-test helpers | This document |
-| src/adapters/tmux.rs | tmux discovery, capture, focus, send-input, rename, spawn, and kill seam; transport only, no status heuristics | `SPEC.md` |
+| src/adapters/tmux.rs | tmux discovery, capture, pane working-directory lookup, focus, send-input, rename, spawn, and kill seam; transport only, no status heuristics | `SPEC.md` |
 | src/integrations/ | Harness recognition, compatibility status derivation, debounce logic, and native-over-compatibility precedence overlays | `SPEC.md` |
 | src/services/notifications.rs (planned) | Notification policy, cooldowns, backend dispatch | `SPEC.md` |
-| src/services/pull_requests.rs (planned) | Pull request lookup, caching, degradation behavior | `SPEC.md` |
+| src/services/pull_requests.rs | Pull request lookup, browser/copy effects, and degradation behavior | `SPEC.md` |
 | src/services/logging.rs | Run logs, latest-run pointer, retention cleanup, and bootstrap/inventory summaries | `SPEC.md` |
 
 ---

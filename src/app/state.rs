@@ -1,5 +1,8 @@
 use std::cmp::Ordering;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
+
+use crate::services::pull_requests::{PullRequestData, PullRequestLookup};
 
 macro_rules! id_type {
     ($name:ident) => {
@@ -148,6 +151,7 @@ pub struct Pane {
     pub id: PaneId,
     pub title: String,
     pub current_command: Option<String>,
+    pub working_dir: Option<PathBuf>,
     pub preview: String,
     pub agent: Option<AgentSnapshot>,
 }
@@ -605,6 +609,10 @@ pub struct AppState {
     pub collapsed_sessions: BTreeSet<SessionId>,
     pub search: Option<SearchState>,
     pub flash: Option<FlashState>,
+    pub pull_request_cache: BTreeMap<PathBuf, PullRequestLookup>,
+    pub pull_request_detail_workspace: Option<PathBuf>,
+    pub pull_request_detail_manual: bool,
+    pub pull_request_auto_open_dismissed: BTreeSet<PathBuf>,
     pub input_draft: TextDraft,
     pub modal: Option<ModalState>,
     pub startup_error: Option<String>,
@@ -808,6 +816,53 @@ impl AppState {
         }
     }
 
+    pub fn selected_workspace_path(&self) -> Option<PathBuf> {
+        let target = self.selection.as_ref()?;
+        let mut paths = self.workspace_paths_for_target(target).into_iter();
+        let first = paths.next()?;
+        if paths.next().is_some() {
+            return None;
+        }
+        Some(first)
+    }
+
+    pub fn selected_pull_request_lookup(&self) -> Option<&PullRequestLookup> {
+        let workspace_path = self.selected_workspace_path()?;
+        self.pull_request_cache.get(&workspace_path)
+    }
+
+    pub fn selected_pull_request(&self) -> Option<&PullRequestData> {
+        match self.selected_pull_request_lookup()? {
+            PullRequestLookup::Available(pull_request) => Some(pull_request),
+            PullRequestLookup::Unknown
+            | PullRequestLookup::Missing
+            | PullRequestLookup::Unavailable { .. } => None,
+        }
+    }
+
+    pub fn is_pull_request_detail_open(&self) -> bool {
+        self.selected_workspace_path()
+            .as_ref()
+            .zip(self.pull_request_detail_workspace.as_ref())
+            .is_some_and(|(selected_workspace, open_workspace)| {
+                selected_workspace == open_workspace
+            })
+            && self.selected_pull_request().is_some()
+    }
+
+    pub fn pull_request_compact_label(&self) -> Option<String> {
+        match self.selected_pull_request_lookup()? {
+            PullRequestLookup::Unknown => Some("pr=CHECKING".to_string()),
+            PullRequestLookup::Missing => Some("pr=NONE".to_string()),
+            PullRequestLookup::Unavailable { .. } => Some("pr=UNAVAILABLE".to_string()),
+            PullRequestLookup::Available(pull_request) => Some(format!(
+                "pr=#{} {}",
+                pull_request.number,
+                pull_request.status.label()
+            )),
+        }
+    }
+
     fn filter_search_targets(&self, targets: Vec<SelectionTarget>) -> Vec<SelectionTarget> {
         let Some(query) = self.search_query().map(str::trim) else {
             return targets;
@@ -825,6 +880,32 @@ impl AppState {
                     .contains(&needle)
             })
             .collect()
+    }
+
+    fn workspace_paths_for_target(&self, target: &SelectionTarget) -> BTreeSet<PathBuf> {
+        match target {
+            SelectionTarget::Session(session_id) => self
+                .inventory
+                .session(session_id)
+                .into_iter()
+                .flat_map(|session| session.windows.iter())
+                .flat_map(|window| window.panes.iter())
+                .filter_map(|pane| pane.working_dir.clone())
+                .collect(),
+            SelectionTarget::Window(window_id) => self
+                .inventory
+                .window(window_id)
+                .into_iter()
+                .flat_map(|window| window.panes.iter())
+                .filter_map(|pane| pane.working_dir.clone())
+                .collect(),
+            SelectionTarget::Pane(pane_id) => self
+                .inventory
+                .pane(pane_id)
+                .and_then(|pane| pane.working_dir.clone())
+                .into_iter()
+                .collect(),
+        }
     }
 }
 

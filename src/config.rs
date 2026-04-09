@@ -151,6 +151,8 @@ pub struct RuntimeConfig {
     pub poll_interval_ms: u64,
     pub capture_lines: usize,
     pub popup: bool,
+    pub pull_request_monitoring_enabled: bool,
+    pub pull_request_poll_interval_ms: u64,
     pub notifications_enabled: bool,
     pub log_retention: usize,
 }
@@ -169,6 +171,8 @@ impl RuntimeConfig {
                 .capture_lines
                 .unwrap_or(file_config.monitoring.capture_lines),
             popup: cli.popup,
+            pull_request_monitoring_enabled: file_config.pull_requests.enabled,
+            pull_request_poll_interval_ms: file_config.pull_requests.poll_interval_ms,
             notifications_enabled: if cli.no_notify {
                 false
             } else {
@@ -383,6 +387,8 @@ mod tests {
         assert_eq!(runtime.tmux_socket, None);
         assert_eq!(runtime.claude_native_dir, None);
         assert!(runtime.popup);
+        assert!(runtime.pull_request_monitoring_enabled);
+        assert_eq!(runtime.pull_request_poll_interval_ms, 30_000);
         assert!(!runtime.notifications_enabled);
     }
 }

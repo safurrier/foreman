@@ -65,7 +65,7 @@ description: >
 - [x] Add focused real tmux coverage for flash jump-and-focus behavior
 
 ## Phase 8: Secondary surfaces
-- [ ] Implement pull request awareness with graceful degradation
+- [x] Implement pull request awareness with graceful degradation
 - [ ] Implement notification suppression, cooldowns, mute, and profile switching
 - [ ] Surface operator-visible failures in the UI and logs
 - [ ] Add header stats for local CPU and memory pressure

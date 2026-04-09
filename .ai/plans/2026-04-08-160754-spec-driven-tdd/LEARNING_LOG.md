@@ -140,3 +140,14 @@ typed label as an immediate selection or focus action without waiting on extra
 confirmation. Search used the same lesson in a different direction: the query
 and restore-selection target belong in reducer-owned state so cancel can always
 return the cursor to a stable logical target.
+
+## 2026-04-09 09:12 - PR detail state needed workspace identity, not cursor state
+
+Chunk 10 stayed clean once pull request state stopped being thought of as
+"whatever the current row shows." The durable identity is the selected
+workspace path resolved from tmux pane working directories. The cache keys, the
+auto-open suppression set, and the detail panel state all need to follow that
+workspace identity rather than a transient sidebar position. The other useful
+split was between auto-open and manual-open behavior: closing a discovered PR
+should suppress future auto-open for that workspace, but a manual reopen should
+still survive later refreshes.

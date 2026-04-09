@@ -45,11 +45,11 @@ description: >
   Dominant validation: reducer tests, buffer tests for overlays,
   logical-selection tests
 
-- [ ] **Pull request awareness**
+- [x] **Pull request awareness**
   Root spec: R17, A16-A17
   Planned chunks: 10
-  Dominant validation: provider contract tests, reducer tests,
-  graceful-degradation smoke tests
+  Dominant validation: provider contract tests, reducer tests, Ratatui buffer
+  tests, and graceful-degradation smoke tests
 
 - [ ] **Notifications**
   Root spec: R18, A18

@@ -3,6 +3,8 @@ use crate::app::state::{
     AppState, FlashNavigateKind, Focus, Inventory, Mode, PaneId, SelectionTarget, SessionId,
     SortMode, WindowId,
 };
+use crate::services::pull_requests::PullRequestLookup;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectionDirection {
@@ -25,6 +27,13 @@ pub enum Action {
     BeginFlash {
         kind: FlashNavigateKind,
     },
+    SetPullRequestLookup {
+        workspace_path: PathBuf,
+        lookup: PullRequestLookup,
+    },
+    TogglePullRequestDetail,
+    OpenSelectedPullRequest,
+    CopySelectedPullRequestUrl,
     CancelMode,
     RequestQuit,
     SetFocus(Focus),
@@ -115,6 +124,21 @@ pub fn action_for_command(state: &AppState, command: Command) -> Action {
         Command::FlashNavigateFocus => Action::BeginFlash {
             kind: FlashNavigateKind::JumpAndFocus,
         },
+        Command::TogglePullRequestDetail => Action::TogglePullRequestDetail,
+        Command::OpenPullRequest => {
+            if state.selected_pull_request().is_some() {
+                Action::OpenSelectedPullRequest
+            } else {
+                Action::Noop
+            }
+        }
+        Command::CopyPullRequestUrl => {
+            if state.selected_pull_request().is_some() {
+                Action::CopySelectedPullRequestUrl
+            } else {
+                Action::Noop
+            }
+        }
         Command::RenameWindow => match (state.selected_window_id(), state.selected_window_name()) {
             (Some(window_id), Some(current_name)) => Action::OpenRenameModal {
                 window_id,
@@ -140,15 +164,20 @@ pub fn action_for_command(state: &AppState, command: Command) -> Action {
 mod tests {
     use super::{action_for_command, Action, DraftEdit};
     use crate::app::{
-        inventory, AppState, Command, FlashNavigateKind, Focus, Mode, PaneBuilder, SelectionTarget,
-        SessionBuilder, WindowBuilder,
+        inventory, AppState, Command, FlashNavigateKind, Focus, HarnessKind, Mode, PaneBuilder,
+        SelectionTarget, SessionBuilder, WindowBuilder,
     };
+    use crate::services::pull_requests::{PullRequestData, PullRequestLookup, PullRequestStatus};
+    use std::path::PathBuf;
 
     fn state_with_selection(selection: Option<SelectionTarget>) -> AppState {
         let inventory = inventory([SessionBuilder::new("alpha").window(
             WindowBuilder::new("alpha:agents")
-                .pane(PaneBuilder::new("alpha:helper"))
-                .pane(PaneBuilder::new("alpha:main")),
+                .pane(PaneBuilder::new("alpha:helper").working_dir("/tmp/alpha"))
+                .pane(
+                    PaneBuilder::agent("alpha:main", HarnessKind::ClaudeCode)
+                        .working_dir("/tmp/alpha"),
+                ),
         )]);
         let mut state = AppState::with_inventory(inventory);
         state.selection = selection;
@@ -265,6 +294,47 @@ mod tests {
             Action::BeginFlash {
                 kind: FlashNavigateKind::JumpAndFocus,
             }
+        );
+    }
+
+    #[test]
+    fn pull_request_commands_require_selected_data_for_open_and_copy() {
+        let mut state = state_with_selection(Some(SelectionTarget::Pane("alpha:main".into())));
+
+        assert_eq!(
+            action_for_command(&state, Command::TogglePullRequestDetail),
+            Action::TogglePullRequestDetail
+        );
+        assert_eq!(
+            action_for_command(&state, Command::OpenPullRequest),
+            Action::Noop
+        );
+        assert_eq!(
+            action_for_command(&state, Command::CopyPullRequestUrl),
+            Action::Noop
+        );
+
+        state.pull_request_cache.insert(
+            PathBuf::from("/tmp/alpha"),
+            PullRequestLookup::Available(PullRequestData {
+                number: 7,
+                title: "Stabilize reducer".to_string(),
+                url: "https://example.com/pr/7".to_string(),
+                repository: "foreman".to_string(),
+                branch: "feat/pr".to_string(),
+                base_branch: "main".to_string(),
+                author: "alex".to_string(),
+                status: PullRequestStatus::Open,
+            }),
+        );
+
+        assert_eq!(
+            action_for_command(&state, Command::OpenPullRequest),
+            Action::OpenSelectedPullRequest
+        );
+        assert_eq!(
+            action_for_command(&state, Command::CopyPullRequestUrl),
+            Action::CopySelectedPullRequestUrl
         );
     }
 

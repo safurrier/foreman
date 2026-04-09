@@ -61,11 +61,13 @@ impl RunLogger {
         self.write_line(
             "INFO",
             &format!(
-                "bootstrap_complete config={} poll_interval_ms={} capture_lines={} popup={} notifications_enabled={} tmux_socket={}",
+                "bootstrap_complete config={} poll_interval_ms={} capture_lines={} popup={} pr_monitoring_enabled={} pr_poll_interval_ms={} notifications_enabled={} tmux_socket={}",
                 runtime.config_file.display(),
                 runtime.poll_interval_ms,
                 runtime.capture_lines,
                 runtime.popup,
+                runtime.pull_request_monitoring_enabled,
+                runtime.pull_request_poll_interval_ms,
                 runtime.notifications_enabled,
                 runtime
                     .tmux_socket
@@ -185,6 +187,8 @@ mod tests {
             poll_interval_ms: 1_000,
             capture_lines: 200,
             popup: false,
+            pull_request_monitoring_enabled: true,
+            pull_request_poll_interval_ms: 30_000,
             notifications_enabled: true,
             log_retention: 2,
         }
@@ -253,6 +257,8 @@ mod tests {
             std::fs::read_to_string(logger.summary().run_path).expect("run log should be readable");
         assert!(contents.contains("bootstrap_complete"));
         assert!(contents.contains("poll_interval_ms=1000"));
+        assert!(contents.contains("pr_monitoring_enabled=true"));
+        assert!(contents.contains("pr_poll_interval_ms=30000"));
     }
 
     #[test]

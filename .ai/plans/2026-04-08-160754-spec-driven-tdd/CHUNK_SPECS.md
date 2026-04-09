@@ -303,11 +303,11 @@ Show pull request state for the selected workspace without making the dashboard 
 - pull-request-panel invariant
 
 **Acceptance checklist**
-- [ ] Selected workspaces can resolve compact PR state when local tooling is available
-- [ ] PR detail can expand from the compact state
-- [ ] Opening in browser and copying URL work when supported
-- [ ] The detail panel does not repeatedly auto-reopen after the operator closes it
-- [ ] Missing or unauthenticated tooling fails soft
+- [x] Selected workspaces can resolve compact PR state when local tooling is available
+- [x] PR detail can expand from the compact state
+- [x] Opening in browser and copying URL work when supported
+- [x] The detail panel does not repeatedly auto-reopen after the operator closes it
+- [x] Missing or unauthenticated tooling fails soft
 
 **Architecture guardrails**
 - PR lookup, browser open, and clipboard copy remain service concerns

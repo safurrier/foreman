@@ -2,6 +2,7 @@ use crate::app::state::{
     AgentSnapshot, AgentStatus, HarnessKind, IntegrationMode, Inventory, Pane, PaneId, Session,
     SessionId, Window, WindowId,
 };
+use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub struct AgentSnapshotBuilder {
@@ -68,6 +69,7 @@ pub struct PaneBuilder {
     id: PaneId,
     title: String,
     current_command: Option<String>,
+    working_dir: Option<PathBuf>,
     preview: String,
     agent: Option<AgentSnapshot>,
 }
@@ -79,6 +81,7 @@ impl PaneBuilder {
             title: id.clone(),
             id: PaneId::new(id),
             current_command: None,
+            working_dir: None,
             preview: String::new(),
             agent: None,
         }
@@ -100,6 +103,11 @@ impl PaneBuilder {
 
     pub fn current_command(mut self, current_command: impl Into<String>) -> Self {
         self.current_command = Some(current_command.into());
+        self
+    }
+
+    pub fn working_dir(mut self, working_dir: impl Into<PathBuf>) -> Self {
+        self.working_dir = Some(working_dir.into());
         self
     }
 
@@ -139,6 +147,7 @@ impl PaneBuilder {
             id: self.id,
             title: self.title,
             current_command: self.current_command,
+            working_dir: self.working_dir,
             preview: self.preview,
             agent: self.agent,
         }

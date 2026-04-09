@@ -1,4 +1,5 @@
 use crate::app::{AgentStatus, AppState, Focus, ModalState, Mode, SelectionTarget};
+use crate::services::pull_requests::PullRequestLookup;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
@@ -31,11 +32,16 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
 
 fn render_header(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     let visible_count = state.visible_targets().len();
+    let pull_request = state
+        .pull_request_compact_label()
+        .map(|label| format!(" | {label}"))
+        .unwrap_or_default();
     let content = format!(
-        "Foreman | mode={} | focus={} | visible_targets={}",
+        "Foreman | mode={} | focus={} | visible_targets={}{}",
         state.mode_label(),
         state.focus_label(),
-        visible_count
+        visible_count,
+        pull_request
     );
     let header =
         Paragraph::new(content).block(Block::default().borders(Borders::ALL).title("Header"));
@@ -121,7 +127,13 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         Mode::Spawn => "Enter Spawn | Esc Cancel",
         Mode::ConfirmKill => "Enter/Y Confirm | Esc Cancel",
         Mode::Help => "? Close | q Quit",
-        Mode::Normal | Mode::PreviewScroll => "? Help | / Search | s Flash | q Quit",
+        Mode::Normal | Mode::PreviewScroll => {
+            if state.selected_pull_request().is_some() {
+                "? Help | / Search | s Flash | p PR | O Open | Y Copy | q Quit"
+            } else {
+                "? Help | / Search | s Flash | p PR | q Quit"
+            }
+        }
     };
     let footer = Paragraph::new(format!(
         "MODE: {} | FOCUS: {} | {}",
@@ -137,7 +149,7 @@ fn render_help(frame: &mut Frame<'_>) {
     let popup = centered_rect(64, 45, frame.area());
     frame.render_widget(Clear, popup);
     let help = Paragraph::new(
-        "Help\n\nj/k or arrows: move\nEnter: select\nTab or focus command: move focus\ni: compose direct input\nx: confirm kill for selected pane\nCtrl+S: submit the active draft\n?: toggle help\nq: quit",
+        "Help\n\nj/k or arrows: move\nEnter: select\nTab or focus command: move focus\ni: compose direct input\np: toggle PR detail\nShift+O: open PR in browser\nShift+Y: copy PR URL\nx: confirm kill for selected pane\nCtrl+S: submit the active draft\n?: toggle help\nq: quit",
     )
     .block(
         Block::default()
@@ -327,7 +339,7 @@ fn sidebar_lines(state: &AppState) -> String {
 }
 
 fn preview_lines(state: &AppState) -> String {
-    match state.selection.as_ref() {
+    let mut content = match state.selection.as_ref() {
         Some(SelectionTarget::Pane(pane_id)) => {
             if let Some(pane) = state.inventory.pane(pane_id) {
                 let status = pane
@@ -381,7 +393,42 @@ fn preview_lines(state: &AppState) -> String {
             }
         }
         None => "Select a pane to inspect recent output and status.".to_string(),
+    };
+
+    if let Some(workspace_path) = state.selected_workspace_path() {
+        content.push_str(&format!("\n\nWorkspace: {}", workspace_path.display()));
     }
+
+    if let Some(lookup) = state.selected_pull_request_lookup() {
+        match lookup {
+            PullRequestLookup::Unknown => content.push_str("\nPR: checking"),
+            PullRequestLookup::Missing => content.push_str("\nPR: no open pull request"),
+            PullRequestLookup::Unavailable { .. } => content.push_str("\nPR: unavailable"),
+            PullRequestLookup::Available(pull_request) => {
+                content.push_str(&format!(
+                    "\nPR: #{} {} - {}",
+                    pull_request.number,
+                    pull_request.status.label(),
+                    pull_request.title
+                ));
+                if state.is_pull_request_detail_open() {
+                    content.push_str(&format!(
+                        "\n\nPull Request\n#{} {}\nTitle: {}\nRepo: {}\nBranches: {} -> {}\nAuthor: {}\nURL: {}\nActions: p toggle | O open | Y copy",
+                        pull_request.number,
+                        pull_request.status.label(),
+                        pull_request.title,
+                        pull_request.repository,
+                        pull_request.branch,
+                        pull_request.base_branch,
+                        pull_request.author,
+                        pull_request.url
+                    ));
+                }
+            }
+        }
+    }
+
+    content
 }
 
 fn status_label(status: AgentStatus) -> &'static str {
@@ -421,8 +468,10 @@ mod tests {
         inventory, AgentStatus, AppState, FlashNavigateKind, FlashState, Focus, HarnessKind,
         ModalState, Mode, PaneBuilder, SearchState, SelectionTarget, SessionBuilder, WindowBuilder,
     };
+    use crate::services::pull_requests::{PullRequestData, PullRequestLookup, PullRequestStatus};
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
+    use std::path::PathBuf;
 
     fn sample_state() -> AppState {
         let inventory = inventory([
@@ -430,6 +479,7 @@ mod tests {
                 WindowBuilder::new("alpha:agents").pane(
                     PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
                         .title("claude-main")
+                        .working_dir("/tmp/alpha")
                         .status(AgentStatus::Working)
                         .activity_score(10),
                 ),
@@ -438,6 +488,7 @@ mod tests {
                 WindowBuilder::new("beta:agents").pane(
                     PaneBuilder::agent("beta:codex", HarnessKind::CodexCli)
                         .title("codex-review")
+                        .working_dir("/tmp/beta")
                         .status(AgentStatus::NeedsAttention)
                         .activity_score(4),
                 ),
@@ -580,6 +631,7 @@ mod tests {
                 window = window.pane(
                     PaneBuilder::agent(format!("alpha:pane:{index}"), HarnessKind::ClaudeCode)
                         .title(format!("pane-{index}"))
+                        .working_dir("/tmp/alpha")
                         .status(AgentStatus::Working),
                 );
             }
@@ -596,5 +648,45 @@ mod tests {
         assert!(output.contains("Flash"));
         assert!(output.contains("[aa]"));
         assert!(output.contains("[ab]"));
+    }
+
+    #[test]
+    fn render_shows_pull_request_compact_and_detail_sections() {
+        let mut state = sample_state();
+        state.pull_request_cache.insert(
+            PathBuf::from("/tmp/alpha"),
+            PullRequestLookup::Available(PullRequestData {
+                number: 42,
+                title: "Add PR awareness".to_string(),
+                url: "https://example.com/pr/42".to_string(),
+                repository: "foreman".to_string(),
+                branch: "feat/pr-awareness".to_string(),
+                base_branch: "main".to_string(),
+                author: "alex".to_string(),
+                status: PullRequestStatus::Open,
+            }),
+        );
+        state.pull_request_detail_workspace = Some(PathBuf::from("/tmp/alpha"));
+
+        let output = render_to_string(&state);
+
+        assert!(output.contains("pr=#42 OPEN"));
+        assert!(output.contains("Pull Request"));
+        assert!(output.contains("feat/pr-awareness"));
+        assert!(output.contains("https://example.com/pr/42"));
+    }
+
+    #[test]
+    fn render_shows_missing_pull_request_without_detail_panel() {
+        let mut state = sample_state();
+        state
+            .pull_request_cache
+            .insert(PathBuf::from("/tmp/alpha"), PullRequestLookup::Missing);
+
+        let output = render_to_string(&state);
+
+        assert!(output.contains("pr=NONE"));
+        assert!(output.contains("PR: no open pull request"));
+        assert!(!output.contains("Pull Request"));
     }
 }

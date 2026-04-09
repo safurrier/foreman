@@ -24,6 +24,9 @@ pub enum Command {
     Search,
     FlashNavigate,
     FlashNavigateFocus,
+    TogglePullRequestDetail,
+    OpenPullRequest,
+    CopyPullRequestUrl,
     RenameWindow,
     SpawnAgent,
     ToggleNonAgentSessions,
@@ -74,6 +77,15 @@ pub fn map_key_event(key: KeyEvent, focus: Focus, mode: Mode) -> Option<Command>
         (Mode::Normal, _, KeyCode::Char('s'), KeyModifiers::NONE) => Some(Command::FlashNavigate),
         (Mode::Normal, _, KeyCode::Char('S'), KeyModifiers::SHIFT) => {
             Some(Command::FlashNavigateFocus)
+        }
+        (Mode::Normal, _, KeyCode::Char('p'), KeyModifiers::NONE) => {
+            Some(Command::TogglePullRequestDetail)
+        }
+        (Mode::Normal, _, KeyCode::Char('O'), KeyModifiers::SHIFT) => {
+            Some(Command::OpenPullRequest)
+        }
+        (Mode::Normal, _, KeyCode::Char('Y'), KeyModifiers::SHIFT) => {
+            Some(Command::CopyPullRequestUrl)
         }
         (Mode::Normal, _, KeyCode::Char('R'), KeyModifiers::SHIFT) => Some(Command::RenameWindow),
         (Mode::Normal, _, KeyCode::Char('N'), KeyModifiers::SHIFT) => Some(Command::SpawnAgent),
@@ -268,6 +280,30 @@ mod tests {
                 Mode::Normal
             ),
             Some(Command::FlashNavigateFocus)
+        );
+    }
+
+    #[test]
+    fn normal_mode_exposes_pull_request_shortcuts() {
+        assert_eq!(
+            map_key_event(key(KeyCode::Char('p')), Focus::Sidebar, Mode::Normal),
+            Some(Command::TogglePullRequestDetail)
+        );
+        assert_eq!(
+            map_key_event(
+                KeyEvent::new(KeyCode::Char('O'), KeyModifiers::SHIFT),
+                Focus::Sidebar,
+                Mode::Normal
+            ),
+            Some(Command::OpenPullRequest)
+        );
+        assert_eq!(
+            map_key_event(
+                KeyEvent::new(KeyCode::Char('Y'), KeyModifiers::SHIFT),
+                Focus::Sidebar,
+                Mode::Normal
+            ),
+            Some(Command::CopyPullRequestUrl)
         );
     }
 }

@@ -5,7 +5,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-const LIST_PANES_FORMAT: &str = "#{session_id}\t#{session_name}\t#{window_id}\t#{window_name}\t#{pane_id}\t#{pane_title}\t#{pane_current_command}";
+const LIST_PANES_FORMAT: &str = "#{session_id}\t#{session_name}\t#{window_id}\t#{window_name}\t#{pane_id}\t#{pane_title}\t#{pane_current_command}\t#{pane_current_path}";
 
 #[derive(Debug)]
 pub enum TmuxError {
@@ -43,6 +43,7 @@ pub struct TmuxPaneRecord {
     pub pane_id: PaneId,
     pub pane_title: String,
     pub current_command: Option<String>,
+    pub current_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -125,6 +126,7 @@ impl<B: TmuxBackend> TmuxAdapter<B> {
                 id: record.pane_id.clone(),
                 title: non_empty(pane_title, record.pane_id.as_str()),
                 current_command,
+                working_dir: record.current_path.clone(),
                 preview,
                 agent,
             };
@@ -356,7 +358,7 @@ impl TmuxBackend for SystemTmuxBackend {
 }
 
 fn parse_pane_record(line: &str) -> Result<TmuxPaneRecord, TmuxError> {
-    let mut fields = line.splitn(7, '\t');
+    let mut fields = line.splitn(8, '\t');
     let session_id = fields
         .next()
         .ok_or_else(|| TmuxError::Parse(format!("missing session_id in pane record: {line}")))?;
@@ -378,6 +380,9 @@ fn parse_pane_record(line: &str) -> Result<TmuxPaneRecord, TmuxError> {
     let current_command = fields.next().ok_or_else(|| {
         TmuxError::Parse(format!("missing current_command in pane record: {line}"))
     })?;
+    let current_path = fields
+        .next()
+        .ok_or_else(|| TmuxError::Parse(format!("missing current_path in pane record: {line}")))?;
 
     Ok(TmuxPaneRecord {
         session_id: SessionId::new(session_id),
@@ -387,6 +392,7 @@ fn parse_pane_record(line: &str) -> Result<TmuxPaneRecord, TmuxError> {
         pane_id: PaneId::new(pane_id),
         pane_title: pane_title.to_string(),
         current_command: (!current_command.trim().is_empty()).then(|| current_command.to_string()),
+        current_path: (!current_path.trim().is_empty()).then(|| PathBuf::from(current_path)),
     })
 }
 
@@ -451,6 +457,7 @@ mod tests {
     use crate::app::{AgentStatus, AppState, PaneId, SelectionTarget, SessionId, WindowId};
     use std::cell::RefCell;
     use std::collections::BTreeMap;
+    use std::path::PathBuf;
 
     #[derive(Debug, Default)]
     struct FakeTmuxBackend {
@@ -562,6 +569,7 @@ mod tests {
             pane_id: PaneId::new(pane_id),
             pane_title: pane_title.to_string(),
             current_command: current_command.map(str::to_string),
+            current_path: Some(PathBuf::from("/workspace")),
         }
     }
 
