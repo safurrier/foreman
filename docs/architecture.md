@@ -49,13 +49,16 @@ testable as the app grows.
 | Harness integrations | Detect supported harness families, translate compatibility signals, and overlay native signals such as Claude when available |
 | Pull request service | Resolve pull request metadata for the selected workspace, and own browser-open and clipboard-copy seams with graceful degradation |
 | Notification service | Apply pure suppression and cooldown policy, dispatch best-effort notifications with backend fallback, and surface observable decisions |
+| System stats service | Capture a lightweight local CPU and memory pressure snapshot for the header without turning Foreman into a telemetry system |
 | Logging + telemetry | Persist structured run logs, latest-run pointer, retention cleanup, and header-level system stats |
 
 ### Primary Data Flows
 
 1. **Startup and boot**
    `foreman` parses config and overrides, starts logging, initializes adapters,
-   builds initial state, and renders the empty or populated shell.
+   builds initial state, captures a system-stats snapshot, and exposes a
+   render-ready shell state. The long-running interactive event loop is still
+   the remaining runtime seam to finish.
 2. **Refresh and status loop**
    Poll tick triggers tmux discovery and pane capture, harness interpreters
    derive status signals, reducer updates state, and renderer redraws.
@@ -125,6 +128,8 @@ testable as the app grows.
 - Notification mute state, profile, refresh tick, and per-pane cooldowns also
   live in `AppState`; refresh reconciliation emits notification effects but does
   not choose notification backends directly.
+- Header system stats and the latest operator-visible alert also live in
+  `AppState`, so rendering stays pure and failure surfaces remain testable.
 - Pull request detail may auto-open on first discovery, but once the operator
   closes it, later refreshes do not auto-reopen it for that same workspace.
 - Refreshes, filtering, and sorting must not leave selection pointing at an
@@ -270,6 +275,7 @@ boundaries unless an ADR changes them.
 | src/integrations/ | Harness recognition, compatibility status derivation, debounce logic, and native-over-compatibility precedence overlays | `SPEC.md` |
 | src/services/notifications.rs | Notification policy, cooldowns, backend fallback, and dispatch seams | `SPEC.md` |
 | src/services/pull_requests.rs | Pull request lookup, browser/copy effects, and degradation behavior | `SPEC.md` |
+| src/services/system_stats.rs | Header-level CPU and memory pressure snapshots behind a small service seam | This document |
 | src/services/logging.rs | Run logs, latest-run pointer, retention cleanup, and bootstrap/inventory summaries | `SPEC.md` |
 
 ---

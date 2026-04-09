@@ -1,5 +1,5 @@
 #!/usr/bin/env -S uv run python
-# MISE description="Run unit tests"
+# MISE description="Run Rust unit, integration, and smoke tests"
 # MISE depends=["setup"]
 import os
 import subprocess

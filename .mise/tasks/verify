@@ -62,7 +62,7 @@ def verify_go(cwd=PROJECT_ROOT):
 
 
 def verify_rust(cwd=PROJECT_ROOT):
-    log_step("Running Rust integration tests")
+    log_step("Running Rust integration and smoke tests")
     result = subprocess.run(
         ["cargo", "test", "--all-features"],
         cwd=cwd,

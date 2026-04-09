@@ -213,3 +213,29 @@ test ladder.
   Result: pass
 - `python3 /Users/alex.furrier/.codex/skills/alex-ai-ai-context-engineering-files/scripts/validate_frontmatter.py .`
   Result: pass
+
+## 2026-04-09 10:21 - Observability and acceptance-pass validation
+
+- System stats service tests in `src/services/system_stats.rs`
+  Result: pass
+- Reducer tests for operator-visible PR soft failures in `src/app/reducer.rs`
+  Result: pass
+- Ratatui buffer tests for header stats and operator alert surfacing in `src/ui/render.rs`
+  Result: pass
+- Bootstrap state tests for tmux-unavailable alerting in `src/cli.rs`
+  Result: pass
+- Binary smoke test for system-stats logging and tmux failure logging in `tests/bootstrap_observability.rs`
+  Result: pass
+- `cargo fmt`
+  Result: pass
+- `cargo test`
+  Result: pass
+- `mise run check`
+  Result: pass
+- `python3 /Users/alex.furrier/.codex/skills/alex-ai-ai-context-engineering-files/scripts/verify_references.py .`
+  Result: pass
+- `python3 /Users/alex.furrier/.codex/skills/alex-ai-ai-context-engineering-files/scripts/validate_frontmatter.py .`
+  Result: pass
+- `mise run verify`
+  Result: fail, due to local Docker daemon and gcloud credential availability
+  rather than Rust code or test failures

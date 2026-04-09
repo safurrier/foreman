@@ -1,7 +1,7 @@
 use crate::app::action::{Action, DraftEdit, SelectionDirection};
 use crate::app::state::{
-    AppState, FlashNavigateKind, Focus, ModalState, Mode, PaneId, SearchState, SelectionTarget,
-    SessionId, WindowId,
+    AppState, FlashNavigateKind, Focus, ModalState, Mode, OperatorAlert, OperatorAlertLevel,
+    OperatorAlertSource, PaneId, SearchState, SelectionTarget, SessionId, WindowId,
 };
 use crate::integrations::stabilize_inventory;
 use crate::services::notifications::{
@@ -547,6 +547,7 @@ fn reconcile_pull_request_detail(state: &mut AppState) {
     let Some(selected_workspace) = state.selected_workspace_path() else {
         state.pull_request_detail_workspace = None;
         state.pull_request_detail_manual = false;
+        clear_pull_request_alert(state);
         return;
     };
 
@@ -555,6 +556,7 @@ fn reconcile_pull_request_detail(state: &mut AppState) {
             if state.pull_request_detail_workspace.as_ref() == Some(&selected_workspace)
                 && state.pull_request_detail_manual => {}
         Some(PullRequestLookup::Available(_)) => {
+            clear_pull_request_alert(state);
             if state
                 .pull_request_auto_open_dismissed
                 .contains(&selected_workspace)
@@ -566,13 +568,30 @@ fn reconcile_pull_request_detail(state: &mut AppState) {
                 state.pull_request_detail_manual = false;
             }
         }
-        Some(PullRequestLookup::Unknown)
-        | Some(PullRequestLookup::Missing)
-        | Some(PullRequestLookup::Unavailable { .. })
-        | None => {
+        Some(PullRequestLookup::Unavailable { message }) => {
             state.pull_request_detail_workspace = None;
             state.pull_request_detail_manual = false;
+            state.operator_alert = Some(OperatorAlert::new(
+                OperatorAlertSource::PullRequests,
+                OperatorAlertLevel::Warn,
+                format!("PR lookup unavailable: {message}"),
+            ));
         }
+        Some(PullRequestLookup::Unknown) | Some(PullRequestLookup::Missing) | None => {
+            state.pull_request_detail_workspace = None;
+            state.pull_request_detail_manual = false;
+            clear_pull_request_alert(state);
+        }
+    }
+}
+
+fn clear_pull_request_alert(state: &mut AppState) {
+    if state
+        .operator_alert
+        .as_ref()
+        .is_some_and(|alert| alert.source == OperatorAlertSource::PullRequests)
+    {
+        state.operator_alert = None;
     }
 }
 
@@ -618,8 +637,8 @@ fn notification_effects_for_refresh(
 mod tests {
     use crate::app::{
         inventory, reduce, Action, AgentStatus, AppState, DraftEdit, FlashNavigateKind, Focus,
-        HarnessKind, ModalState, Mode, PaneBuilder, SelectionDirection, SelectionTarget,
-        SessionBuilder, SortMode, WindowBuilder,
+        HarnessKind, ModalState, Mode, OperatorAlertLevel, OperatorAlertSource, PaneBuilder,
+        SelectionDirection, SelectionTarget, SessionBuilder, SortMode, WindowBuilder,
     };
     use crate::services::pull_requests::{PullRequestData, PullRequestLookup, PullRequestStatus};
     use std::path::PathBuf;
@@ -1274,6 +1293,58 @@ mod tests {
                 text: "https://example.com/pr/7".to_string(),
             }]
         );
+    }
+
+    #[test]
+    fn pull_request_unavailable_sets_operator_alert_for_selected_workspace() {
+        let mut state = AppState::with_inventory(sample_inventory());
+        state.selection = Some(SelectionTarget::Pane("alpha:claude".into()));
+
+        reduce(
+            &mut state,
+            Action::SetPullRequestLookup {
+                workspace_path: PathBuf::from("/tmp/alpha"),
+                lookup: PullRequestLookup::Unavailable {
+                    message: "GitHub CLI is not installed".to_string(),
+                },
+            },
+        );
+
+        let alert = state
+            .operator_alert
+            .as_ref()
+            .expect("pull request failure should surface an operator alert");
+        assert_eq!(alert.source, OperatorAlertSource::PullRequests);
+        assert_eq!(alert.level, OperatorAlertLevel::Warn);
+        assert!(alert.message.contains("PR lookup unavailable"));
+        assert!(alert.message.contains("GitHub CLI is not installed"));
+    }
+
+    #[test]
+    fn pull_request_alert_clears_after_workspace_recovers() {
+        let mut state = AppState::with_inventory(sample_inventory());
+        state.selection = Some(SelectionTarget::Pane("alpha:claude".into()));
+
+        reduce(
+            &mut state,
+            Action::SetPullRequestLookup {
+                workspace_path: PathBuf::from("/tmp/alpha"),
+                lookup: PullRequestLookup::Unavailable {
+                    message: "gh auth missing".to_string(),
+                },
+            },
+        );
+        assert!(state.operator_alert.is_some());
+
+        reduce(
+            &mut state,
+            Action::SetPullRequestLookup {
+                workspace_path: PathBuf::from("/tmp/alpha"),
+                lookup: sample_pull_request(9, "Recover PR state", "https://example.com/pr/9"),
+            },
+        );
+
+        assert!(state.operator_alert.is_none());
     }
 
     #[test]

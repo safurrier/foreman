@@ -32,18 +32,25 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
 
 fn render_header(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     let visible_count = state.visible_targets().len();
+    let stats = format!(" | {}", state.system_stats_label());
     let pull_request = state
         .pull_request_compact_label()
         .map(|label| format!(" | {label}"))
         .unwrap_or_default();
     let notifications = format!(" | {}", state.notifications_label());
+    let alert = state
+        .operator_alert_label()
+        .map(|label| format!(" | {label}"))
+        .unwrap_or_default();
     let content = format!(
-        "Foreman | mode={} | focus={} | visible_targets={}{}{}",
+        "Foreman | mode={} | focus={} | visible_targets={}{}{}{}{}",
         state.mode_label(),
         state.focus_label(),
         visible_count,
+        stats,
         pull_request,
-        notifications
+        notifications,
+        alert
     );
     let header =
         Paragraph::new(content).block(Block::default().borders(Borders::ALL).title("Header"));
@@ -397,6 +404,15 @@ fn preview_lines(state: &AppState) -> String {
         None => "Select a pane to inspect recent output and status.".to_string(),
     };
 
+    if let Some(alert) = &state.operator_alert {
+        content = format!(
+            "Alert [{}]: {}\n\n{}",
+            alert.level.label(),
+            alert.message,
+            content
+        );
+    }
+
     if let Some(workspace_path) = state.selected_workspace_path() {
         content.push_str(&format!("\n\nWorkspace: {}", workspace_path.display()));
     }
@@ -480,9 +496,11 @@ mod tests {
     use super::render;
     use crate::app::{
         inventory, AgentStatus, AppState, FlashNavigateKind, FlashState, Focus, HarnessKind,
-        ModalState, Mode, PaneBuilder, SearchState, SelectionTarget, SessionBuilder, WindowBuilder,
+        ModalState, Mode, OperatorAlert, OperatorAlertLevel, OperatorAlertSource, PaneBuilder,
+        SearchState, SelectionTarget, SessionBuilder, WindowBuilder,
     };
     use crate::services::pull_requests::{PullRequestData, PullRequestLookup, PullRequestStatus};
+    use crate::services::system_stats::SystemStatsSnapshot;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
     use std::path::PathBuf;
@@ -719,5 +737,34 @@ mod tests {
         let profile_output = render_to_string(&state);
         assert!(profile_output.contains("notify=COMPLETE"));
         assert!(profile_output.contains("Notifications: COMPLETE"));
+    }
+
+    #[test]
+    fn render_includes_system_stats_in_header() {
+        let mut state = sample_state();
+        state.system_stats = SystemStatsSnapshot {
+            cpu_pressure_percent: Some(18),
+            memory_pressure_percent: Some(71),
+        };
+
+        let output = render_to_string(&state);
+
+        assert!(output.contains("cpu=18% mem=71%"));
+    }
+
+    #[test]
+    fn render_surfaces_operator_alert_in_header_and_preview() {
+        let mut state = sample_state();
+        state.operator_alert = Some(OperatorAlert::new(
+            OperatorAlertSource::PullRequests,
+            OperatorAlertLevel::Warn,
+            "PR lookup unavailable: GitHub CLI is not installed",
+        ));
+
+        let output = render_to_string(&state);
+
+        assert!(output.contains("alert=WARN"));
+        assert!(output.contains("Alert [WARN]"));
+        assert!(output.contains("GitHub CLI is not installed"));
     }
 }

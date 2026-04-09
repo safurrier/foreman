@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use crate::services::pull_requests::{PullRequestData, PullRequestLookup};
+use crate::services::system_stats::SystemStatsSnapshot;
 
 macro_rules! id_type {
     ($name:ident) => {
@@ -612,6 +613,65 @@ pub struct NotificationState {
     pub last_status: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperatorAlertLevel {
+    Info,
+    Warn,
+    Error,
+}
+
+impl OperatorAlertLevel {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Info => "INFO",
+            Self::Warn => "WARN",
+            Self::Error => "ERROR",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperatorAlertSource {
+    Tmux,
+    PullRequests,
+    Notifications,
+    Browser,
+    Clipboard,
+}
+
+impl OperatorAlertSource {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Tmux => "tmux",
+            Self::PullRequests => "pull_requests",
+            Self::Notifications => "notifications",
+            Self::Browser => "browser",
+            Self::Clipboard => "clipboard",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperatorAlert {
+    pub source: OperatorAlertSource,
+    pub level: OperatorAlertLevel,
+    pub message: String,
+}
+
+impl OperatorAlert {
+    pub fn new(
+        source: OperatorAlertSource,
+        level: OperatorAlertLevel,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            source,
+            level,
+            message: message.into(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModalState {
     RenameWindow {
@@ -680,6 +740,8 @@ pub struct AppState {
     pub notifications: NotificationState,
     pub input_draft: TextDraft,
     pub modal: Option<ModalState>,
+    pub system_stats: SystemStatsSnapshot,
+    pub operator_alert: Option<OperatorAlert>,
     pub startup_error: Option<String>,
 }
 
@@ -934,6 +996,16 @@ impl AppState {
         } else {
             format!("notify={}", self.notifications.profile.label())
         }
+    }
+
+    pub fn system_stats_label(&self) -> String {
+        self.system_stats.label()
+    }
+
+    pub fn operator_alert_label(&self) -> Option<String> {
+        self.operator_alert
+            .as_ref()
+            .map(|alert| format!("alert={}", alert.level.label()))
     }
 
     fn filter_search_targets(&self, targets: Vec<SelectionTarget>) -> Vec<SelectionTarget> {

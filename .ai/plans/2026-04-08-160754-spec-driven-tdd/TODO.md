@@ -67,10 +67,13 @@ description: >
 ## Phase 8: Secondary surfaces
 - [x] Implement pull request awareness with graceful degradation
 - [x] Implement notification suppression, cooldowns, mute, and profile switching
-- [ ] Surface operator-visible failures in the UI and logs
-- [ ] Add header stats for local CPU and memory pressure
+- [x] Surface operator-visible failures in the UI and logs
+- [x] Add header stats for local CPU and memory pressure
 
 ## Phase 9: Acceptance and docs
-- [ ] Add shell-based smoke tests for core operator flows
-- [ ] Run `cargo fmt`, `cargo clippy`, `cargo test`, and `mise run check`
-- [ ] Sync runtime behavior back into `README.md`, `SPEC.md`, and `docs/architecture.md` as needed
+- [x] Add shell-based smoke tests for core operator flows
+- [x] Run `cargo fmt`, `cargo clippy`, `cargo test`, and `mise run check`
+- [x] Sync runtime behavior back into `README.md`, `SPEC.md`, and `docs/architecture.md` as needed
+
+## Phase 10: Remaining runtime delivery gap
+- [ ] Implement the long-running interactive event loop and effect executor so the binary matches the full dashboard contract instead of bootstrap-and-exit behavior

@@ -373,6 +373,7 @@ Prove the main operator journeys end to end and leave the repo contracts matchin
 
 **Acceptance checklist**
 - [ ] Core operator smoke tests exist for startup, inventory, focus, input, and pane actions
+- [ ] The compiled binary runs the long-lived interactive dashboard loop instead of bootstrap-and-exit behavior
 - [ ] The fast quality gate stays green
 - [ ] Heavy verification is updated to reflect the real app shape
 - [ ] `SPEC.md`, `docs/architecture.md`, and user-facing docs match the implemented behavior
@@ -387,6 +388,7 @@ Prove the main operator journeys end to end and leave the repo contracts matchin
 - `mise run check`
 - `mise run verify`
 - smoke suite
+- binary-level dashboard smoke once the interactive loop exists
 - `/plan-sync`
 - `/spec-sync`
 

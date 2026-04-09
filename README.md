@@ -12,7 +12,16 @@ mise run setup
 mise run check
 
 # Start development
-mise run dev```
+mise run dev
+```
+
+## Current Status
+
+- `foreman --config-path` and `foreman --init-config` are live.
+- Normal startup bootstraps config, logging, tmux inventory, native Claude
+  overlays, and header-level system stats.
+- The binary currently exits after bootstrap. The long-running interactive TUI
+  loop is still an open implementation item.
 
 ## Starting New Work
 
@@ -29,10 +38,11 @@ mise run plan -- <slug>
 | `mise run fmt` | Auto-format code |
 | `mise run lint` | Run lint checks (non-modifying) |
 | `mise run typecheck` | Run static type analysis |
-| `mise run test` | Run unit tests |
+| `mise run test` | Run Rust unit, integration, and smoke tests |
 | `mise run build` | Build artifacts |
 | `mise run check` | Fast quality gate (fmt + lint + typecheck + test) |
-| `mise run dev` | Start local development || `mise run ci` | CI entrypoint (= check) |
+| `mise run dev` | Start local development |
+| `mise run ci` | CI entrypoint (= check) |
 | `mise run plan -- <slug>` | Create a plan directory for a unit of work |
 | `mise run verify` | Heavy validation (integration, docker, security) |
 

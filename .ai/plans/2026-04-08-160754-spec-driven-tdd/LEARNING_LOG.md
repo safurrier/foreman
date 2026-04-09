@@ -161,3 +161,13 @@ until the visible pane status actually flips to idle. The other useful split
 was policy versus delivery: suppression rules and cooldowns stay pure and
 testable, while backend fallback and shell execution stay in the notification
 service.
+
+## 2026-04-09 10:21 - Acceptance work surfaced a real runtime gap
+
+The observability slice itself landed cleanly: header stats now come from a
+small service seam, operator-visible soft failures live in `AppState`, and the
+binary/bootstrap path logs both. The more important discovery was broader:
+the crate has a real reducer, renderer, and smoke suite, but the compiled
+binary still bootstraps and exits instead of running the persistent interactive
+dashboard loop. That means chunk 12 cannot honestly be called complete until
+the event loop and effect executor exist as first-class runtime code.

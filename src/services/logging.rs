@@ -1,9 +1,10 @@
-use crate::app::InventorySummary;
+use crate::app::{InventorySummary, OperatorAlert};
 use crate::config::RuntimeConfig;
 use crate::integrations::ClaudeNativeOverlaySummary;
 use crate::services::notifications::{
     NotificationDecision, NotificationDispatchReceipt, NotificationError, NotificationRequest,
 };
+use crate::services::system_stats::SystemStatsSnapshot;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -97,8 +98,37 @@ impl RunLogger {
         )
     }
 
+    pub fn log_system_stats(&mut self, snapshot: &SystemStatsSnapshot) -> io::Result<()> {
+        self.write_line(
+            "INFO",
+            &format!(
+                "system_stats_snapshot cpu_pressure={} memory_pressure={}",
+                snapshot
+                    .cpu_pressure_percent
+                    .map(|value| format!("{value}%"))
+                    .unwrap_or_else(|| "?".to_string()),
+                snapshot
+                    .memory_pressure_percent
+                    .map(|value| format!("{value}%"))
+                    .unwrap_or_else(|| "?".to_string())
+            ),
+        )
+    }
+
     pub fn log_tmux_error(&mut self, error: &str) -> io::Result<()> {
         self.write_line("WARN", &format!("tmux_bootstrap_error {error}"))
+    }
+
+    pub fn log_operator_alert(&mut self, alert: &OperatorAlert) -> io::Result<()> {
+        self.write_line(
+            alert.level.label(),
+            &format!(
+                "operator_alert source={} level={} message={}",
+                alert.source.label(),
+                alert.level.label().to_ascii_lowercase(),
+                alert.message
+            ),
+        )
     }
 
     pub fn log_claude_native_summary(
@@ -225,13 +255,16 @@ fn current_run_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::RunLogger;
-    use crate::app::{InventorySummary, NotificationKind};
+    use crate::app::{
+        InventorySummary, NotificationKind, OperatorAlert, OperatorAlertLevel, OperatorAlertSource,
+    };
     use crate::config::RuntimeConfig;
     use crate::integrations::ClaudeNativeOverlaySummary;
     use crate::services::notifications::{
         NotificationDecision, NotificationDecisionReason, NotificationDispatchReceipt,
         NotificationError, NotificationRequest,
     };
+    use crate::services::system_stats::SystemStatsSnapshot;
     use std::path::Path;
     use tempfile::tempdir;
 
@@ -343,6 +376,25 @@ mod tests {
     }
 
     #[test]
+    fn system_stats_log_writes_header_snapshot() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let mut logger = RunLogger::start(temp_dir.path(), 2).expect("logger should start");
+
+        logger
+            .log_system_stats(&SystemStatsSnapshot {
+                cpu_pressure_percent: Some(21),
+                memory_pressure_percent: Some(63),
+            })
+            .expect("system stats log should succeed");
+
+        let contents =
+            std::fs::read_to_string(logger.summary().run_path).expect("run log should be readable");
+        assert!(contents.contains("system_stats_snapshot"));
+        assert!(contents.contains("cpu_pressure=21%"));
+        assert!(contents.contains("memory_pressure=63%"));
+    }
+
+    #[test]
     fn claude_native_log_writes_summary_counts() {
         let temp_dir = tempdir().expect("temp dir should exist");
         let mut logger = RunLogger::start(temp_dir.path(), 2).expect("logger should start");
@@ -406,5 +458,26 @@ mod tests {
         assert!(contents.contains("notification_backend_selected"));
         assert!(contents.contains("backend=fallback"));
         assert!(contents.contains("notification_backend_failure"));
+    }
+
+    #[test]
+    fn operator_alert_log_captures_source_and_level() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let mut logger = RunLogger::start(temp_dir.path(), 2).expect("logger should start");
+
+        logger
+            .log_operator_alert(&OperatorAlert::new(
+                OperatorAlertSource::PullRequests,
+                OperatorAlertLevel::Warn,
+                "PR lookup unavailable: GitHub CLI is not installed",
+            ))
+            .expect("operator alert log should succeed");
+
+        let contents =
+            std::fs::read_to_string(logger.summary().run_path).expect("run log should be readable");
+        assert!(contents.contains("operator_alert"));
+        assert!(contents.contains("source=pull_requests"));
+        assert!(contents.contains("level=warn"));
+        assert!(contents.contains("GitHub CLI is not installed"));
     }
 }

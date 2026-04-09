@@ -62,6 +62,10 @@ description: >
   Planned chunks: 12
   Dominant validation: `cargo fmt`, `cargo clippy`, `cargo test`,
   `mise run check`, `mise run verify`
+  Current gap: the repo now has shell-backed smoke coverage for bootstrap,
+  tmux, notifications, and pane actions, but the compiled binary still lacks
+  the long-running interactive event loop required to treat chunk 12 as fully
+  closed.
 
 ## Architecture review checklist
 

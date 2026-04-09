@@ -1,10 +1,13 @@
 use crate::adapters::tmux::{SystemTmuxBackend, TmuxAdapter};
-use crate::app::{AppState, InventorySummary};
+use crate::app::{
+    AppState, InventorySummary, OperatorAlert, OperatorAlertLevel, OperatorAlertSource,
+};
 use crate::config::{load_config, resolve_paths, write_default_config, ConfigError, RuntimeConfig};
 use crate::integrations::{
     apply_claude_native_signals, ClaudeNativeOverlaySummary, FileClaudeNativeSignalSource,
 };
 use crate::services::logging::{RunLogSummary, RunLogger};
+use crate::services::system_stats::{SysinfoSystemStatsBackend, SystemStatsService};
 use clap::Parser;
 use std::fmt;
 use std::path::PathBuf;
@@ -106,8 +109,14 @@ pub fn run(cli: Cli) -> Result<RunOutcome, RunError> {
     let (state, claude_native) = bootstrap_state(&runtime);
     let inventory = state.inventory_summary();
     logger.log_inventory(&inventory).map_err(ConfigError::Io)?;
+    logger
+        .log_system_stats(&state.system_stats)
+        .map_err(ConfigError::Io)?;
     if let Some(error) = &state.startup_error {
         logger.log_tmux_error(error).map_err(ConfigError::Io)?;
+    }
+    if let Some(alert) = &state.operator_alert {
+        logger.log_operator_alert(alert).map_err(ConfigError::Io)?;
     }
     logger
         .log_claude_native_summary(&claude_native)
@@ -129,6 +138,9 @@ pub fn run(cli: Cli) -> Result<RunOutcome, RunError> {
 }
 
 fn bootstrap_state(runtime: &RuntimeConfig) -> (AppState, ClaudeNativeOverlaySummary) {
+    let system_stats = SystemStatsService::new(SysinfoSystemStatsBackend::new())
+        .snapshot()
+        .unwrap_or_default();
     let adapter = TmuxAdapter::new(SystemTmuxBackend::new(runtime.tmux_socket.clone()));
     match adapter.load_inventory(runtime.capture_lines) {
         Ok(mut inventory) => {
@@ -143,6 +155,7 @@ fn bootstrap_state(runtime: &RuntimeConfig) -> (AppState, ClaudeNativeOverlaySum
 
             let mut state = AppState {
                 popup_mode: runtime.popup,
+                system_stats,
                 ..AppState::with_inventory(inventory)
             };
             state.notifications.muted = !runtime.notifications_enabled;
@@ -151,6 +164,12 @@ fn bootstrap_state(runtime: &RuntimeConfig) -> (AppState, ClaudeNativeOverlaySum
         Err(error) => {
             let mut state = AppState {
                 popup_mode: runtime.popup,
+                system_stats,
+                operator_alert: Some(OperatorAlert::new(
+                    OperatorAlertSource::Tmux,
+                    OperatorAlertLevel::Warn,
+                    format!("tmux unavailable: {error}"),
+                )),
                 startup_error: Some(error.to_string()),
                 ..AppState::default()
             };
@@ -163,6 +182,7 @@ fn bootstrap_state(runtime: &RuntimeConfig) -> (AppState, ClaudeNativeOverlaySum
 #[cfg(test)]
 mod tests {
     use super::{run, Cli, RunOutcome};
+    use crate::app::OperatorAlertSource;
     use clap::Parser;
     use tempfile::tempdir;
 
@@ -232,6 +252,43 @@ mod tests {
         match outcome {
             RunOutcome::Bootstrapped(summary) => {
                 assert!(summary.state.notifications.muted);
+            }
+            other => panic!("expected bootstrapped outcome, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bootstrap_surfaces_tmux_unavailable_as_operator_alert() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let missing_socket = temp_dir.path().join("missing.sock");
+        let cli = Cli::parse_from([
+            "foreman",
+            "--config-file",
+            temp_dir
+                .path()
+                .join("config.toml")
+                .to_str()
+                .expect("utf-8 path"),
+            "--log-dir",
+            temp_dir.path().join("logs").to_str().expect("utf-8 path"),
+            "--tmux-socket",
+            missing_socket.to_str().expect("utf-8 path"),
+        ]);
+
+        let outcome = run(cli).expect("run should succeed");
+
+        match outcome {
+            RunOutcome::Bootstrapped(summary) => {
+                assert!(summary.state.startup_error.is_some());
+                let alert = summary
+                    .state
+                    .operator_alert
+                    .as_ref()
+                    .expect("tmux failure should surface an operator alert");
+                assert_eq!(alert.source, OperatorAlertSource::Tmux);
+                assert!(alert.message.contains("tmux unavailable"));
+                assert!(summary.state.system_stats.cpu_pressure_percent.is_some());
+                assert!(summary.state.system_stats.memory_pressure_percent.is_some());
             }
             other => panic!("expected bootstrapped outcome, got {other:?}"),
         }

@@ -11,7 +11,7 @@ pub use reducer::{reduce, Effect};
 pub use state::{
     AgentSnapshot, AgentStatus, AppState, Filters, FlashNavigateKind, FlashState, FlashTarget,
     Focus, HarnessKind, IntegrationMode, Inventory, InventorySummary, ModalState, Mode,
-    NotificationCooldownKey, NotificationKind, NotificationProfile, NotificationState, Pane,
-    PaneId, SearchState, SelectionTarget, Session, SessionId, SortMode, TextDraft, Window,
-    WindowId,
+    NotificationCooldownKey, NotificationKind, NotificationProfile, NotificationState,
+    OperatorAlert, OperatorAlertLevel, OperatorAlertSource, Pane, PaneId, SearchState,
+    SelectionTarget, Session, SessionId, SortMode, TextDraft, Window, WindowId,
 };

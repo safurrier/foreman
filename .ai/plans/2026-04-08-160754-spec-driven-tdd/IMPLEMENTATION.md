@@ -59,6 +59,11 @@ Build the product in this order:
 5. pull requests, notifications, and observability
 6. acceptance sweep and doc sync
 
+The acceptance sweep exposed one missing runtime slice that was too implicit in
+the original plan: the binary still needs a long-running interactive event loop
+and effect executor to turn the reducer/render core into the full dashboard
+contract described in `SPEC.md`.
+
 ## Test ladder
 
 ### 1. Unit tests
