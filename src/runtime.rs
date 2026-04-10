@@ -4,7 +4,10 @@ use crate::app::{
     OperatorAlertLevel, OperatorAlertSource,
 };
 use crate::cli::PreparedBootstrap;
-use crate::integrations::{apply_configured_claude_signals, ClaudeNativeOverlaySummary};
+use crate::integrations::{
+    apply_configured_claude_signals, apply_configured_codex_signals, ClaudeNativeOverlaySummary,
+    CodexNativeOverlaySummary,
+};
 use crate::services::logging::RunLogger;
 use crate::services::notifications::{
     build_notification_dispatcher, NotificationDispatcher, NotificationRequest,
@@ -281,7 +284,7 @@ impl DashboardRuntime {
     fn refresh_inventory(&mut self) -> Result<(), RuntimeError> {
         self.logger.debug("inventory_refresh_started")?;
         match self.load_inventory_with_native() {
-            Ok((inventory, claude_native)) => {
+            Ok((inventory, claude_native, codex_native)) => {
                 self.apply_runtime_action(Action::SetStartupError(None))?;
                 self.clear_alert_source(OperatorAlertSource::Tmux)?;
                 self.apply_runtime_action(Action::ReplaceInventory(inventory))?;
@@ -291,6 +294,10 @@ impl DashboardRuntime {
                 self.logger.log_claude_native_summary(&claude_native)?;
                 for warning in &claude_native.warnings {
                     self.logger.log_claude_native_warning(warning)?;
+                }
+                self.logger.log_codex_native_summary(&codex_native)?;
+                for warning in &codex_native.warnings {
+                    self.logger.log_codex_native_warning(warning)?;
                 }
             }
             Err(error_message) => {
@@ -311,7 +318,14 @@ impl DashboardRuntime {
 
     fn load_inventory_with_native(
         &self,
-    ) -> Result<(crate::app::Inventory, ClaudeNativeOverlaySummary), String> {
+    ) -> Result<
+        (
+            crate::app::Inventory,
+            ClaudeNativeOverlaySummary,
+            CodexNativeOverlaySummary,
+        ),
+        String,
+    > {
         let mut inventory = self
             .tmux
             .load_inventory(self.runtime.capture_lines)
@@ -322,8 +336,13 @@ impl DashboardRuntime {
             self.runtime.claude_native_dir.as_deref(),
             self.runtime.claude_integration_preference,
         );
+        let codex_native = apply_configured_codex_signals(
+            &mut inventory,
+            self.runtime.codex_native_dir.as_deref(),
+            self.runtime.codex_integration_preference,
+        );
 
-        Ok((inventory, claude_native))
+        Ok((inventory, claude_native, codex_native))
     }
 
     fn refresh_system_stats(&mut self) -> Result<(), RuntimeError> {

@@ -1,6 +1,6 @@
 use crate::app::{InventorySummary, OperatorAlert};
 use crate::config::{LogVerbosity, RuntimeConfig};
-use crate::integrations::ClaudeNativeOverlaySummary;
+use crate::integrations::{ClaudeNativeOverlaySummary, CodexNativeOverlaySummary};
 use crate::services::notifications::{
     NotificationDecision, NotificationDispatchReceipt, NotificationError, NotificationRequest,
 };
@@ -80,7 +80,7 @@ impl RunLogger {
         self.write_line(
             "INFO",
             &format!(
-                "bootstrap_complete config={} poll_interval_ms={} capture_lines={} popup={} pr_monitoring_enabled={} pr_poll_interval_ms={} notifications_enabled={} notification_cooldown_ticks={} notification_profile={} notification_backends={} claude_integration_preference={} log_verbosity={} tmux_socket={}",
+                "bootstrap_complete config={} poll_interval_ms={} capture_lines={} popup={} pr_monitoring_enabled={} pr_poll_interval_ms={} notifications_enabled={} notification_cooldown_ticks={} notification_profile={} notification_backends={} claude_integration_preference={} codex_integration_preference={} log_verbosity={} tmux_socket={}",
                 runtime.config_file.display(),
                 runtime.poll_interval_ms,
                 runtime.capture_lines,
@@ -97,6 +97,7 @@ impl RunLogger {
                     .collect::<Vec<_>>()
                     .join(","),
                 runtime.claude_integration_preference.label(),
+                runtime.codex_integration_preference.label(),
                 runtime.log_verbosity.label(),
                 runtime
                     .tmux_socket
@@ -200,6 +201,25 @@ impl RunLogger {
 
     pub fn log_claude_native_warning(&mut self, warning: &str) -> io::Result<()> {
         self.write_line("WARN", &format!("claude_native_warning {warning}"))
+    }
+
+    pub fn log_codex_native_summary(
+        &mut self,
+        summary: &CodexNativeOverlaySummary,
+    ) -> io::Result<()> {
+        self.write_line(
+            "INFO",
+            &format!(
+                "codex_native_summary applied={} fallback_to_compatibility={} warnings={}",
+                summary.applied,
+                summary.fallback_to_compatibility,
+                summary.warnings.len()
+            ),
+        )
+    }
+
+    pub fn log_codex_native_warning(&mut self, warning: &str) -> io::Result<()> {
+        self.write_line("WARN", &format!("codex_native_warning {warning}"))
     }
 
     pub fn log_notification_decision(&mut self, decision: &NotificationDecision) -> io::Result<()> {
@@ -313,7 +333,7 @@ mod tests {
     use crate::config::{
         IntegrationPreference, LogVerbosity, NotificationBackendName, RuntimeConfig,
     };
-    use crate::integrations::ClaudeNativeOverlaySummary;
+    use crate::integrations::{ClaudeNativeOverlaySummary, CodexNativeOverlaySummary};
     use crate::services::notifications::{
         NotificationDecision, NotificationDecisionReason, NotificationDispatchReceipt,
         NotificationError, NotificationRequest,
@@ -329,6 +349,7 @@ mod tests {
             log_dir: log_dir.to_path_buf(),
             tmux_socket: None,
             claude_native_dir: None,
+            codex_native_dir: None,
             log_verbosity: LogVerbosity::Info,
             poll_interval_ms: 1_000,
             capture_lines: 200,
@@ -343,6 +364,7 @@ mod tests {
             ],
             notification_profile: crate::app::NotificationProfile::All,
             claude_integration_preference: IntegrationPreference::Auto,
+            codex_integration_preference: IntegrationPreference::Auto,
             log_retention: 2,
         }
     }
@@ -419,6 +441,7 @@ mod tests {
         assert!(contents.contains("notification_profile=ALL"));
         assert!(contents.contains("notification_backends=notify-send,osascript"));
         assert!(contents.contains("claude_integration_preference=auto"));
+        assert!(contents.contains("codex_integration_preference=auto"));
         assert!(contents.contains("log_verbosity=info"));
     }
 
@@ -511,6 +534,27 @@ mod tests {
         assert!(contents.contains("claude_native_summary"));
         assert!(contents.contains("applied=1"));
         assert!(contents.contains("fallback_to_compatibility=2"));
+    }
+
+    #[test]
+    fn codex_native_log_writes_summary_counts() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let mut logger =
+            RunLogger::start(temp_dir.path(), 2, LogVerbosity::Info).expect("logger should start");
+
+        logger
+            .log_codex_native_summary(&CodexNativeOverlaySummary {
+                applied: 2,
+                fallback_to_compatibility: 1,
+                warnings: vec!["missing".to_string()],
+            })
+            .expect("native summary log should succeed");
+
+        let contents =
+            std::fs::read_to_string(logger.summary().run_path).expect("run log should be readable");
+        assert!(contents.contains("codex_native_summary"));
+        assert!(contents.contains("applied=2"));
+        assert!(contents.contains("fallback_to_compatibility=1"));
     }
 
     #[test]

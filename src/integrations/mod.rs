@@ -1,7 +1,9 @@
 mod claude;
 mod claude_hook;
 mod codex;
+mod codex_hook;
 mod gemini;
+mod native;
 mod opencode;
 
 use crate::app::{AgentSnapshot, AgentStatus, HarnessKind, IntegrationMode, Inventory};
@@ -12,6 +14,13 @@ pub use claude::{
 };
 pub use claude_hook::{
     bridge_claude_hook_input, ClaudeHookBridgeError, ClaudeHookBridgeRequest, ClaudeHookEventKind,
+};
+pub use codex::{
+    apply_native_signals as apply_codex_native_signals, CodexNativeOverlaySummary,
+    FileCodexNativeSignalSource,
+};
+pub use codex_hook::{
+    bridge_codex_hook_input, CodexHookBridgeError, CodexHookBridgeRequest, CodexHookEventKind,
 };
 use std::path::Path;
 
@@ -105,6 +114,29 @@ pub fn apply_configured_claude_signals(
             }
 
             claude::compatibility_fallback_summary(
+                inventory,
+                matches!(preference, IntegrationPreference::Native),
+            )
+        }
+    }
+}
+
+pub fn apply_configured_codex_signals(
+    inventory: &mut Inventory,
+    native_dir: Option<&Path>,
+    preference: IntegrationPreference,
+) -> CodexNativeOverlaySummary {
+    match preference {
+        IntegrationPreference::Compatibility => CodexNativeOverlaySummary::default(),
+        IntegrationPreference::Auto | IntegrationPreference::Native => {
+            if let Some(dir) = native_dir {
+                return codex::apply_native_signals(
+                    inventory,
+                    &FileCodexNativeSignalSource::new(dir.to_path_buf()),
+                );
+            }
+
+            codex::compatibility_fallback_summary(
                 inventory,
                 matches!(preference, IntegrationPreference::Native),
             )

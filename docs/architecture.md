@@ -47,7 +47,7 @@ testable as the app grows.
 | App state core | Own `Command`, `Action`, `Mode`, `Focus`, selection state, filters, sort mode, modal state, and reducer logic |
 | Ratatui renderer | Render header, sidebar, preview, input, footer, help, and overlays from pure state |
 | tmux adapter | Discover sessions/windows/panes, capture pane output, focus panes, send input, rename windows, create windows, and kill panes |
-| Harness integrations | Detect supported harness families, translate compatibility signals, and overlay native signals such as Claude when available |
+| Harness integrations | Detect supported harness families, translate compatibility signals, and overlay native signals such as Claude and Codex when available |
 | Pull request service | Resolve pull request metadata for the selected workspace, and own browser-open and clipboard-copy seams with graceful degradation |
 | Notification service | Apply pure suppression and cooldown policy, build dispatcher order from typed config, dispatch best-effort notifications with backend fallback, and surface observable decisions |
 | System stats service | Capture a lightweight local CPU and memory pressure snapshot for the header without turning Foreman into a telemetry system |
@@ -79,8 +79,9 @@ testable as the app grows.
   content come from an external process and may be stale, partial, or missing.
 - **Harness boundary**: native integration signals are more structured but still
   external to Foreman and may disconnect or downgrade to compatibility mode.
-  For Claude Code, those signals arrive through official hook events bridged
-  into per-pane JSON files keyed by `TMUX_PANE`.
+  For Claude Code and Codex CLI, those signals arrive through official hook
+  events bridged into per-pane JSON files keyed by `TMUX_PANE` or an explicit
+  pane id when the hook runs outside tmux.
 - **Local tooling boundary**: Git, GitHub-aware commands, browser openers,
   clipboard tools, and notification backends are optional dependencies and must
   fail soft.
@@ -148,6 +149,10 @@ testable as the app grows.
 - Claude Code hook bridging is outside the reducer and renderer. The bridge
   reads hook stdin, resolves the pane identity, and writes atomic signal files
   that runtime later consumes.
+- Codex hook bridging follows the same boundary, but the strongest current
+  real-binary validation is at the hook boundary itself. In local validation,
+  `codex exec` emitted native hooks reliably in non-interactive mode while the
+  same command inside a tmux TTY did not.
 - Compatibility heuristics are allowed to be lower confidence, but they must
   fail soft rather than hide the pane entirely.
 - All tmux, GitHub, browser, clipboard, and notification effects flow through
@@ -279,11 +284,12 @@ boundaries unless an ADR changes them.
 |---|---|---|
 | src/cli.rs | CLI flags, config path/init flows, debug logging flag, runtime override parsing, and bootstrap wiring | `SPEC.md` |
 | src/bin/foreman-claude-hook.rs | Claude Code hook bridge CLI that resolves the signal directory and writes native per-pane status files | This document |
+| src/bin/foreman-codex-hook.rs | Codex hook bridge CLI that resolves the signal directory and writes native per-pane status files | This document |
 | src/runtime.rs | Interactive terminal setup, event polling, redraw cadence, effect execution, and runtime-level soft-failure handling | This document |
 | src/app/ | Core state, commands, actions, reducer, selectors, drafts, modal targets, and UI-facing invariants | This document |
 | src/ui/ | Ratatui layout, widgets, rendering, and buffer-test helpers | This document |
 | src/adapters/tmux.rs | tmux discovery, capture, pane working-directory lookup, focus, send-input, rename, spawn, and kill seam; transport only, no status heuristics | `SPEC.md` |
-| src/integrations/ | Harness recognition, compatibility status derivation, debounce logic, hook-to-signal bridging, native-over-compatibility precedence overlays, and config-driven Claude mode preference | `SPEC.md` |
+| src/integrations/ | Harness recognition, compatibility status derivation, debounce logic, hook-to-signal bridging, shared native file-signal helpers, native-over-compatibility precedence overlays, and config-driven per-harness mode preference | `SPEC.md` |
 | src/services/notifications.rs | Notification policy, configured cooldowns, backend-order wiring, backend fallback, and dispatch seams | `SPEC.md` |
 | src/services/pull_requests.rs | Pull request lookup, browser/copy effects, and degradation behavior | `SPEC.md` |
 | src/services/system_stats.rs | Header-level CPU and memory pressure snapshots behind a small service seam | This document |

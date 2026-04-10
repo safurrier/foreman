@@ -19,8 +19,8 @@ not another round of terminal parsing.
 
 ### MUST
 
-- Add a supported Codex hook bridge path that can drive native `working`,
-  `idle`, and `error` states.
+- Add a supported Codex hook bridge path that can drive native `working` and
+  `idle` states from official Codex hooks.
 - Keep Codex native mode authoritative over compatibility mode when native
   signals are present.
 - Preserve compatibility fallback when native hook delivery is unavailable.
@@ -33,6 +33,8 @@ not another round of terminal parsing.
   event model onto Codex.
 - Use Codex hook events to improve activity confidence during turns.
 - Document the minimal Codex hook config needed for operators.
+- Be explicit that attention/error cues remain compatibility-backed until the
+  official Codex hook surface exposes stronger structured signals.
 
 ## Constraints
 

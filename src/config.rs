@@ -210,6 +210,7 @@ impl IntegrationPreference {
 #[serde(default)]
 pub struct IntegrationConfig {
     pub claude_code: HarnessIntegrationConfig,
+    pub codex_cli: HarnessIntegrationConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -244,6 +245,7 @@ pub struct RuntimeConfig {
     pub log_dir: PathBuf,
     pub tmux_socket: Option<PathBuf>,
     pub claude_native_dir: Option<PathBuf>,
+    pub codex_native_dir: Option<PathBuf>,
     pub log_verbosity: LogVerbosity,
     pub poll_interval_ms: u64,
     pub capture_lines: usize,
@@ -255,6 +257,7 @@ pub struct RuntimeConfig {
     pub notification_backends: Vec<NotificationBackendName>,
     pub notification_profile: NotificationProfile,
     pub claude_integration_preference: IntegrationPreference,
+    pub codex_integration_preference: IntegrationPreference,
     pub log_retention: usize,
 }
 
@@ -265,12 +268,18 @@ impl RuntimeConfig {
             .clone()
             .or(file_config.integrations.claude_code.native_dir.clone())
             .or_else(|| Some(default_claude_native_dir(&paths.log_dir)));
+        let codex_native_dir = cli
+            .codex_native_dir
+            .clone()
+            .or(file_config.integrations.codex_cli.native_dir.clone())
+            .or_else(|| Some(default_codex_native_dir(&paths.log_dir)));
 
         Self {
             config_file: paths.config_file,
             log_dir: paths.log_dir,
             tmux_socket: cli.tmux_socket.clone(),
             claude_native_dir,
+            codex_native_dir,
             log_verbosity: if cli.debug {
                 LogVerbosity::Debug
             } else {
@@ -294,6 +303,7 @@ impl RuntimeConfig {
             notification_backends: file_config.notifications.backends,
             notification_profile: file_config.notifications.active_profile,
             claude_integration_preference: file_config.integrations.claude_code.mode,
+            codex_integration_preference: file_config.integrations.codex_cli.mode,
             log_retention: file_config.logging.retain_run_logs,
         }
     }
@@ -355,8 +365,16 @@ pub fn default_config_toml() -> String {
 }
 
 pub fn default_claude_native_dir(log_dir: &Path) -> PathBuf {
+    default_native_dir(log_dir, "claude-native")
+}
+
+pub fn default_codex_native_dir(log_dir: &Path) -> PathBuf {
+    default_native_dir(log_dir, "codex-native")
+}
+
+fn default_native_dir(log_dir: &Path, leaf: &str) -> PathBuf {
     let state_dir = log_dir.parent().unwrap_or(log_dir);
-    state_dir.join("claude-native")
+    state_dir.join(leaf)
 }
 
 fn resolve_config_file(env: &PathEnvironment) -> Result<PathBuf, ConfigError> {
@@ -403,10 +421,10 @@ fn resolve_log_dir(env: &PathEnvironment) -> Result<PathBuf, ConfigError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        default_claude_native_dir, resolve_paths_with_env, write_default_config, AppConfig,
-        ConfigError, IntegrationPreference, LoggingConfig, NotificationBackendName,
-        NotificationConfig, PathEnvironment, PullRequestConfig, RuntimeConfig,
-        DEFAULT_NOTIFICATION_COOLDOWN_TICKS,
+        default_claude_native_dir, default_codex_native_dir, resolve_paths_with_env,
+        write_default_config, AppConfig, ConfigError, IntegrationPreference, LoggingConfig,
+        NotificationBackendName, NotificationConfig, PathEnvironment, PullRequestConfig,
+        RuntimeConfig, DEFAULT_NOTIFICATION_COOLDOWN_TICKS,
     };
     use crate::app::NotificationProfile;
     use crate::cli::Cli;
@@ -477,6 +495,10 @@ mod tests {
             parsed.integrations.claude_code.mode,
             IntegrationPreference::Auto
         );
+        assert_eq!(
+            parsed.integrations.codex_cli.mode,
+            IntegrationPreference::Auto
+        );
     }
 
     #[test]
@@ -519,6 +541,10 @@ mod tests {
             runtime.claude_native_dir,
             Some(default_claude_native_dir(Path::new("/tmp/logs")))
         );
+        assert_eq!(
+            runtime.codex_native_dir,
+            Some(default_codex_native_dir(Path::new("/tmp/logs")))
+        );
         assert_eq!(runtime.log_verbosity, super::LogVerbosity::Debug);
         assert!(runtime.popup);
         assert!(runtime.pull_request_monitoring_enabled);
@@ -538,6 +564,10 @@ mod tests {
         assert_eq!(runtime.notification_profile, NotificationProfile::All);
         assert_eq!(
             runtime.claude_integration_preference,
+            IntegrationPreference::Auto
+        );
+        assert_eq!(
+            runtime.codex_integration_preference,
             IntegrationPreference::Auto
         );
     }
@@ -573,6 +603,11 @@ enabled = false
             IntegrationPreference::Auto
         );
         assert_eq!(parsed.integrations.claude_code.native_dir, None);
+        assert_eq!(
+            parsed.integrations.codex_cli.mode,
+            IntegrationPreference::Auto
+        );
+        assert_eq!(parsed.integrations.codex_cli.native_dir, None);
     }
 
     #[test]
@@ -588,6 +623,10 @@ active_profile = "attention-only"
 [integrations.claude_code]
 mode = "compatibility"
 native_dir = "/tmp/foreman-native"
+
+[integrations.codex_cli]
+mode = "native"
+native_dir = "/tmp/codex-native"
 "#,
         )
         .expect("config should parse");
@@ -612,6 +651,14 @@ native_dir = "/tmp/foreman-native"
             parsed.integrations.claude_code.native_dir,
             Some(Path::new("/tmp/foreman-native").to_path_buf())
         );
+        assert_eq!(
+            parsed.integrations.codex_cli.mode,
+            IntegrationPreference::Native
+        );
+        assert_eq!(
+            parsed.integrations.codex_cli.native_dir,
+            Some(Path::new("/tmp/codex-native").to_path_buf())
+        );
     }
 
     #[test]
@@ -619,6 +666,14 @@ native_dir = "/tmp/foreman-native"
         assert_eq!(
             default_claude_native_dir(Path::new("/tmp/foreman/logs")),
             Path::new("/tmp/foreman/claude-native")
+        );
+    }
+
+    #[test]
+    fn default_codex_native_dir_is_sibling_of_log_dir() {
+        assert_eq!(
+            default_codex_native_dir(Path::new("/tmp/foreman/logs")),
+            Path::new("/tmp/foreman/codex-native")
         );
     }
 }

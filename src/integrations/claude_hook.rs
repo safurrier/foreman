@@ -1,11 +1,12 @@
-use super::claude::ClaudeNativeSignal;
+use super::native::{
+    signal_for_status, write_signal_file as write_native_signal_file, NativeSignal,
+    NativeSignalWriteError,
+};
 use crate::app::AgentStatus;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::fmt;
-use std::fs;
-use std::io::{self, Read};
+use std::io::Read;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClaudeHookBridgeRequest {
@@ -42,28 +43,26 @@ pub enum ClaudeHookEventKind {
 
 #[derive(Debug)]
 pub enum ClaudeHookBridgeError {
-    Io(io::Error),
     Parse(serde_json::Error),
     MissingPaneId,
-    Serialize(serde_json::Error),
+    Write(NativeSignalWriteError),
 }
 
 impl fmt::Display for ClaudeHookBridgeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Io(error) => write!(f, "{error}"),
             Self::Parse(error) => write!(f, "{error}"),
             Self::MissingPaneId => write!(f, "missing pane id; set TMUX_PANE or pass --pane-id"),
-            Self::Serialize(error) => write!(f, "{error}"),
+            Self::Write(error) => write!(f, "{error}"),
         }
     }
 }
 
 impl std::error::Error for ClaudeHookBridgeError {}
 
-impl From<io::Error> for ClaudeHookBridgeError {
-    fn from(error: io::Error) -> Self {
-        Self::Io(error)
+impl From<NativeSignalWriteError> for ClaudeHookBridgeError {
+    fn from(error: NativeSignalWriteError) -> Self {
+        Self::Write(error)
     }
 }
 
@@ -71,12 +70,6 @@ impl From<io::Error> for ClaudeHookBridgeError {
 struct RawClaudeHookEvent {
     hook_event_name: String,
     notification_type: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct SignalFile<'a> {
-    status: &'a str,
-    activity_score: u64,
 }
 
 pub fn bridge_claude_hook_input<R: Read>(
@@ -94,9 +87,7 @@ pub fn bridge_claude_hook_input<R: Read>(
     Ok(Some(kind))
 }
 
-fn signal_for_event(
-    event: &RawClaudeHookEvent,
-) -> Option<(ClaudeHookEventKind, ClaudeNativeSignal)> {
+fn signal_for_event(event: &RawClaudeHookEvent) -> Option<(ClaudeHookEventKind, NativeSignal)> {
     match event.hook_event_name.as_str() {
         "UserPromptSubmit" => Some((
             ClaudeHookEventKind::UserPromptSubmit,
@@ -125,64 +116,12 @@ fn signal_for_event(
     }
 }
 
-fn signal_for_status(status: AgentStatus) -> ClaudeNativeSignal {
-    ClaudeNativeSignal {
-        status,
-        activity_score: match status {
-            AgentStatus::Working => 120,
-            AgentStatus::NeedsAttention => 90,
-            AgentStatus::Error => 70,
-            AgentStatus::Idle => 40,
-            AgentStatus::Unknown => 0,
-        },
-    }
-}
-
 fn write_signal_file(
     request: &ClaudeHookBridgeRequest,
-    signal: &ClaudeNativeSignal,
+    signal: &NativeSignal,
 ) -> Result<(), ClaudeHookBridgeError> {
-    fs::create_dir_all(&request.native_dir)?;
-
-    let final_path = request
-        .native_dir
-        .join(format!("{}.json", request.pane_id.as_str()));
-    let unique_suffix = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock should be after unix epoch")
-        .as_nanos();
-    let temp_path = request.native_dir.join(format!(
-        ".{}.{}.tmp",
-        request.pane_id.as_str(),
-        unique_suffix
-    ));
-    let payload = SignalFile {
-        status: status_label(signal.status),
-        activity_score: signal.activity_score,
-    };
-    let contents = serde_json::to_vec(&payload).map_err(ClaudeHookBridgeError::Serialize)?;
-    fs::write(&temp_path, contents)?;
-
-    if let Err(error) = fs::rename(&temp_path, &final_path) {
-        if final_path.exists() {
-            fs::remove_file(&final_path)?;
-            fs::rename(&temp_path, &final_path)?;
-        } else {
-            return Err(ClaudeHookBridgeError::Io(error));
-        }
-    }
-
+    write_native_signal_file(&request.native_dir, request.pane_id.as_str(), signal)?;
     Ok(())
-}
-
-fn status_label(status: AgentStatus) -> &'static str {
-    match status {
-        AgentStatus::Working => "working",
-        AgentStatus::NeedsAttention => "needs_attention",
-        AgentStatus::Error => "error",
-        AgentStatus::Idle => "idle",
-        AgentStatus::Unknown => "unknown",
-    }
 }
 
 #[cfg(test)]

@@ -1,10 +1,6 @@
+use super::native;
 use super::{status_from_hints, CompatibilityObservation, StatusHints};
-use crate::app::{AgentSnapshot, AgentStatus, HarnessKind, IntegrationMode, Inventory, PaneId};
-use serde::Deserialize;
-use std::fmt;
-use std::fs;
-use std::io;
-use std::path::PathBuf;
+use crate::app::{AgentStatus, HarnessKind, Inventory};
 
 const RECOGNITION_TOKENS: &[&str] = &["claude", "claude code"];
 const STATUS_HINTS: StatusHints = StatusHints {
@@ -33,99 +29,11 @@ const STATUS_HINTS: StatusHints = StatusHints {
     idle: &["ready", "idle", "awaiting task", "waiting for task", "done"],
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ClaudeNativeSignal {
-    pub status: AgentStatus,
-    pub activity_score: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ClaudeNativeOverlaySummary {
-    pub applied: usize,
-    pub fallback_to_compatibility: usize,
-    pub warnings: Vec<String>,
-}
-
-pub trait ClaudeNativeSignalSource {
-    fn signal_for_pane(
-        &self,
-        pane_id: &PaneId,
-    ) -> Result<Option<ClaudeNativeSignal>, ClaudeNativeSignalError>;
-}
-
-#[derive(Debug)]
-pub enum ClaudeNativeSignalError {
-    Io(io::Error),
-    Parse(serde_json::Error),
-    InvalidStatus(String),
-}
-
-impl fmt::Display for ClaudeNativeSignalError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Io(error) => write!(f, "{error}"),
-            Self::Parse(error) => write!(f, "{error}"),
-            Self::InvalidStatus(status) => write!(f, "invalid Claude native status: {status}"),
-        }
-    }
-}
-
-impl std::error::Error for ClaudeNativeSignalError {}
-
-impl From<io::Error> for ClaudeNativeSignalError {
-    fn from(error: io::Error) -> Self {
-        Self::Io(error)
-    }
-}
-
-impl From<serde_json::Error> for ClaudeNativeSignalError {
-    fn from(error: serde_json::Error) -> Self {
-        Self::Parse(error)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct FileClaudeNativeSignalSource {
-    dir: PathBuf,
-}
-
-impl FileClaudeNativeSignalSource {
-    pub fn new(dir: PathBuf) -> Self {
-        Self { dir }
-    }
-
-    fn signal_path(&self, pane_id: &PaneId) -> PathBuf {
-        self.dir.join(format!("{}.json", pane_id.as_str()))
-    }
-}
-
-impl ClaudeNativeSignalSource for FileClaudeNativeSignalSource {
-    fn signal_for_pane(
-        &self,
-        pane_id: &PaneId,
-    ) -> Result<Option<ClaudeNativeSignal>, ClaudeNativeSignalError> {
-        let path = self.signal_path(pane_id);
-        if !path.exists() {
-            return Ok(None);
-        }
-
-        let payload = fs::read_to_string(path)?;
-        let raw: RawClaudeNativeSignal = serde_json::from_str(&payload)?;
-        let status = parse_native_status(&raw.status)?;
-        Ok(Some(ClaudeNativeSignal {
-            status,
-            activity_score: raw
-                .activity_score
-                .unwrap_or_else(|| native_activity_score(status)),
-        }))
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct RawClaudeNativeSignal {
-    status: String,
-    activity_score: Option<u64>,
-}
+pub use native::{
+    FileNativeSignalSource as FileClaudeNativeSignalSource,
+    NativeOverlaySummary as ClaudeNativeOverlaySummary,
+    NativeSignalSource as ClaudeNativeSignalSource,
+};
 
 pub(crate) fn recognition_tokens() -> &'static [&'static str] {
     RECOGNITION_TOKENS
@@ -139,104 +47,21 @@ pub fn apply_native_signals<S: ClaudeNativeSignalSource>(
     inventory: &mut Inventory,
     source: &S,
 ) -> ClaudeNativeOverlaySummary {
-    let mut summary = ClaudeNativeOverlaySummary::default();
-
-    for session in &mut inventory.sessions {
-        for window in &mut session.windows {
-            for pane in &mut window.panes {
-                let fallback_candidate = matches!(
-                    pane.agent.as_ref(),
-                    Some(agent)
-                        if agent.harness == HarnessKind::ClaudeCode
-                            && agent.integration_mode == IntegrationMode::Compatibility
-                );
-
-                match source.signal_for_pane(&pane.id) {
-                    Ok(Some(signal)) => {
-                        pane.agent = Some(AgentSnapshot {
-                            harness: HarnessKind::ClaudeCode,
-                            status: signal.status,
-                            observed_status: signal.status,
-                            integration_mode: IntegrationMode::Native,
-                            activity_score: signal.activity_score,
-                            debounce_ticks: 0,
-                        });
-                        summary.applied += 1;
-                    }
-                    Ok(None) => {
-                        if fallback_candidate {
-                            summary.fallback_to_compatibility += 1;
-                        }
-                    }
-                    Err(error) => {
-                        if fallback_candidate {
-                            summary.fallback_to_compatibility += 1;
-                        }
-                        summary
-                            .warnings
-                            .push(format!("pane={} {error}", pane.id.as_str()));
-                    }
-                }
-            }
-        }
-    }
-
-    summary
+    native::apply_native_signals(inventory, HarnessKind::ClaudeCode, source)
 }
 
 pub(crate) fn compatibility_fallback_summary(
     inventory: &Inventory,
     warn_missing_native: bool,
 ) -> ClaudeNativeOverlaySummary {
-    let fallback_to_compatibility = inventory
-        .sessions
-        .iter()
-        .flat_map(|session| session.windows.iter())
-        .flat_map(|window| window.panes.iter())
-        .filter(|pane| {
-            matches!(
-                pane.agent.as_ref(),
-                Some(agent)
-                    if agent.harness == HarnessKind::ClaudeCode
-                        && agent.integration_mode == IntegrationMode::Compatibility
-            )
-        })
-        .count();
-
-    let mut summary = ClaudeNativeOverlaySummary {
-        applied: 0,
-        fallback_to_compatibility,
-        warnings: Vec::new(),
-    };
-    if warn_missing_native && fallback_to_compatibility > 0 {
-        summary.warnings.push(
+    native::compatibility_fallback_summary(
+        inventory,
+        HarnessKind::ClaudeCode,
+        warn_missing_native.then_some(
             "claude native preference requested but no native signal source was configured"
                 .to_string(),
-        );
-    }
-
-    summary
-}
-
-fn parse_native_status(status: &str) -> Result<AgentStatus, ClaudeNativeSignalError> {
-    match status.trim().to_ascii_lowercase().as_str() {
-        "working" => Ok(AgentStatus::Working),
-        "needs_attention" | "needs-attention" | "attention" => Ok(AgentStatus::NeedsAttention),
-        "idle" => Ok(AgentStatus::Idle),
-        "error" => Ok(AgentStatus::Error),
-        "unknown" => Ok(AgentStatus::Unknown),
-        other => Err(ClaudeNativeSignalError::InvalidStatus(other.to_string())),
-    }
-}
-
-fn native_activity_score(status: AgentStatus) -> u64 {
-    match status {
-        AgentStatus::Working => 120,
-        AgentStatus::NeedsAttention => 90,
-        AgentStatus::Error => 70,
-        AgentStatus::Idle => 40,
-        AgentStatus::Unknown => 0,
-    }
+        ),
+    )
 }
 
 #[cfg(test)]

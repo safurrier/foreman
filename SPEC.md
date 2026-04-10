@@ -408,7 +408,7 @@ mise run ci
 
 - Given a supported harness with native integration available, when the dashboard discovers that agent, it uses native mode as the authoritative source of status.
 - Given native integration is not available and the harness is still visible in tmux, the dashboard falls back to compatibility mode instead of dropping the pane entirely.
-- Given config forces compatibility mode for Claude, native signal data does not override compatibility status for that run.
+- Given config forces compatibility mode for Claude or Codex, native signal data does not override compatibility status for that run.
 
 **A6. Default hiding and toggle behavior**
 
@@ -438,6 +438,14 @@ mise run ci
 - Given the product is being rebuilt from scratch, when the first native integration is delivered, Claude Code is the first harness supported in native mode.
 - Completion and needs-attention detection for Claude Code are reliable enough to drive notifications without terminal-only parsing as the primary signal.
 - Foreman ships a supported Claude Code hook bridge so native status does not
+  depend on ad hoc user scripts.
+
+**A11b. Codex CLI native hook support**
+
+- Given Codex CLI native integration is configured, real Codex hook events can
+  drive native `working` and `idle` status without terminal parsing as the
+  primary source.
+- Foreman ships a supported Codex hook bridge so Codex native status does not
   depend on ad hoc user scripts.
 
 **A12. Pane operations**

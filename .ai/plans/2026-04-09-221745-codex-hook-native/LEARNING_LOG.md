@@ -18,3 +18,13 @@ description: >
   strong on turn and tool lifecycle but do not obviously expose a Claude-style
   notification event for "waiting on the operator", so we may need a hybrid
   native-plus-compatibility model there.
+- The hook bridge architecture wanted a shared file-signal layer after the
+  second native integration landed. Pulling the parser, atomic writer, and
+  fallback summary into one `native` helper kept Claude and Codex aligned
+  without making the reducer or runtime more abstract than necessary.
+- The real Codex binary surfaced an important validation nuance: `codex exec`
+  emitted `submit` and `stop` hooks reliably in supported non-interactive mode,
+  but the same command inside a tmux TTY did not emit hooks in local testing.
+  The durable test shape is therefore split between:
+  - real Codex-binary hook E2E
+  - separate Foreman tmux/dashboard E2E around native-file consumption

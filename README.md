@@ -20,12 +20,15 @@ mise run dev
 - `foreman --config-path` and `foreman --init-config` are live.
 - `foreman --debug` enables debug-level run logging without changing the normal
   interactive startup path.
-- Normal startup bootstraps config, logging, tmux inventory, native Claude
-  overlays, and header-level system stats.
+- Normal startup bootstraps config, logging, tmux inventory, native Claude and
+  Codex overlays, and header-level system stats.
 - Config now controls notification cooldowns, backend order, startup profile,
-  and Claude native-vs-compatibility preference.
+  and per-harness native-vs-compatibility preference.
 - `foreman-claude-hook` bridges official Claude Code hook events into Foreman's
   per-pane native status files, with a default state path and optional
+  config-level override.
+- `foreman-codex-hook` bridges official Codex hook events into the same
+  per-pane native status model, with its own default state path and optional
   config-level override.
 - Normal startup now enters the interactive dashboard loop with live tmux
   polling, direct input, popup focus-close behavior, and binary-level tmux E2E
@@ -84,6 +87,46 @@ Example `.claude/settings.json`:
           {
             "type": "command",
             "command": "foreman-claude-hook"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+## Codex Native Hooks
+
+Foreman also ships `foreman-codex-hook` for Codex native status integration.
+The bridge reads official Codex hook JSON on stdin, resolves the pane from
+`TMUX_PANE` or `--pane-id`, and writes the per-pane signal file that Foreman
+overlays in native mode.
+
+By default the bridge writes next to Foreman's run logs under `codex-native`.
+You can override that path with `[integrations.codex_cli].native_dir` in
+`config.toml`.
+
+Example repo-local `.codex/hooks.json`:
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "foreman-codex-hook"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "foreman-codex-hook"
           }
         ]
       }

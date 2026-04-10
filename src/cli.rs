@@ -3,7 +3,10 @@ use crate::app::{
     AppState, InventorySummary, OperatorAlert, OperatorAlertLevel, OperatorAlertSource,
 };
 use crate::config::{load_config, resolve_paths, write_default_config, ConfigError, RuntimeConfig};
-use crate::integrations::{apply_configured_claude_signals, ClaudeNativeOverlaySummary};
+use crate::integrations::{
+    apply_configured_claude_signals, apply_configured_codex_signals, ClaudeNativeOverlaySummary,
+    CodexNativeOverlaySummary,
+};
 use crate::services::logging::{RunLogSummary, RunLogger};
 use crate::services::system_stats::{SysinfoSystemStatsBackend, SystemStatsService};
 use clap::Parser;
@@ -47,6 +50,9 @@ pub struct Cli {
     pub claude_native_dir: Option<PathBuf>,
 
     #[arg(long, hide = true)]
+    pub codex_native_dir: Option<PathBuf>,
+
+    #[arg(long, hide = true)]
     pub bootstrap_only: bool,
 }
 
@@ -64,6 +70,7 @@ pub struct BootstrapSummary {
     pub state: AppState,
     pub inventory: InventorySummary,
     pub claude_native: ClaudeNativeOverlaySummary,
+    pub codex_native: CodexNativeOverlaySummary,
 }
 
 pub(crate) struct PreparedBootstrap {
@@ -71,6 +78,7 @@ pub(crate) struct PreparedBootstrap {
     pub logger: RunLogger,
     pub state: AppState,
     pub claude_native: ClaudeNativeOverlaySummary,
+    pub codex_native: CodexNativeOverlaySummary,
 }
 
 impl PreparedBootstrap {
@@ -81,6 +89,7 @@ impl PreparedBootstrap {
             logs: self.logger.summary(),
             state: self.state,
             claude_native: self.claude_native,
+            codex_native: self.codex_native,
         }
     }
 }
@@ -184,7 +193,7 @@ pub(crate) fn prepare_bootstrap(
     logger
         .debug("bootstrap_debug_logging_enabled")
         .map_err(ConfigError::Io)?;
-    let (state, claude_native) = bootstrap_state(&runtime);
+    let (state, claude_native, codex_native) = bootstrap_state(&runtime);
     let inventory = state.inventory_summary();
     logger.log_inventory(&inventory).map_err(ConfigError::Io)?;
     logger
@@ -204,16 +213,31 @@ pub(crate) fn prepare_bootstrap(
             .log_claude_native_warning(warning)
             .map_err(ConfigError::Io)?;
     }
+    logger
+        .log_codex_native_summary(&codex_native)
+        .map_err(ConfigError::Io)?;
+    for warning in &codex_native.warnings {
+        logger
+            .log_codex_native_warning(warning)
+            .map_err(ConfigError::Io)?;
+    }
 
     Ok(PreparedBootstrap {
         runtime,
         logger,
         state,
         claude_native,
+        codex_native,
     })
 }
 
-pub(crate) fn bootstrap_state(runtime: &RuntimeConfig) -> (AppState, ClaudeNativeOverlaySummary) {
+pub(crate) fn bootstrap_state(
+    runtime: &RuntimeConfig,
+) -> (
+    AppState,
+    ClaudeNativeOverlaySummary,
+    CodexNativeOverlaySummary,
+) {
     let system_stats = SystemStatsService::new(SysinfoSystemStatsBackend::new())
         .snapshot()
         .unwrap_or_default();
@@ -225,6 +249,11 @@ pub(crate) fn bootstrap_state(runtime: &RuntimeConfig) -> (AppState, ClaudeNativ
                 runtime.claude_native_dir.as_deref(),
                 runtime.claude_integration_preference,
             );
+            let codex_native = apply_configured_codex_signals(
+                &mut inventory,
+                runtime.codex_native_dir.as_deref(),
+                runtime.codex_integration_preference,
+            );
 
             let mut state = AppState {
                 popup_mode: runtime.popup,
@@ -234,7 +263,7 @@ pub(crate) fn bootstrap_state(runtime: &RuntimeConfig) -> (AppState, ClaudeNativ
             state.notifications.muted = !runtime.notifications_enabled;
             state.notifications.profile = runtime.notification_profile;
             state.notifications.cooldown_ticks = runtime.notification_cooldown_ticks;
-            (state, claude_native)
+            (state, claude_native, codex_native)
         }
         Err(error) => {
             let mut state = AppState {
@@ -251,7 +280,11 @@ pub(crate) fn bootstrap_state(runtime: &RuntimeConfig) -> (AppState, ClaudeNativ
             state.notifications.muted = !runtime.notifications_enabled;
             state.notifications.profile = runtime.notification_profile;
             state.notifications.cooldown_ticks = runtime.notification_cooldown_ticks;
-            (state, ClaudeNativeOverlaySummary::default())
+            (
+                state,
+                ClaudeNativeOverlaySummary::default(),
+                CodexNativeOverlaySummary::default(),
+            )
         }
     }
 }

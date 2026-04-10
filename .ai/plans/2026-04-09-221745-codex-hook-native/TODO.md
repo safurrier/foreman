@@ -8,8 +8,8 @@ description: >
 
 # TODO — codex-hook-native
 
-- [ ] Confirm Codex hook/event inputs and stable fields.
-- [ ] Design native status mapping and compatibility fallback boundaries.
-- [ ] Implement Codex hook bridge and runtime wiring.
-- [ ] Add bridge-level and tmux-backed E2E coverage.
-- [ ] Sync docs, SPEC references, and validation records.
+- [x] Confirm Codex hook/event inputs and stable fields.
+- [x] Design native status mapping and compatibility fallback boundaries.
+- [x] Implement Codex hook bridge and runtime wiring.
+- [x] Add bridge-level and real Codex-binary E2E coverage.
+- [x] Sync docs, SPEC references, and validation records.
