@@ -164,7 +164,7 @@ export default function (pi: ExtensionAPI) {{
     let pane_id = fixture.new_session(
         "alpha",
         &format!(
-            "zsh -lc 'cd {work_dir}; export PATH=\"{bin_dir}:$PATH\"; printf \"Pi hook loop ready\\n\"; while IFS= read -r line; do printf \"PROMPT:%s\\n\" \"$line\"; pi --no-session -e {extension} -p \"$line\"; printf \"__PI_DONE__\\n\"; done'",
+            "sh -lc 'cd {work_dir}; export PATH=\"{bin_dir}:$PATH\"; printf \"Pi hook loop ready\\n\"; while IFS= read -r line; do printf \"PROMPT:%s\\n\" \"$line\"; pi --no-session -e {extension} -p \"$line\"; printf \"__PI_DONE__\\n\"; done'",
             work_dir = shell_escape(work_dir.display().to_string().as_str()),
             bin_dir = shell_escape(bin_dir.display().to_string().as_str()),
             extension = shell_escape(extension_path.display().to_string().as_str()),

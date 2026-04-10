@@ -210,7 +210,7 @@ fn interactive_input_then_completion_transition_emits_notification() {
     let fixture = TmuxFixture::new();
     let pane_id = fixture.new_session(
         "alpha",
-        r#"zsh -lc 'print -r -- "Claude Code ready"; while IFS= read -r line; do print -r -- "INPUT:$line"; done'"#,
+        r#"sh -lc 'printf "%s\n" "Claude Code ready"; while IFS= read -r line; do printf "%s\n" "INPUT:$line"; done'"#,
     );
     fixture.wait_for_capture(&pane_id, "Claude Code ready");
     let beta_pane = fixture.new_session("beta", &fixture.shell_command("Claude Code ready"));

@@ -12,7 +12,7 @@ fn interactive_binary_renders_dashboard_and_sends_input_to_selected_agent() {
     let fixture = TmuxFixture::new();
     let agent_pane = fixture.new_session(
         "alpha",
-        r#"zsh -lc 'print -r -- "Claude Code ready"; while IFS= read -r line; do print -r -- "INPUT:$line"; done'"#,
+        r#"sh -lc 'printf "%s\n" "Claude Code ready"; while IFS= read -r line; do printf "%s\n" "INPUT:$line"; done'"#,
     );
     fixture.wait_for_capture(&agent_pane, "Claude Code ready");
 

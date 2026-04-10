@@ -19,8 +19,8 @@ description: >
 
 ## Notes
 
-- This checkout has no git remote configured, so GitHub PR creation cannot be
-  completed locally until a remote exists.
+- The repository now has `origin` configured at `safurrier/foreman`, and the
+  1.0 PR is open as `#1`.
 
 ## 2026-04-10
 
@@ -44,3 +44,29 @@ Notes:
   Docker dependency-cache layer depended directly on `Cargo.toml`. Adding
   `Cargo.docker.toml` fixed the cache invalidation path and restored a green
   Docker build.
+
+## 2026-04-10 10:55
+
+- `cargo test --test claude_native -- --nocapture`
+  - pass
+- `cargo test --test runtime_dashboard -- --nocapture`
+  - pass
+- `cargo test --test notification_runtime -- --nocapture`
+  - pass
+- `cargo test --test tmux_actions -- --nocapture`
+  - pass
+- `cargo test`
+  - pass
+- `mise run check`
+  - pass
+- `mise run verify`
+  - pass
+
+Notes:
+- The first GitHub Actions PR run failed on `ubuntu-latest` because the tmux
+  E2E fixture and several runtime smoke tests assumed `zsh`. That caused pane
+  commands to exit immediately on Linux and the tmux server to disappear before
+  capture.
+- The fix switched the shared tmux fixture and non-ignored runtime smoke tests
+  to portable `sh`/`printf` command strings and corrected helper quoting so the
+  keep-alive shell actually stays alive across platforms.

@@ -8,7 +8,7 @@ fn system_tmux_backend_sends_multiline_input_to_target_pane() {
     let fixture = TmuxFixture::new();
     let pane_id = fixture.new_session(
         "alpha",
-        r#"zsh -lc 'while IFS= read -r line; do print -r -- "INPUT:$line"; done'"#,
+        r#"sh -lc 'while IFS= read -r line; do printf "%s\n" "INPUT:$line"; done'"#,
     );
 
     let adapter = TmuxAdapter::new(SystemTmuxBackend::new(Some(

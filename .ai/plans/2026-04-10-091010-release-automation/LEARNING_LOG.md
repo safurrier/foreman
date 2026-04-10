@@ -47,3 +47,16 @@ the heavy gate stable again and also let the container image preserve the real
 The product and release automation work are ready for a PR, but this checkout
 has no git remote configured. That means push and `gh pr create` are blocked by
 repository plumbing, not by code or validation state.
+
+## 2026-04-10 10:55 - The tmux E2E harness had a hidden shell portability bug
+
+The first GitHub Actions run failed even though local validation was green.
+The app was fine; the failure was in the tmux test fixture and a few runtime
+tests that assumed `zsh` existed. On `ubuntu-latest`, those panes exited
+immediately, the tmux server shut down, and the tests reported "no server
+running".
+
+The fix was to make the fixture and the non-ignored tmux E2E commands use
+portable `sh` plus `printf`, and to tighten the quoting in the helper that
+keeps dashboard sessions alive. That made the same test layer work on both
+macOS and Linux instead of only on the local machine.

@@ -170,7 +170,7 @@ native_dir = "{native_dir}"
     .expect("config should be written");
 
     let agent_command = format!(
-        "zsh -lc 'export PATH=\"{}:$PATH\"; printf \"Claude hook loop ready\\n\"; while IFS= read -r line; do printf \"PROMPT:%s\\n\" \"$line\"; claude -p --settings \"{}\" \"$line\"; printf \"__CLAUDE_DONE__\\n\"; done'",
+        "sh -lc 'export PATH=\"{}:$PATH\"; printf \"Claude hook loop ready\\n\"; while IFS= read -r line; do printf \"PROMPT:%s\\n\" \"$line\"; claude -p --settings \"{}\" \"$line\"; printf \"__CLAUDE_DONE__\\n\"; done'",
         bin_dir.display(),
         settings_path.display(),
     );

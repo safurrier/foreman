@@ -102,15 +102,15 @@ impl TmuxFixture {
 
     pub fn shell_command(&self, line: &str) -> String {
         format!(
-            "zsh -lc \"printf '%s\\n' '{}'; exec sleep 60\"",
-            line.replace('\'', "")
+            "sh -lc \"printf '%s\\n' {}; exec sleep 60\"",
+            shell_escape(line)
         )
     }
 
     #[allow(dead_code)]
     pub fn keep_alive_command(&self, command: &str, sentinel: &str) -> String {
         format!(
-            "zsh -lc '{}; printf \"%s\\n\" {}; exec sleep 60'",
+            "sh -lc '{}; printf \"%s\\n\" {}; exec sleep 60'",
             command.replace('\'', r#"'\''"#),
             sentinel
         )
@@ -205,6 +205,10 @@ impl TmuxFixture {
             .trim()
             .to_string()
     }
+}
+
+fn shell_escape(input: &str) -> String {
+    format!("'{}'", input.replace('\'', r#"'\''"#))
 }
 
 impl Drop for TmuxFixture {
