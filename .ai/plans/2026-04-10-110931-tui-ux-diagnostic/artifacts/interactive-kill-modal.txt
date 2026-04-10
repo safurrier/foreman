@@ -1,0 +1,36 @@
+┌Header────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│Foreman | mode=CONFIRM KILL | focus=SIDEBAR | visible_targets=14 | cpu=182% mem=81% | pr=#1 OPEN | notify=MUTED       │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌* Sidebar──────────────────────────────┐┌Preview──────────────────────────────────────────────────────────────────────┐
+│  Session  beta                        ││Selected pane: M1-AFurrier                                                   │
+│  Window   beta-main                   ││Status: IDLE                                                                 │
+│  Pane     M1-AFurrier [ATTN]          ││Harness: ClaudeCode                                                          │
+│  Window   printf                      ││Command: bash                                                                │
+│> Pane     M1-AFurrier [IDLE]          ││                                                                             │
+│  Session  alpha                       ││Claude Code ready                                                            │
+│  Window   agents                      ││sh-3.2$                                                                      │
+│  Pane     M1-AFurrier┌Confirm Kill────────────────────────────────────────────────────────────┐                      │
+│  Session  dashboard  │Kill pane %6?                                                           │                      │
+│  Window   target/debu│                                                                        │                      │
+│  Pane     M1-AFurrier│Enter or y: confirm                                                     │                      │
+│  Session  gamma      │Esc or n: cancel                                                        │                      │
+│  Window   agents     │                                                                        │                      │
+│  Pane     M1-AFurrier│                                                                        │                      │
+│                      │                                                                        │                      │
+│                      │                                                                        │                      │
+│                      │                                                                        │                      │
+│                      │                                                                        │                      │
+│                      │                                                                        │                      │
+│                      │                                                                        │                      │
+│                      └────────────────────────────────────────────────────────────────────────┘──────────────────────┘
+│                                       │┌Input────────────────────────────────────────────────────────────────────────┐
+│                                       ││Direct input is available for the selected pane.                             │
+│                                       ││                                                                             │
+│                                       ││                                                                             │
+│                                       ││                                                                             │
+│                                       ││                                                                             │
+│                                       ││                                                                             │
+└───────────────────────────────────────┘└─────────────────────────────────────────────────────────────────────────────┘
+┌Footer────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│MODE: CONFIRM KILL | FOCUS: SIDEBAR | Enter/Y Confirm | Esc Cancel                                                    │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

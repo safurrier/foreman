@@ -361,6 +361,7 @@ mod tests {
     };
     use crate::services::pull_requests::{PullRequestData, PullRequestLookup, PullRequestStatus};
     use crate::services::system_stats::SystemStatsSnapshot;
+    use crate::ui::theme::ThemeName;
     use std::path::Path;
     use tempfile::tempdir;
 
@@ -389,6 +390,7 @@ mod tests {
             codex_integration_preference: IntegrationPreference::Auto,
             pi_integration_preference: IntegrationPreference::Auto,
             log_retention: 2,
+            theme: ThemeName::Catppuccin,
         }
     }
 

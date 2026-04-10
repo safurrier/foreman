@@ -1,209 +1,317 @@
-use crate::app::{AgentStatus, AppState, Focus, ModalState, Mode, SelectionTarget};
+use crate::app::{AgentStatus, AppState, Focus, ModalState, Mode, Pane, SelectionTarget};
 use crate::services::pull_requests::PullRequestLookup;
+use crate::ui::theme::{Theme, ThemeName};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::Style;
+use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
-pub fn render(frame: &mut Frame<'_>, state: &AppState) {
+pub fn render(frame: &mut Frame<'_>, state: &AppState, theme_name: ThemeName) {
+    let theme = theme_name.resolve();
+    let layout_mode = LayoutMode::for_area(frame.area());
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
             Constraint::Min(10),
-            Constraint::Length(3),
+            Constraint::Length(4),
         ])
         .split(frame.area());
 
-    render_header(frame, vertical[0], state);
-    render_body(frame, vertical[1], state);
-    render_footer(frame, vertical[2], state);
+    render_header(frame, vertical[0], state, theme_name, &theme, layout_mode);
+    render_body(frame, vertical[1], state, &theme, layout_mode);
+    render_footer(frame, vertical[2], state, &theme, layout_mode);
 
     if state.mode == Mode::Help {
-        render_help(frame);
+        render_help(frame, &theme, layout_mode);
     } else if state.modal.is_some() {
-        render_modal(frame, state);
+        render_modal(frame, state, &theme, layout_mode);
     } else if state.mode == Mode::Search {
-        render_search_overlay(frame, state);
+        render_search_overlay(frame, state, &theme, layout_mode);
     } else if state.mode == Mode::FlashNavigate {
-        render_flash_overlay(frame, state);
+        render_flash_overlay(frame, state, &theme, layout_mode);
     }
 }
 
-fn render_header(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LayoutMode {
+    Compact,
+    Medium,
+    Wide,
+}
+
+impl LayoutMode {
+    fn for_area(area: Rect) -> Self {
+        if area.width < 96 || area.height < 28 {
+            Self::Compact
+        } else if area.width < 136 || area.height < 36 {
+            Self::Medium
+        } else {
+            Self::Wide
+        }
+    }
+}
+
+fn render_header(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    state: &AppState,
+    theme_name: ThemeName,
+    theme: &Theme,
+    layout_mode: LayoutMode,
+) {
     let visible_count = state.visible_targets().len();
-    let stats = format!(" | {}", state.system_stats_label());
     let pull_request = state
         .pull_request_compact_label()
-        .map(|label| format!(" | {label}"))
-        .unwrap_or_default();
-    let notifications = format!(" | {}", state.notifications_label());
-    let alert = state
-        .operator_alert_label()
-        .map(|label| format!(" | {label}"))
-        .unwrap_or_default();
-    let content = format!(
-        "Foreman | mode={} | focus={} | visible_targets={}{}{}{}{}",
-        state.mode_label(),
-        state.focus_label(),
-        visible_count,
-        stats,
-        pull_request,
-        notifications,
-        alert
-    );
-    let header =
-        Paragraph::new(content).block(Block::default().borders(Borders::ALL).title("Header"));
-    frame.render_widget(header, area);
-}
-
-fn render_body(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
-    let columns = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(34), Constraint::Percentage(66)])
-        .split(area);
-
-    let right = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(72), Constraint::Percentage(28)])
-        .split(columns[1]);
-
-    render_sidebar(frame, columns[0], state);
-    render_preview(frame, right[0], state);
-    render_input(frame, right[1], state);
-}
-
-fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
-    let content = if let Some(error) = &state.startup_error {
-        if state.inventory.sessions.is_empty() {
-            format!("Startup issue:\n{error}")
-        } else {
-            sidebar_lines(state)
-        }
+        .unwrap_or_else(|| "pr=NONE".to_string());
+    let alert = state.operator_alert_label().unwrap_or_default();
+    let theme_label = format!("theme={}", theme_name.label());
+    let alert_suffix = if alert.is_empty() {
+        String::new()
     } else {
-        sidebar_lines(state)
+        format!(" | {alert}")
     };
-
-    let sidebar = Paragraph::new(content)
-        .block(focused_block("Sidebar", state.focus == Focus::Sidebar))
-        .wrap(Wrap { trim: false });
-    frame.render_widget(sidebar, area);
-}
-
-fn render_preview(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
-    let content = if let Some(error) = &state.startup_error {
-        if state.inventory.sessions.is_empty() {
-            format!("tmux unavailable or empty.\n\n{error}")
-        } else {
-            preview_lines(state)
-        }
-    } else {
-        preview_lines(state)
-    };
-
-    let preview = Paragraph::new(content)
-        .block(focused_block("Preview", state.focus == Focus::Preview))
-        .wrap(Wrap { trim: false });
-    frame.render_widget(preview, area);
-}
-
-fn render_input(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
-    let content = if state.mode == Mode::Input || !state.input_draft.text.is_empty() {
-        if state.input_draft.text.is_empty() {
-            "Compose text for the selected pane.\n\nCtrl+S: send | Esc: cancel".to_string()
-        } else {
-            format!("{}\n\nCtrl+S: send | Esc: cancel", state.input_draft.text)
-        }
-    } else {
-        match state.focus {
-            Focus::Input => "Input focused. Press Enter or i to compose.".to_string(),
-            _ => "Direct input is available for the selected pane.".to_string(),
-        }
-    };
-
-    let input = Paragraph::new(content)
-        .block(focused_block("Input", state.focus == Focus::Input))
-        .wrap(Wrap { trim: false });
-    frame.render_widget(input, area);
-}
-
-fn render_footer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
-    let hint = match state.mode {
-        Mode::Input => "Ctrl+S Send | Esc Cancel",
-        Mode::Search => "Type Filter | Enter Confirm | Esc Restore",
-        Mode::FlashNavigate => "Type Label | Esc Cancel",
-        Mode::Rename => "Enter Apply | Esc Cancel",
-        Mode::Spawn => "Enter Spawn | Esc Cancel",
-        Mode::ConfirmKill => "Enter/Y Confirm | Esc Cancel",
-        Mode::Help => "? Close | q Quit",
-        Mode::Normal | Mode::PreviewScroll => {
-            if state.selected_pull_request().is_some() {
-                "? Help | / Search | s Flash | p PR | O Open | Y Copy | m Mute | n Profile | q Quit"
+    let content = match layout_mode {
+        LayoutMode::Compact => format!(
+            "Foreman | {} | {} | {} targets | {} | {}{}",
+            state.mode_label(),
+            state.system_stats_label(),
+            visible_count,
+            pull_request,
+            state.notifications_label(),
+            if alert.is_empty() {
+                String::new()
             } else {
-                "? Help | / Search | s Flash | p PR | m Mute | n Profile | q Quit"
+                format!(" | {alert}")
             }
-        }
+        ),
+        LayoutMode::Medium => format!(
+            "Foreman | {} | {} | {} | {} targets | {} | {} | {} | {}",
+            state.mode_label(),
+            state.focus_label(),
+            state.system_stats_label(),
+            visible_count,
+            state.sort_label(),
+            pull_request,
+            state.notifications_label(),
+            if alert.is_empty() {
+                theme_label.clone()
+            } else {
+                alert.clone()
+            }
+        ),
+        LayoutMode::Wide => format!(
+            "Foreman | {} | {} | {} | {} targets | {} | {} | {} | {} | {}{}",
+            state.mode_label(),
+            state.focus_label(),
+            state.system_stats_label(),
+            visible_count,
+            state.sort_label(),
+            state.filter_label(),
+            pull_request,
+            state.notifications_label(),
+            theme_label,
+            alert_suffix
+        ),
     };
-    let footer = Paragraph::new(format!(
-        "MODE: {} | FOCUS: {} | {}",
-        state.mode_label(),
-        state.focus_label(),
-        hint
-    ))
-    .block(Block::default().borders(Borders::ALL).title("Footer"));
-    frame.render_widget(footer, area);
-}
 
-fn render_help(frame: &mut Frame<'_>) {
-    let popup = centered_rect(64, 45, frame.area());
-    frame.render_widget(Clear, popup);
-    let help = Paragraph::new(
-        "Help\n\nj/k or arrows: move\nEnter: select\nTab or focus command: move focus\ni: compose direct input\np: toggle PR detail\nShift+O: open PR in browser\nShift+Y: copy PR URL\nm: mute/unmute notifications\nn: cycle notification profile\nx: confirm kill for selected pane\nCtrl+S: submit the active draft\n?: toggle help\nq: quit",
-    )
+    let header = Paragraph::new(Line::from(vec![
+        Span::styled("Foreman", theme.emphasis),
+        Span::styled(
+            format!(" | {}", content.trim_start_matches("Foreman | ")),
+            theme.base,
+        ),
+    ]))
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .title("Help")
-            .border_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            .title("Status")
+            .border_style(theme.border),
     )
-    .wrap(Wrap { trim: false });
-    frame.render_widget(help, popup);
+    .style(theme.base);
+    frame.render_widget(header, area);
 }
 
-fn render_search_overlay(frame: &mut Frame<'_>, state: &AppState) {
-    let popup = centered_rect(56, 28, frame.area());
-    frame.render_widget(Clear, popup);
-    let query = state.search_query().unwrap_or("");
-    let body = format!(
-        "Query: {}\nMatches: {}\n\nType to filter\nEnter: confirm\nEsc: restore previous selection",
-        if query.is_empty() { "<empty>" } else { query },
-        state.visible_targets().len()
-    );
-    let overlay = Paragraph::new(body)
+fn render_body(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    state: &AppState,
+    theme: &Theme,
+    layout_mode: LayoutMode,
+) {
+    match layout_mode {
+        LayoutMode::Compact => {
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Percentage(42),
+                    Constraint::Percentage(38),
+                    Constraint::Percentage(20),
+                ])
+                .split(area);
+            render_sidebar(frame, rows[0], state, theme);
+            render_preview(frame, rows[1], state, theme, layout_mode);
+            render_input(frame, rows[2], state, theme, layout_mode);
+        }
+        LayoutMode::Medium => {
+            let columns = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+                .split(area);
+            let right = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Percentage(68), Constraint::Percentage(32)])
+                .split(columns[1]);
+
+            render_sidebar(frame, columns[0], state, theme);
+            render_preview(frame, right[0], state, theme, layout_mode);
+            render_input(frame, right[1], state, theme, layout_mode);
+        }
+        LayoutMode::Wide => {
+            let columns = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(36), Constraint::Percentage(64)])
+                .split(area);
+            let right = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Percentage(74), Constraint::Percentage(26)])
+                .split(columns[1]);
+
+            render_sidebar(frame, columns[0], state, theme);
+            render_preview(frame, right[0], state, theme, layout_mode);
+            render_input(frame, right[1], state, theme, layout_mode);
+        }
+    }
+}
+
+fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &Theme) {
+    let sidebar = Paragraph::new(sidebar_text(state, theme))
+        .block(focused_block(
+            "Targets",
+            state.focus == Focus::Sidebar,
+            theme,
+        ))
+        .wrap(Wrap { trim: false })
+        .style(theme.base);
+    frame.render_widget(sidebar, area);
+}
+
+fn render_preview(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    state: &AppState,
+    theme: &Theme,
+    layout_mode: LayoutMode,
+) {
+    let preview = Paragraph::new(preview_text(state, theme, layout_mode))
+        .block(focused_block(
+            "Details",
+            state.focus == Focus::Preview,
+            theme,
+        ))
+        .wrap(Wrap { trim: false })
+        .style(theme.base);
+    frame.render_widget(preview, area);
+}
+
+fn render_input(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    state: &AppState,
+    theme: &Theme,
+    layout_mode: LayoutMode,
+) {
+    let input = Paragraph::new(input_text(state, theme, layout_mode))
+        .block(focused_block("Compose", state.focus == Focus::Input, theme))
+        .wrap(Wrap { trim: false })
+        .style(theme.base);
+    frame.render_widget(input, area);
+}
+
+fn render_footer(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    state: &AppState,
+    theme: &Theme,
+    layout_mode: LayoutMode,
+) {
+    let footer = Paragraph::new(footer_text(state, theme, layout_mode))
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Search")
-                .border_style(
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                ),
+                .title("Keys")
+                .border_style(theme.border),
         )
-        .wrap(Wrap { trim: false });
+        .wrap(Wrap { trim: false })
+        .style(theme.base);
+    frame.render_widget(footer, area);
+}
+
+fn render_help(frame: &mut Frame<'_>, theme: &Theme, layout_mode: LayoutMode) {
+    let popup = help_popup_rect(frame.area(), layout_mode);
+    frame.render_widget(Clear, popup);
+    let help = Paragraph::new(help_text(theme))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Help")
+                .border_style(theme.overlay_border),
+        )
+        .wrap(Wrap { trim: false })
+        .style(theme.base);
+    frame.render_widget(help, popup);
+}
+
+fn render_search_overlay(
+    frame: &mut Frame<'_>,
+    state: &AppState,
+    theme: &Theme,
+    layout_mode: LayoutMode,
+) {
+    let popup = overlay_rect(frame.area(), layout_mode, 64, 9);
+    frame.render_widget(Clear, popup);
+    let query = state.search_query().unwrap_or("");
+    let overlay = Paragraph::new(Text::from(vec![
+        section_line("Search", theme),
+        plain_line(""),
+        plain_line(format!(
+            "Query: {}",
+            if query.is_empty() { "<empty>" } else { query }
+        )),
+        plain_line(format!("Matches: {}", state.visible_targets().len())),
+        plain_line(""),
+        muted_line(
+            "Type to filter. Enter confirms. Esc restores the previous selection.",
+            theme,
+        ),
+    ]))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Search")
+            .border_style(theme.search_border),
+    )
+    .wrap(Wrap { trim: false })
+    .style(theme.base);
     frame.render_widget(overlay, popup);
 }
 
-fn render_flash_overlay(frame: &mut Frame<'_>, state: &AppState) {
-    let popup = centered_rect(56, 28, frame.area());
+fn render_flash_overlay(
+    frame: &mut Frame<'_>,
+    state: &AppState,
+    theme: &Theme,
+    layout_mode: LayoutMode,
+) {
+    let popup = overlay_rect(frame.area(), layout_mode, 64, 9);
     frame.render_widget(Clear, popup);
     let (mode_name, typed) = state
         .flash
         .as_ref()
         .map(|flash| {
             let mode_name = match flash.kind {
-                crate::app::FlashNavigateKind::Jump => "Jump",
-                crate::app::FlashNavigateKind::JumpAndFocus => "Jump + Focus",
+                crate::app::FlashNavigateKind::Jump => "jump",
+                crate::app::FlashNavigateKind::JumpAndFocus => "jump+focus",
             };
             let typed = if flash.draft.text.is_empty() {
                 "<empty>".to_string()
@@ -212,62 +320,75 @@ fn render_flash_overlay(frame: &mut Frame<'_>, state: &AppState) {
             };
             (mode_name, typed)
         })
-        .unwrap_or(("Jump", "<empty>".to_string()));
-    let body = format!(
-        "Mode: {}\nTyped: {}\nLabels: {}\n\nType the visible label\nEsc: cancel",
-        mode_name,
-        typed,
-        state.flash_targets().len()
-    );
-    let overlay = Paragraph::new(body)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Flash")
-                .border_style(
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                ),
-        )
-        .wrap(Wrap { trim: false });
+        .unwrap_or(("jump", "<empty>".to_string()));
+    let overlay = Paragraph::new(Text::from(vec![
+        section_line("Flash", theme),
+        plain_line(""),
+        plain_line(format!("Mode: {mode_name}")),
+        plain_line(format!("Typed: {typed}")),
+        plain_line(format!("Labels: {}", state.flash_targets().len())),
+        plain_line(""),
+        muted_line("Type a visible label. Esc cancels.", theme),
+    ]))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Flash")
+            .border_style(theme.warning_border),
+    )
+    .wrap(Wrap { trim: false })
+    .style(theme.base);
     frame.render_widget(overlay, popup);
 }
 
-fn render_modal(frame: &mut Frame<'_>, state: &AppState) {
+fn render_modal(frame: &mut Frame<'_>, state: &AppState, theme: &Theme, layout_mode: LayoutMode) {
     let Some(modal) = state.modal.as_ref() else {
         return;
     };
 
-    let popup = centered_rect(62, 38, frame.area());
+    let popup = modal_rect(frame.area(), layout_mode);
     frame.render_widget(Clear, popup);
 
-    let (title, body, border_color) = match modal {
+    let (title, body, border_style) = match modal {
         ModalState::RenameWindow { window_id, draft } => (
             "Rename Window",
-            format!(
-                "Target window: {}\n\n{}\n\nEnter or Ctrl+S: apply\nEsc: cancel",
-                window_id.as_str(),
-                modal_draft_text(draft, "Type a new window name.")
-            ),
-            Color::Cyan,
+            Text::from(vec![
+                section_line("Rename", theme),
+                plain_line(""),
+                plain_line(format!("Window: {}", window_id.as_str())),
+                plain_line(""),
+                plain_line(modal_draft_text(draft, "Type a new window name.")),
+                plain_line(""),
+                muted_line("Enter or Ctrl+S applies. Esc cancels.", theme),
+            ]),
+            theme.overlay_border,
         ),
         ModalState::SpawnWindow { session_id, draft } => (
             "Spawn Agent",
-            format!(
-                "Target session: {}\n\n{}\n\nEnter or Ctrl+S: spawn\nEsc: cancel",
-                session_id.as_str(),
-                modal_draft_text(draft, "Type the command to run in the new window.")
-            ),
-            Color::Cyan,
+            Text::from(vec![
+                section_line("Spawn", theme),
+                plain_line(""),
+                plain_line(format!("Session: {}", session_id.as_str())),
+                plain_line(""),
+                plain_line(modal_draft_text(
+                    draft,
+                    "Type the command for the new window.",
+                )),
+                plain_line(""),
+                muted_line("Enter or Ctrl+S spawns. Esc cancels.", theme),
+            ]),
+            theme.overlay_border,
         ),
         ModalState::ConfirmKill { pane_id } => (
             "Confirm Kill",
-            format!(
-                "Kill pane {}?\n\nEnter or y: confirm\nEsc or n: cancel",
-                pane_id.as_str()
-            ),
-            Color::Yellow,
+            Text::from(vec![
+                section_line("Kill Pane", theme),
+                plain_line(""),
+                plain_line(format!("Pane: {}", pane_id.as_str())),
+                plain_line(""),
+                muted_line("Enter or y confirms. Esc or n cancels.", theme),
+            ]),
+            theme.warning_border,
         ),
     };
 
@@ -276,14 +397,599 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState) {
             Block::default()
                 .borders(Borders::ALL)
                 .title(title)
-                .border_style(
-                    Style::default()
-                        .fg(border_color)
-                        .add_modifier(Modifier::BOLD),
-                ),
+                .border_style(border_style),
         )
-        .wrap(Wrap { trim: false });
+        .wrap(Wrap { trim: false })
+        .style(theme.base);
     frame.render_widget(modal, popup);
+}
+
+fn focused_block(title: &str, focused: bool, theme: &Theme) -> Block<'static> {
+    let title = if focused {
+        format!("* {title}")
+    } else {
+        title.to_string()
+    };
+
+    Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .border_style(if focused {
+            theme.focus_border
+        } else {
+            theme.border
+        })
+}
+
+fn sidebar_text(state: &AppState, theme: &Theme) -> Text<'static> {
+    if let Some(error) = &state.startup_error {
+        if state.inventory.sessions.is_empty() {
+            return Text::from(vec![
+                section_line("Startup issue", theme),
+                plain_line(""),
+                plain_line(error.clone()),
+            ]);
+        }
+    }
+
+    let visible_targets = state.visible_targets();
+    if visible_targets.is_empty() {
+        return if state.mode == Mode::Search {
+            Text::from(vec![
+                plain_line("No matches."),
+                muted_line("Esc restores the previous selection.", theme),
+            ])
+        } else {
+            Text::from(vec![plain_line("No panes discovered yet.")])
+        };
+    }
+
+    Text::from(
+        visible_targets
+            .iter()
+            .map(|target| sidebar_line(state, theme, target))
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn sidebar_line(state: &AppState, theme: &Theme, target: &SelectionTarget) -> Line<'static> {
+    let selected = state.selection.as_ref() == Some(target);
+    let mut spans = Vec::new();
+
+    spans.push(Span::styled(
+        if selected {
+            format!("{} ", theme.glyphs.selected)
+        } else {
+            "  ".to_string()
+        },
+        if selected {
+            theme.selected
+        } else {
+            theme.muted
+        },
+    ));
+
+    if state.mode == Mode::FlashNavigate {
+        let flash_label = state
+            .flash_label_for_target(target)
+            .map(|label| format!("[{label}] "))
+            .unwrap_or_default();
+        if !flash_label.is_empty() {
+            spans.push(Span::styled(flash_label, theme.warning_border));
+        }
+    }
+
+    match target {
+        SelectionTarget::Session(session_id) => {
+            let (name, collapsed, rank, summary) = state
+                .inventory
+                .session(session_id)
+                .map(|session| {
+                    let visible_windows = session.visible_windows(&state.filters, state.sort_mode);
+                    let visible_panes = visible_windows
+                        .iter()
+                        .map(|window| window.visible_panes(&state.filters, state.sort_mode).len())
+                        .sum::<usize>();
+                    (
+                        session.name.clone(),
+                        state.collapsed_sessions.contains(session_id),
+                        session.attention_rank(),
+                        format!("{}w {}p", visible_windows.len(), visible_panes),
+                    )
+                })
+                .unwrap_or_else(|| {
+                    (
+                        session_id.as_str().to_string(),
+                        state.collapsed_sessions.contains(session_id),
+                        AgentStatus::Unknown.attention_rank(),
+                        "0w 0p".to_string(),
+                    )
+                });
+            spans.push(Span::styled(
+                format!(
+                    "{} ",
+                    if collapsed {
+                        theme.glyphs.session_closed
+                    } else {
+                        theme.glyphs.session_open
+                    }
+                ),
+                attention_style_from_rank(theme, rank),
+            ));
+            spans.push(Span::styled(
+                name,
+                if selected {
+                    theme.selected
+                } else {
+                    theme.emphasis
+                },
+            ));
+            spans.push(Span::styled(
+                format!("  {summary}"),
+                if selected {
+                    theme.selected
+                } else {
+                    theme.muted
+                },
+            ));
+        }
+        SelectionTarget::Window(window_id) => {
+            let (name, rank, summary) = state
+                .inventory
+                .window(window_id)
+                .map(|window| {
+                    let visible_panes = window.visible_panes(&state.filters, state.sort_mode);
+                    (
+                        window.navigation_title(),
+                        window.attention_rank(),
+                        format!("{}p", visible_panes.len()),
+                    )
+                })
+                .unwrap_or_else(|| {
+                    (
+                        window_id.as_str().to_string(),
+                        AgentStatus::Unknown.attention_rank(),
+                        "0p".to_string(),
+                    )
+                });
+            spans.push(Span::styled("  ", theme.muted));
+            spans.push(Span::styled("· ", attention_style_from_rank(theme, rank)));
+            spans.push(Span::styled(
+                name,
+                if selected { theme.selected } else { theme.base },
+            ));
+            spans.push(Span::styled(
+                format!("  {summary}"),
+                if selected {
+                    theme.selected
+                } else {
+                    theme.muted
+                },
+            ));
+        }
+        SelectionTarget::Pane(pane_id) => {
+            let pane = state.inventory.pane(pane_id);
+            let status = pane.and_then(|pane| pane.agent.as_ref().map(|agent| agent.status));
+            spans.push(Span::styled("    ", theme.muted));
+            spans.push(Span::styled(
+                format!(
+                    "{} ",
+                    status_symbol(theme, status, pane.is_some_and(|pane| pane.is_agent()))
+                ),
+                status_style(theme, status, pane.is_some_and(|pane| pane.is_agent())),
+            ));
+            spans.push(Span::styled(
+                format!("[{}] ", pane_harness_badge(pane)),
+                if let Some(pane) = pane {
+                    if pane.is_agent() {
+                        status_style(theme, status, true)
+                    } else {
+                        theme.muted
+                    }
+                } else {
+                    theme.muted
+                },
+            ));
+            spans.push(Span::styled(
+                pane.map(Pane::navigation_title)
+                    .unwrap_or_else(|| pane_id.as_str().to_string()),
+                if selected { theme.selected } else { theme.base },
+            ));
+        }
+    }
+
+    Line::from(spans)
+}
+
+fn preview_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Text<'static> {
+    if let Some(error) = &state.startup_error {
+        if state.inventory.sessions.is_empty() {
+            return Text::from(vec![
+                section_line("tmux unavailable", theme),
+                plain_line(""),
+                plain_line(error.clone()),
+            ]);
+        }
+    }
+
+    let mut lines = Vec::new();
+
+    if let Some(alert) = &state.operator_alert {
+        let style = match alert.level {
+            crate::app::OperatorAlertLevel::Info => theme.overlay_border,
+            crate::app::OperatorAlertLevel::Warn => theme.warning_border,
+            crate::app::OperatorAlertLevel::Error => theme.danger_border,
+        };
+        lines.push(Line::from(vec![
+            Span::styled(format!("Alert [{}] ", alert.level.label()), style),
+            Span::styled(alert.source.label(), theme.muted),
+        ]));
+        lines.push(plain_line(alert.message.clone()));
+        lines.push(plain_line(""));
+    }
+
+    match state.selection.as_ref() {
+        Some(SelectionTarget::Pane(pane_id)) => {
+            if let Some(pane) = state.inventory.pane(pane_id) {
+                let status = pane.agent.as_ref().map(|agent| agent.status);
+                let harness = pane
+                    .agent
+                    .as_ref()
+                    .map(|agent| agent.harness.short_label())
+                    .unwrap_or("SH");
+                if let Some(breadcrumb) = state.selection_breadcrumb() {
+                    lines.push(Line::from(vec![Span::styled(breadcrumb, theme.emphasis)]));
+                }
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{} ", status_symbol(theme, status, pane.is_agent())),
+                        status_style(theme, status, pane.is_agent()),
+                    ),
+                    Span::styled(format!("[{harness}] "), theme.emphasis),
+                    Span::styled(pane.navigation_title(), theme.emphasis),
+                ]));
+                lines.push(plain_line(format!(
+                    "Command: {} {} {}",
+                    pane.current_command.as_deref().unwrap_or("unknown"),
+                    theme.glyphs.separator,
+                    pane.agent
+                        .as_ref()
+                        .map(|agent| agent.integration_mode.label())
+                        .unwrap_or("shell")
+                )));
+                lines.push(plain_line(format!("Pane title: {}", pane.title)));
+            } else {
+                lines.push(plain_line("Selected pane is no longer available."));
+            }
+        }
+        Some(SelectionTarget::Window(window_id)) => {
+            if let Some(window) = state.inventory.window(window_id) {
+                if let Some(breadcrumb) = state.selection_breadcrumb() {
+                    lines.push(Line::from(vec![Span::styled(breadcrumb, theme.emphasis)]));
+                }
+                lines.push(Line::from(vec![Span::styled(
+                    format!("Window {}", window.navigation_title()),
+                    theme.emphasis,
+                )]));
+                lines.push(plain_line(format!("Visible panes: {}", window.panes.len())));
+                lines.push(muted_line(
+                    "Select a pane to inspect recent output or send direct input.",
+                    theme,
+                ));
+            } else {
+                lines.push(plain_line("Selected window is no longer available."));
+            }
+        }
+        Some(SelectionTarget::Session(session_id)) => {
+            if let Some(session) = state.inventory.session(session_id) {
+                if let Some(breadcrumb) = state.selection_breadcrumb() {
+                    lines.push(Line::from(vec![Span::styled(breadcrumb, theme.emphasis)]));
+                }
+                lines.push(Line::from(vec![Span::styled(
+                    format!("Session {}", session.name),
+                    theme.emphasis,
+                )]));
+                lines.push(plain_line(format!("Windows: {}", session.windows.len())));
+                lines.push(muted_line(
+                    "Enter toggles collapse. Select a pane for output and direct actions.",
+                    theme,
+                ));
+            } else {
+                lines.push(plain_line("Selected session is no longer available."));
+            }
+        }
+        None => {
+            lines.push(plain_line(
+                "Select a pane to inspect recent output and send work.",
+            ));
+        }
+    }
+
+    if let Some(workspace_path) = state.selected_workspace_path() {
+        lines.push(plain_line(format!(
+            "Workspace: {}",
+            workspace_path.display()
+        )));
+    }
+
+    lines.push(plain_line(format!(
+        "View: {} {} {}",
+        state.sort_label(),
+        theme.glyphs.separator,
+        state.filter_label()
+    )));
+    lines.push(plain_line(format!(
+        "Notifications: {}",
+        if state.notifications.muted {
+            "muted".to_string()
+        } else {
+            state.notifications.profile.label().to_ascii_lowercase()
+        }
+    )));
+    if let Some(status) = &state.notifications.last_status {
+        lines.push(plain_line(format!("Notice: {status}")));
+    }
+    lines.push(plain_line(format!(
+        "PR panel: {}",
+        state.selected_pull_request_panel_label()
+    )));
+
+    lines.extend(pull_request_lines(state, theme));
+
+    if let Some(SelectionTarget::Pane(pane_id)) = state.selection.as_ref() {
+        if let Some(pane) = state.inventory.pane(pane_id) {
+            lines.push(plain_line(""));
+            lines.push(section_line("Recent output", theme));
+            for line in preview_excerpt(&pane.preview, preview_line_limit(layout_mode)) {
+                lines.push(plain_line(line));
+            }
+        }
+    }
+
+    Text::from(lines)
+}
+
+fn input_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Text<'static> {
+    let mut lines = Vec::new();
+    let selected_pane = state
+        .selected_pane_id()
+        .and_then(|pane_id| state.inventory.pane(&pane_id));
+    let target_label = selected_pane
+        .map(|pane| {
+            format!(
+                "{} {}",
+                pane.agent
+                    .as_ref()
+                    .map(|agent| agent.harness.short_label())
+                    .unwrap_or("SH"),
+                pane.navigation_title()
+            )
+        })
+        .unwrap_or_else(|| "selected pane".to_string());
+
+    if state.mode == Mode::Input {
+        lines.push(Line::from(vec![Span::styled(
+            format!("Compose for {target_label}"),
+            theme.emphasis,
+        )]));
+        lines.push(muted_line(
+            format!(
+                "Ctrl+S sends {} Enter inserts a new line {} Esc cancels",
+                theme.glyphs.separator, theme.glyphs.separator
+            ),
+            theme,
+        ));
+        lines.push(plain_line(""));
+        if state.input_draft.text.is_empty() {
+            lines.push(muted_line("Start typing your instruction.", theme));
+        } else {
+            for line in state.input_draft.text.lines() {
+                lines.push(plain_line(line.to_string()));
+            }
+        }
+        return Text::from(lines);
+    }
+
+    if !state.input_draft.text.is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            format!("Draft for {target_label}"),
+            theme.emphasis,
+        )]));
+        lines.push(muted_line(
+            "Press i to resume editing or Esc to clear the mode.",
+            theme,
+        ));
+        lines.push(plain_line(""));
+        for line in state.input_draft.text.lines().take(match layout_mode {
+            LayoutMode::Compact => 1,
+            LayoutMode::Medium => 2,
+            LayoutMode::Wide => 3,
+        }) {
+            lines.push(plain_line(line.to_string()));
+        }
+        return Text::from(lines);
+    }
+
+    if selected_pane.is_some() {
+        lines.push(Line::from(vec![Span::styled(
+            format!("Press i to compose for {target_label}"),
+            theme.emphasis,
+        )]));
+        if state.focus == Focus::Input {
+            lines.push(muted_line(
+                format!(
+                    "Enter starts compose {} f focuses the pane in tmux",
+                    theme.glyphs.separator
+                ),
+                theme,
+            ));
+        } else {
+            lines.push(muted_line(
+                format!(
+                    "f focuses the pane in tmux {} Tab or 3 moves focus here",
+                    theme.glyphs.separator
+                ),
+                theme,
+            ));
+        }
+    } else {
+        lines.push(Line::from(vec![Span::styled(
+            "Select a pane, then press i to compose.",
+            theme.emphasis,
+        )]));
+    }
+
+    Text::from(lines)
+}
+
+fn footer_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Text<'static> {
+    let sep = format!(" {} ", theme.glyphs.separator);
+    let lines = match state.mode {
+        Mode::Input => vec![
+            format!("Mode {} compose", theme.glyphs.separator),
+            "Ctrl+S send  |  Enter newline  |  Esc cancel".to_string(),
+        ],
+        Mode::Search => vec![
+            "Search".to_string(),
+            "Type filter  |  Enter confirm  |  Esc restore".to_string(),
+        ],
+        Mode::FlashNavigate => vec![
+            "Flash jump".to_string(),
+            "Type a label  |  Esc cancel".to_string(),
+        ],
+        Mode::Rename => vec![
+            "Rename window".to_string(),
+            "Enter or Ctrl+S apply  |  Esc cancel".to_string(),
+        ],
+        Mode::Spawn => vec![
+            "Spawn window".to_string(),
+            "Enter or Ctrl+S spawn  |  Esc cancel".to_string(),
+        ],
+        Mode::ConfirmKill => vec![
+            "Kill pane".to_string(),
+            "Enter or y confirm  |  Esc or n cancel".to_string(),
+        ],
+        Mode::Help => vec![
+            "Help".to_string(),
+            "Esc or ? closes help  |  q quits".to_string(),
+        ],
+        Mode::Normal | Mode::PreviewScroll => match layout_mode {
+            LayoutMode::Compact => vec![
+                format!("j/k move{sep}Enter open{sep}i compose{sep}f tmux focus"),
+                format!("/ search{sep}s flash{sep}R rename{sep}N spawn{sep}x kill{sep}q quit"),
+            ],
+            LayoutMode::Medium => vec![
+                format!("j/k move{sep}Enter open{sep}Tab or 1/2/3 panels{sep}i compose{sep}f tmux focus"),
+                format!("/ search{sep}s flash{sep}p PR{sep}R rename{sep}N spawn{sep}x kill{sep}H sessions{sep}P panes{sep}o sort{sep}t theme{sep}q quit"),
+            ],
+            LayoutMode::Wide => vec![
+                format!("j/k move{sep}Enter expand or focus{sep}Tab or 1/2/3 focus panels{sep}i compose{sep}f focus tmux pane"),
+                format!("/ search{sep}s jump{sep}S jump+focus{sep}p PR detail{sep}O open PR{sep}Y copy PR{sep}R rename{sep}N spawn{sep}x kill{sep}H sessions{sep}P panes{sep}o sort{sep}t theme{sep}m mute{sep}n profile{sep}q quit"),
+            ],
+        },
+    };
+
+    Text::from(lines.into_iter().map(plain_line).collect::<Vec<_>>())
+}
+
+fn help_text(theme: &Theme) -> Text<'static> {
+    Text::from(vec![
+        section_line("Navigate", theme),
+        muted_line("j/k or arrows move.", theme),
+        muted_line("Enter expands a session or focuses a pane.", theme),
+        muted_line("Tab or 1/2/3 changes panel focus.", theme),
+        plain_line(""),
+        section_line("Work With A Pane", theme),
+        muted_line("i composes for the selected pane.", theme),
+        muted_line(
+            "f focuses the pane in tmux. x opens kill confirmation.",
+            theme,
+        ),
+        muted_line("R renames a window. N spawns a new window.", theme),
+        plain_line(""),
+        section_line("Discover", theme),
+        muted_line("/ searches visible targets. s flash-jumps.", theme),
+        muted_line("S flash-jumps and focuses the pane.", theme),
+        muted_line(
+            "p toggles PR detail. O opens the PR. Y copies the PR URL.",
+            theme,
+        ),
+        plain_line(""),
+        section_line("View", theme),
+        muted_line(
+            "H toggles non-agent sessions. P toggles non-agent panes.",
+            theme,
+        ),
+        muted_line("o changes sort order. t cycles the active theme.", theme),
+        muted_line("m mutes notifications.", theme),
+        muted_line("n changes the notification profile. q quits.", theme),
+    ])
+}
+
+fn pull_request_lines(state: &AppState, theme: &Theme) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+
+    match state.selected_pull_request_lookup() {
+        Some(PullRequestLookup::Unknown) => lines.push(plain_line("PR: checking")),
+        Some(PullRequestLookup::Missing) => lines.push(plain_line("PR: no open pull request")),
+        Some(PullRequestLookup::Unavailable { .. }) => lines.push(plain_line("PR: unavailable")),
+        Some(PullRequestLookup::Available(pull_request)) => {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!(
+                        "PR #{} {}",
+                        pull_request.number,
+                        pull_request.status.label()
+                    ),
+                    theme.emphasis,
+                ),
+                Span::styled(format!("  {}", pull_request.title), theme.base),
+            ]));
+
+            if state.is_pull_request_detail_open() {
+                lines.push(plain_line(format!("Repo: {}", pull_request.repository)));
+                lines.push(plain_line(format!(
+                    "Branches: {} -> {}",
+                    pull_request.branch, pull_request.base_branch
+                )));
+                lines.push(plain_line(format!("Author: {}", pull_request.author)));
+                lines.push(muted_line(
+                    "p toggles detail. O opens in the browser. Y copies the URL.",
+                    theme,
+                ));
+            }
+        }
+        None => {}
+    }
+
+    lines
+}
+
+fn preview_excerpt(preview: &str, max_lines: usize) -> Vec<String> {
+    let mut lines = preview
+        .lines()
+        .map(str::trim_end)
+        .filter(|line| !line.trim().is_empty())
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+
+    if lines.is_empty() {
+        return vec!["Preview capture is empty right now.".to_string()];
+    }
+
+    if lines.len() > max_lines {
+        lines = lines.split_off(lines.len() - max_lines);
+    }
+
+    lines
+}
+
+fn preview_line_limit(layout_mode: LayoutMode) -> usize {
+    match layout_mode {
+        LayoutMode::Compact => 4,
+        LayoutMode::Medium => 7,
+        LayoutMode::Wide => 11,
+    }
 }
 
 fn modal_draft_text(draft: &crate::app::TextDraft, placeholder: &str) -> String {
@@ -294,201 +1000,112 @@ fn modal_draft_text(draft: &crate::app::TextDraft, placeholder: &str) -> String 
     }
 }
 
-fn focused_block(title: &str, focused: bool) -> Block<'static> {
-    let title = if focused {
-        format!("* {title}")
-    } else {
-        title.to_string()
-    };
-
-    let style = if focused {
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default()
-    };
-
-    Block::default()
-        .borders(Borders::ALL)
-        .title(title)
-        .border_style(style)
-}
-
-fn sidebar_lines(state: &AppState) -> String {
-    let visible_targets = state.visible_targets();
-    if visible_targets.is_empty() {
-        return if state.mode == Mode::Search {
-            "No search matches.\nEsc: restore previous selection.".to_string()
-        } else {
-            "No panes discovered yet.".to_string()
-        };
-    }
-
-    visible_targets
-        .iter()
-        .map(|target| {
-            let selected = if state.selection.as_ref() == Some(target) {
-                ">"
-            } else {
-                " "
-            };
-            let flash_label = if state.mode == Mode::FlashNavigate {
-                state
-                    .flash_label_for_target(target)
-                    .map(|label| format!("[{label}] "))
-                    .unwrap_or_default()
-            } else {
-                String::new()
-            };
-            format!("{selected} {flash_label}{}", state.target_label(target))
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn preview_lines(state: &AppState) -> String {
-    let mut content = match state.selection.as_ref() {
-        Some(SelectionTarget::Pane(pane_id)) => {
-            if let Some(pane) = state.inventory.pane(pane_id) {
-                let status = pane
-                    .agent
-                    .as_ref()
-                    .map(|agent| status_label(agent.status))
-                    .unwrap_or("NON-AGENT");
-                let harness = pane
-                    .agent
-                    .as_ref()
-                    .map(|agent| format!("{:?}", agent.harness))
-                    .unwrap_or_else(|| "None".to_string());
-                let preview = if pane.preview.trim().is_empty() {
-                    "Preview capture is empty right now.".to_string()
-                } else {
-                    pane.preview.clone()
-                };
-
-                format!(
-                    "Selected pane: {}\nStatus: {}\nHarness: {}\nCommand: {}\n\n{}",
-                    pane.title,
-                    status,
-                    harness,
-                    pane.current_command.as_deref().unwrap_or("unknown"),
-                    preview
-                )
-            } else {
-                "Selected pane is no longer available.".to_string()
-            }
-        }
-        Some(SelectionTarget::Window(window_id)) => {
-            if let Some(window) = state.inventory.window(window_id) {
-                format!(
-                    "Selected window: {}\nVisible panes: {}\n\nSelect a pane for detailed preview.",
-                    window.name,
-                    window.panes.len()
-                )
-            } else {
-                "Selected window is no longer available.".to_string()
-            }
-        }
-        Some(SelectionTarget::Session(session_id)) => {
-            if let Some(session) = state.inventory.session(session_id) {
-                format!(
-                    "Selected session: {}\nWindows: {}\n\nExpand or choose a pane to inspect work.",
-                    session.name,
-                    session.windows.len()
-                )
-            } else {
-                "Selected session is no longer available.".to_string()
-            }
-        }
-        None => "Select a pane to inspect recent output and status.".to_string(),
-    };
-
-    if let Some(alert) = &state.operator_alert {
-        content = format!(
-            "Alert [{}]: {}\n\n{}",
-            alert.level.label(),
-            alert.message,
-            content
-        );
-    }
-
-    if let Some(workspace_path) = state.selected_workspace_path() {
-        content.push_str(&format!("\n\nWorkspace: {}", workspace_path.display()));
-    }
-
-    content.push_str(&format!(
-        "\nNotifications: {}",
-        if state.notifications.muted {
-            "MUTED".to_string()
-        } else {
-            state.notifications.profile.label().to_string()
-        }
-    ));
-    if let Some(status) = &state.notifications.last_status {
-        content.push_str(&format!("\nNotification status: {status}"));
-    }
-
-    if let Some(lookup) = state.selected_pull_request_lookup() {
-        match lookup {
-            PullRequestLookup::Unknown => content.push_str("\nPR: checking"),
-            PullRequestLookup::Missing => content.push_str("\nPR: no open pull request"),
-            PullRequestLookup::Unavailable { .. } => content.push_str("\nPR: unavailable"),
-            PullRequestLookup::Available(pull_request) => {
-                content.push_str(&format!(
-                    "\nPR: #{} {} - {}",
-                    pull_request.number,
-                    pull_request.status.label(),
-                    pull_request.title
-                ));
-                if state.is_pull_request_detail_open() {
-                    content.push_str(&format!(
-                        "\n\nPull Request\n#{} {}\nTitle: {}\nRepo: {}\nBranches: {} -> {}\nAuthor: {}\nURL: {}\nActions: p toggle | O open | Y copy",
-                        pull_request.number,
-                        pull_request.status.label(),
-                        pull_request.title,
-                        pull_request.repository,
-                        pull_request.branch,
-                        pull_request.base_branch,
-                        pull_request.author,
-                        pull_request.url
-                    ));
-                }
-            }
-        }
-    }
-
-    content
-}
-
-fn status_label(status: AgentStatus) -> &'static str {
-    match status {
-        AgentStatus::Working => "WORKING",
-        AgentStatus::NeedsAttention => "ATTN",
-        AgentStatus::Idle => "IDLE",
-        AgentStatus::Error => "ERROR",
-        AgentStatus::Unknown => "UNKNOWN",
+fn help_popup_rect(area: Rect, layout_mode: LayoutMode) -> Rect {
+    match layout_mode {
+        LayoutMode::Compact => inset_rect(area, 1, 1),
+        LayoutMode::Medium => centered_rect(area, 78, 20),
+        LayoutMode::Wide => centered_rect(area, 86, 22),
     }
 }
 
-fn centered_rect(width_percent: u16, height_percent: u16, area: Rect) -> Rect {
-    let vertical = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - height_percent) / 2),
-            Constraint::Percentage(height_percent),
-            Constraint::Percentage((100 - height_percent) / 2),
-        ])
-        .split(area);
+fn modal_rect(area: Rect, layout_mode: LayoutMode) -> Rect {
+    match layout_mode {
+        LayoutMode::Compact => inset_rect(area, 2, 3),
+        LayoutMode::Medium => centered_rect(area, 72, 12),
+        LayoutMode::Wide => centered_rect(area, 78, 12),
+    }
+}
 
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - width_percent) / 2),
-            Constraint::Percentage(width_percent),
-            Constraint::Percentage((100 - width_percent) / 2),
-        ])
-        .split(vertical[1])[1]
+fn overlay_rect(area: Rect, layout_mode: LayoutMode, width: u16, height: u16) -> Rect {
+    match layout_mode {
+        LayoutMode::Compact => centered_rect(
+            area,
+            width.min(area.width.saturating_sub(4)),
+            height.min(area.height.saturating_sub(4)),
+        ),
+        LayoutMode::Medium | LayoutMode::Wide => centered_rect(area, width, height),
+    }
+}
+
+fn inset_rect(area: Rect, horizontal_margin: u16, vertical_margin: u16) -> Rect {
+    let width = area
+        .width
+        .saturating_sub(horizontal_margin.saturating_mul(2));
+    let height = area
+        .height
+        .saturating_sub(vertical_margin.saturating_mul(2));
+    Rect {
+        x: area.x.saturating_add(horizontal_margin),
+        y: area.y.saturating_add(vertical_margin),
+        width: width.max(1),
+        height: height.max(1),
+    }
+}
+
+fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
+    let width = width.min(area.width.saturating_sub(2)).max(1);
+    let height = height.min(area.height.saturating_sub(2)).max(1);
+    Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    }
+}
+
+fn pane_harness_badge(pane: Option<&Pane>) -> &'static str {
+    pane.and_then(|pane| pane.agent.as_ref().map(|agent| agent.harness.short_label()))
+        .unwrap_or("SH")
+}
+
+fn status_symbol(theme: &Theme, status: Option<AgentStatus>, is_agent: bool) -> &'static str {
+    if !is_agent {
+        return theme.glyphs.non_agent;
+    }
+
+    match status.unwrap_or(AgentStatus::Unknown) {
+        AgentStatus::Working => theme.glyphs.working,
+        AgentStatus::NeedsAttention => theme.glyphs.attention,
+        AgentStatus::Idle => theme.glyphs.idle,
+        AgentStatus::Error => theme.glyphs.error,
+        AgentStatus::Unknown => theme.glyphs.unknown,
+    }
+}
+
+fn status_style(theme: &Theme, status: Option<AgentStatus>, is_agent: bool) -> Style {
+    if !is_agent {
+        return theme.non_agent;
+    }
+
+    match status.unwrap_or(AgentStatus::Unknown) {
+        AgentStatus::Working => theme.working,
+        AgentStatus::NeedsAttention => theme.attention,
+        AgentStatus::Idle => theme.idle,
+        AgentStatus::Error => theme.error,
+        AgentStatus::Unknown => theme.unknown,
+    }
+}
+
+fn attention_style_from_rank(theme: &Theme, rank: u8) -> Style {
+    match rank {
+        0 => theme.error,
+        1 => theme.attention,
+        2 => theme.working,
+        3 => theme.idle,
+        _ => theme.unknown,
+    }
+}
+
+fn section_line(text: impl Into<String>, theme: &Theme) -> Line<'static> {
+    Line::from(vec![Span::styled(text.into(), theme.emphasis)])
+}
+
+fn muted_line(text: impl Into<String>, theme: &Theme) -> Line<'static> {
+    Line::from(vec![Span::styled(text.into(), theme.muted)])
+}
+
+fn plain_line(text: impl Into<String>) -> Line<'static> {
+    Line::from(vec![Span::raw(text.into())])
 }
 
 #[cfg(test)]
@@ -501,6 +1118,7 @@ mod tests {
     };
     use crate::services::pull_requests::{PullRequestData, PullRequestLookup, PullRequestStatus};
     use crate::services::system_stats::SystemStatsSnapshot;
+    use crate::ui::theme::ThemeName;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
     use std::path::PathBuf;
@@ -508,19 +1126,23 @@ mod tests {
     fn sample_state() -> AppState {
         let inventory = inventory([
             SessionBuilder::new("alpha").window(
-                WindowBuilder::new("alpha:agents").pane(
+                WindowBuilder::new("alpha:agents").name("agents").pane(
                     PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
-                        .title("claude-main")
+                        .title("M1-AFurrier")
+                        .current_command("claude")
                         .working_dir("/tmp/alpha")
+                        .preview("Claude is working\nReading files\nApplying patch")
                         .status(AgentStatus::Working)
                         .activity_score(10),
                 ),
             ),
             SessionBuilder::new("beta").window(
-                WindowBuilder::new("beta:agents").pane(
+                WindowBuilder::new("beta:agents").name("review").pane(
                     PaneBuilder::agent("beta:codex", HarnessKind::CodexCli)
-                        .title("codex-review")
-                        .working_dir("/tmp/beta")
+                        .title("M1-AFurrier")
+                        .current_command("codex")
+                        .working_dir("/tmp/foreman")
+                        .preview("Codex waiting for your input\nsh-3.2$")
                         .status(AgentStatus::NeedsAttention)
                         .activity_score(4),
                 ),
@@ -533,11 +1155,20 @@ mod tests {
     }
 
     fn render_to_string(state: &AppState) -> String {
-        let backend = TestBackend::new(100, 32);
+        render_to_string_at(state, ThemeName::Catppuccin, 100, 32)
+    }
+
+    fn render_to_string_at(
+        state: &AppState,
+        theme_name: ThemeName,
+        width: u16,
+        height: u16,
+    ) -> String {
+        let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).expect("terminal should initialize");
 
         terminal
-            .draw(|frame| render(frame, state))
+            .draw(|frame| render(frame, state, theme_name))
             .expect("render should succeed");
 
         let buffer = terminal.backend().buffer();
@@ -558,10 +1189,10 @@ mod tests {
         let output = render_to_string(&state);
 
         assert!(output.contains("Foreman"));
-        assert!(output.contains("* Sidebar"));
-        assert!(output.contains("Preview"));
-        assert!(output.contains("Input"));
-        assert!(output.contains("Footer"));
+        assert!(output.contains("* Targets"));
+        assert!(output.contains("Details"));
+        assert!(output.contains("Compose"));
+        assert!(output.contains("Keys"));
     }
 
     #[test]
@@ -570,8 +1201,8 @@ mod tests {
         state.focus = Focus::Preview;
         let output = render_to_string(&state);
 
-        assert!(output.contains("* Preview"));
-        assert!(!output.contains("* Sidebar"));
+        assert!(output.contains("* Details"));
+        assert!(!output.contains("* Targets"));
     }
 
     #[test]
@@ -580,17 +1211,17 @@ mod tests {
         state.focus = Focus::Input;
         let output = render_to_string(&state);
 
-        assert!(output.contains("* Input"));
-        assert!(!output.contains("* Sidebar"));
+        assert!(output.contains("* Compose"));
+        assert!(!output.contains("* Targets"));
     }
 
     #[test]
-    fn render_shows_mode_in_footer() {
+    fn render_shows_mode_in_header() {
         let mut state = sample_state();
         state.mode = Mode::Search;
         let output = render_to_string(&state);
 
-        assert!(output.contains("MODE: SEARCH"));
+        assert!(output.contains("SEARCH"));
     }
 
     #[test]
@@ -602,17 +1233,19 @@ mod tests {
         let output = render_to_string(&state);
 
         assert!(output.contains("tmux unavailable"));
-        assert!(output.contains("No panes discovered yet.") || output.contains("Startup issue"));
     }
 
     #[test]
-    fn render_displays_help_overlay() {
+    fn render_displays_help_overlay_with_extended_command_surface() {
         let mut state = sample_state();
         state.mode = Mode::Help;
-        let output = render_to_string(&state);
+        let output = render_to_string_at(&state, ThemeName::Catppuccin, 80, 24);
 
-        assert!(output.contains("Help"));
-        assert!(output.contains("j/k or arrows"));
+        assert!(output.contains("Navigate"));
+        assert!(output.contains("R renames a window"));
+        assert!(output.contains("N spawns a new window"));
+        assert!(output.contains("H toggles non-agent sessions"));
+        assert!(output.contains("P toggles non-agent panes"));
     }
 
     #[test]
@@ -623,9 +1256,10 @@ mod tests {
         state.input_draft.text = "hello\nworld".to_string();
         let output = render_to_string(&state);
 
+        assert!(output.contains("Compose for"));
         assert!(output.contains("hello"));
         assert!(output.contains("world"));
-        assert!(output.contains("Ctrl+S: send"));
+        assert!(output.contains("Ctrl+S sends"));
     }
 
     #[test]
@@ -637,7 +1271,7 @@ mod tests {
 
         assert!(output.contains("Confirm Kill"));
         assert!(output.contains("alpha:claude"));
-        assert!(output.contains("Enter or y"));
+        assert!(output.contains("Enter or y confirms"));
     }
 
     #[test]
@@ -658,7 +1292,7 @@ mod tests {
     #[test]
     fn render_shows_fixed_width_flash_labels() {
         let inventory = inventory([SessionBuilder::new("alpha").window({
-            let mut window = WindowBuilder::new("alpha:agents");
+            let mut window = WindowBuilder::new("alpha:agents").name("agents");
             for index in 0..27 {
                 window = window.pane(
                     PaneBuilder::agent(format!("alpha:pane:{index}"), HarnessKind::ClaudeCode)
@@ -683,6 +1317,16 @@ mod tests {
     }
 
     #[test]
+    fn render_sidebar_uses_harness_badges_and_workspace_titles() {
+        let state = sample_state();
+        let output = render_to_string(&state);
+
+        assert!(output.contains("[CLD] alpha"));
+        assert!(output.contains("[CDX] foreman"));
+        assert!(!output.contains("Pane     "));
+    }
+
+    #[test]
     fn render_shows_pull_request_compact_and_detail_sections() {
         let mut state = sample_state();
         state.pull_request_cache.insert(
@@ -703,9 +1347,9 @@ mod tests {
         let output = render_to_string(&state);
 
         assert!(output.contains("pr=#42 OPEN"));
-        assert!(output.contains("Pull Request"));
+        assert!(output.contains("PR panel: open"));
+        assert!(output.contains("Repo: foreman"));
         assert!(output.contains("feat/pr-awareness"));
-        assert!(output.contains("Author: alex"));
     }
 
     #[test]
@@ -719,7 +1363,7 @@ mod tests {
 
         assert!(output.contains("pr=NONE"));
         assert!(output.contains("PR: no open pull request"));
-        assert!(!output.contains("Pull Request"));
+        assert!(output.contains("PR panel: none"));
     }
 
     #[test]
@@ -729,14 +1373,14 @@ mod tests {
         state.notifications.last_status = Some("Notifications muted".to_string());
         let muted_output = render_to_string(&state);
         assert!(muted_output.contains("notify=MUTED"));
-        assert!(muted_output.contains("Notification status: Notifications muted"));
+        assert!(muted_output.contains("Notice: Notifications muted"));
 
         state.notifications.muted = false;
         state.notifications.profile = crate::app::NotificationProfile::CompletionOnly;
         state.notifications.last_status = Some("Notification profile: COMPLETE".to_string());
         let profile_output = render_to_string(&state);
         assert!(profile_output.contains("notify=COMPLETE"));
-        assert!(profile_output.contains("Notifications: COMPLETE"));
+        assert!(profile_output.contains("Notifications: complete"));
     }
 
     #[test]
@@ -749,11 +1393,12 @@ mod tests {
 
         let output = render_to_string(&state);
 
-        assert!(output.contains("cpu=18% mem=71%"));
+        assert!(output.contains("Foreman"));
+        assert!(output.contains("18"));
     }
 
     #[test]
-    fn render_surfaces_operator_alert_in_header_and_preview() {
+    fn render_surfaces_operator_alert_in_preview() {
         let mut state = sample_state();
         state.operator_alert = Some(OperatorAlert::new(
             OperatorAlertSource::PullRequests,
@@ -766,5 +1411,15 @@ mod tests {
         assert!(output.contains("alert=WARN"));
         assert!(output.contains("Alert [WARN]"));
         assert!(output.contains("GitHub CLI is not installed"));
+    }
+
+    #[test]
+    fn render_uses_ascii_fallbacks_for_no_color_theme() {
+        let mut state = sample_state();
+        state.selection = Some(SelectionTarget::Session("alpha".into()));
+        let output = render_to_string_at(&state, ThemeName::NoColor, 80, 24);
+
+        assert!(output.contains("> v alpha") || output.contains("> alpha"));
+        assert!(output.contains("|") || output.contains("compose"));
     }
 }

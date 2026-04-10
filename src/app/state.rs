@@ -102,6 +102,15 @@ pub enum SortMode {
     AttentionFirst,
 }
 
+impl SortMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::RecentActivity => "recent",
+            Self::AttentionFirst => "attention",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum NotificationKind {
     Completion,
@@ -161,6 +170,28 @@ pub enum HarnessKind {
     OpenCode,
 }
 
+impl HarnessKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ClaudeCode => "Claude Code",
+            Self::CodexCli => "Codex CLI",
+            Self::Pi => "Pi",
+            Self::GeminiCli => "Gemini CLI",
+            Self::OpenCode => "OpenCode",
+        }
+    }
+
+    pub fn short_label(self) -> &'static str {
+        match self {
+            Self::ClaudeCode => "CLD",
+            Self::CodexCli => "CDX",
+            Self::Pi => "PI",
+            Self::GeminiCli => "GEM",
+            Self::OpenCode => "OCD",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AgentStatus {
     Working,
@@ -172,6 +203,26 @@ pub enum AgentStatus {
 }
 
 impl AgentStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Working => "WORKING",
+            Self::NeedsAttention => "ATTENTION",
+            Self::Idle => "IDLE",
+            Self::Error => "ERROR",
+            Self::Unknown => "UNKNOWN",
+        }
+    }
+
+    pub fn short_label(self) -> &'static str {
+        match self {
+            Self::Working => "WORK",
+            Self::NeedsAttention => "ATTN",
+            Self::Idle => "IDLE",
+            Self::Error => "ERR",
+            Self::Unknown => "UNK",
+        }
+    }
+
     pub fn attention_rank(self) -> u8 {
         match self {
             Self::Error => 0,
@@ -187,6 +238,15 @@ impl AgentStatus {
 pub enum IntegrationMode {
     Native,
     Compatibility,
+}
+
+impl IntegrationMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Native => "native",
+            Self::Compatibility => "compat",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -231,6 +291,24 @@ impl Pane {
             .map(|agent| agent.status.attention_rank())
             .unwrap_or_else(|| AgentStatus::Unknown.attention_rank())
     }
+
+    pub fn workspace_name(&self) -> Option<String> {
+        self.working_dir
+            .as_ref()
+            .and_then(|path| path.file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .filter(|name| !name.trim().is_empty())
+    }
+
+    pub fn navigation_title(&self) -> String {
+        self.workspace_name()
+            .or_else(|| {
+                (!self.title.trim().is_empty() && self.title != self.id.as_str())
+                    .then(|| self.title.clone())
+            })
+            .or_else(|| self.current_command.clone())
+            .unwrap_or_else(|| self.id.as_str().to_string())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -273,6 +351,30 @@ impl Window {
             .map(Pane::attention_rank)
             .min()
             .unwrap_or_else(|| AgentStatus::Unknown.attention_rank())
+    }
+
+    pub fn navigation_title(&self) -> String {
+        if !is_generic_window_name(&self.name) {
+            return self.name.clone();
+        }
+
+        let workspace_names = self
+            .panes
+            .iter()
+            .filter_map(Pane::workspace_name)
+            .collect::<BTreeSet<_>>();
+        if workspace_names.len() == 1 {
+            return workspace_names
+                .into_iter()
+                .next()
+                .expect("single workspace should exist");
+        }
+
+        if self.panes.len() == 1 {
+            return self.panes[0].navigation_title();
+        }
+
+        self.name.clone()
     }
 }
 
@@ -857,31 +959,36 @@ impl AppState {
             SelectionTarget::Session(session_id) => self
                 .inventory
                 .session(session_id)
-                .map(|session| format!("Session  {}", session.name))
-                .unwrap_or_else(|| format!("Session  {}", session_id.as_str())),
+                .map(|session| format!("session {}", session.name))
+                .unwrap_or_else(|| format!("session {}", session_id.as_str())),
             SelectionTarget::Window(window_id) => self
                 .inventory
                 .window(window_id)
-                .map(|window| format!("Window   {}", window.name))
-                .unwrap_or_else(|| format!("Window   {}", window_id.as_str())),
+                .map(|window| format!("window {}", window.name))
+                .unwrap_or_else(|| format!("window {}", window_id.as_str())),
             SelectionTarget::Pane(pane_id) => self
                 .inventory
                 .pane(pane_id)
                 .map(|pane| {
+                    let harness = pane
+                        .agent
+                        .as_ref()
+                        .map(|agent| agent.harness.label())
+                        .unwrap_or("Shell");
                     let status = pane
                         .agent
                         .as_ref()
-                        .map(|agent| match agent.status {
-                            AgentStatus::Working => "WORKING",
-                            AgentStatus::NeedsAttention => "ATTN",
-                            AgentStatus::Idle => "IDLE",
-                            AgentStatus::Error => "ERROR",
-                            AgentStatus::Unknown => "UNKNOWN",
-                        })
+                        .map(|agent| agent.status.label())
                         .unwrap_or("NON-AGENT");
-                    format!("Pane     {} [{}]", pane.title, status)
+                    format!(
+                        "pane {} {} {} {}",
+                        pane.navigation_title(),
+                        pane.title,
+                        harness,
+                        status
+                    )
                 })
-                .unwrap_or_else(|| format!("Pane     {}", pane_id.as_str())),
+                .unwrap_or_else(|| format!("pane {}", pane_id.as_str())),
         }
     }
 
@@ -1015,6 +1122,60 @@ impl AppState {
         }
     }
 
+    pub fn sort_label(&self) -> &'static str {
+        self.sort_mode.label()
+    }
+
+    pub fn filter_label(&self) -> String {
+        match (
+            self.filters.show_non_agent_sessions,
+            self.filters.show_non_agent_panes,
+        ) {
+            (false, false) => "agents-only".to_string(),
+            (true, false) => "all-sessions".to_string(),
+            (false, true) => "all-panes".to_string(),
+            (true, true) => "all-targets".to_string(),
+        }
+    }
+
+    pub fn selected_pull_request_panel_label(&self) -> &'static str {
+        if self.is_pull_request_detail_open() {
+            "open"
+        } else if self.selected_pull_request().is_some() {
+            "hidden"
+        } else {
+            "none"
+        }
+    }
+
+    pub fn selection_breadcrumb(&self) -> Option<String> {
+        match self.selection.as_ref()? {
+            SelectionTarget::Session(session_id) => self
+                .inventory
+                .session(session_id)
+                .map(|session| session.name.clone()),
+            SelectionTarget::Window(window_id) => self
+                .inventory
+                .parent_for_window(window_id)
+                .zip(self.inventory.window(window_id))
+                .map(|(session, window)| {
+                    format!("{} / {}", session.name, window.navigation_title())
+                }),
+            SelectionTarget::Pane(pane_id) => self
+                .inventory
+                .parent_for_pane(pane_id)
+                .zip(self.inventory.pane(pane_id))
+                .map(|((session, window), pane)| {
+                    format!(
+                        "{} / {} / {}",
+                        session.name,
+                        window.navigation_title(),
+                        pane.navigation_title()
+                    )
+                }),
+        }
+    }
+
     pub fn system_stats_label(&self) -> String {
         self.system_stats.label()
     }
@@ -1119,6 +1280,13 @@ fn pane_cmp(left: &Pane, right: &Pane, sort_mode: SortMode) -> Ordering {
     }
 }
 
+fn is_generic_window_name(name: &str) -> bool {
+    matches!(
+        name.trim().to_ascii_lowercase().as_str(),
+        "" | "sh" | "zsh" | "bash" | "fish" | "nu" | "shell"
+    )
+}
+
 fn flash_label_width(count: usize) -> usize {
     let mut width = 1;
     let mut capacity = 26usize;
@@ -1136,4 +1304,43 @@ fn flash_label_for_index(mut index: usize, width: usize) -> String {
         index /= 26;
     }
     chars.into_iter().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AppState, SelectionTarget};
+    use crate::app::{inventory, HarnessKind, PaneBuilder, SessionBuilder, WindowBuilder};
+
+    #[test]
+    fn window_navigation_title_falls_back_from_generic_shell_name() {
+        let inventory = inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:0").name("sh").pane(
+                PaneBuilder::agent("alpha:pane", HarnessKind::ClaudeCode).working_dir("/tmp/alpha"),
+            ),
+        )]);
+
+        let window = inventory
+            .window(&"alpha:0".into())
+            .expect("window should exist");
+        assert_eq!(window.navigation_title(), "alpha");
+    }
+
+    #[test]
+    fn selection_breadcrumb_includes_session_window_and_pane_titles() {
+        let inventory = inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:0").name("agents").pane(
+                PaneBuilder::agent("alpha:pane", HarnessKind::ClaudeCode)
+                    .title("main")
+                    .working_dir("/tmp/foreman"),
+            ),
+        )]);
+
+        let mut state = AppState::with_inventory(inventory);
+        state.selection = Some(SelectionTarget::Pane("alpha:pane".into()));
+
+        assert_eq!(
+            state.selection_breadcrumb().as_deref(),
+            Some("alpha / agents / foreman")
+        );
+    }
 }

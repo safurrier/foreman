@@ -104,7 +104,7 @@ active_profile = "completion-only"
     );
 
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman");
-    fixture.wait_for_alt_capture(&dashboard_pane, "MODE: NORMAL");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
 
     write_atomic(
         &native_dir.join(format!("{pane_id}.json")),
@@ -186,7 +186,7 @@ active_profile = "attention-only"
     );
 
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman");
-    fixture.wait_for_alt_capture(&dashboard_pane, "MODE: NORMAL");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
 
     write_atomic(
         &native_dir.join(format!("{pane_id}.json")),
@@ -274,10 +274,10 @@ active_profile = "completion-only"
     );
 
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman");
-    fixture.wait_for_alt_capture(&dashboard_pane, "MODE: NORMAL");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
 
     fixture.send_keys(&dashboard_pane, &["j", "j"]);
-    fixture.wait_for_alt_capture(&dashboard_pane, "Selected pane:");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Press i to compose for");
 
     fixture.send_keys(&dashboard_pane, &["i", "s", "l", "e", "e", "p", "C-s"]);
     fixture.wait_for_capture(&pane_id, "INPUT:sleep");

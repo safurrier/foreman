@@ -34,6 +34,7 @@ pub enum Command {
     ToggleNonAgentSessions,
     ToggleNonAgentPanes,
     CycleSortMode,
+    CycleTheme,
     Quit,
 }
 
@@ -104,6 +105,7 @@ pub fn map_key_event(key: KeyEvent, focus: Focus, mode: Mode) -> Option<Command>
             Some(Command::ToggleNonAgentPanes)
         }
         (Mode::Normal, _, KeyCode::Char('o'), KeyModifiers::NONE) => Some(Command::CycleSortMode),
+        (Mode::Normal, _, KeyCode::Char('t'), KeyModifiers::NONE) => Some(Command::CycleTheme),
         _ => None,
     }
 }
@@ -248,6 +250,10 @@ mod tests {
         assert_eq!(
             map_key_event(key(KeyCode::Enter), Focus::Input, Mode::Normal),
             Some(Command::StartInput)
+        );
+        assert_eq!(
+            map_key_event(key(KeyCode::Char('t')), Focus::Sidebar, Mode::Normal),
+            Some(Command::CycleTheme)
         );
     }
 

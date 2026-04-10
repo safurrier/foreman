@@ -1,0 +1,36 @@
+Codex CLI waiting for your input
+sh-3.2$ printf 'UX_DIRECT_OK\n'
+UX_DIRECT_OK
+sh-3.2$ 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

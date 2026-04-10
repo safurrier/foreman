@@ -1,4 +1,5 @@
 use crate::app::NotificationProfile;
+use crate::ui::theme::ThemeName;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fs::{self, OpenOptions};
@@ -101,6 +102,7 @@ pub struct AppConfig {
     pub logging: LoggingConfig,
     pub pull_requests: PullRequestConfig,
     pub integrations: IntegrationConfig,
+    pub ui: UiConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -168,6 +170,12 @@ impl Default for PullRequestConfig {
             poll_interval_ms: 30_000,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct UiConfig {
+    pub theme: ThemeName,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -262,6 +270,7 @@ pub struct RuntimeConfig {
     pub codex_integration_preference: IntegrationPreference,
     pub pi_integration_preference: IntegrationPreference,
     pub log_retention: usize,
+    pub theme: ThemeName,
 }
 
 impl RuntimeConfig {
@@ -315,6 +324,7 @@ impl RuntimeConfig {
             codex_integration_preference: file_config.integrations.codex_cli.mode,
             pi_integration_preference: file_config.integrations.pi.mode,
             log_retention: file_config.logging.retain_run_logs,
+            theme: file_config.ui.theme,
         }
     }
 }
@@ -438,10 +448,12 @@ mod tests {
         default_claude_native_dir, default_codex_native_dir, default_pi_native_dir,
         resolve_paths_with_env, write_default_config, AppConfig, ConfigError,
         IntegrationPreference, LoggingConfig, NotificationBackendName, NotificationConfig,
-        PathEnvironment, PullRequestConfig, RuntimeConfig, DEFAULT_NOTIFICATION_COOLDOWN_TICKS,
+        PathEnvironment, PullRequestConfig, RuntimeConfig, UiConfig,
+        DEFAULT_NOTIFICATION_COOLDOWN_TICKS,
     };
     use crate::app::NotificationProfile;
     use crate::cli::Cli;
+    use crate::ui::theme::ThemeName;
     use clap::Parser;
     use std::path::Path;
     use tempfile::tempdir;
@@ -505,6 +517,7 @@ mod tests {
         assert_eq!(parsed.logging, LoggingConfig::default());
         assert_eq!(parsed.notifications, NotificationConfig::default());
         assert_eq!(parsed.pull_requests, PullRequestConfig::default());
+        assert_eq!(parsed.ui, UiConfig::default());
         assert_eq!(
             parsed.integrations.claude_code.mode,
             IntegrationPreference::Auto
@@ -593,6 +606,7 @@ mod tests {
             runtime.pi_integration_preference,
             IntegrationPreference::Auto
         );
+        assert_eq!(runtime.theme, ThemeName::Catppuccin);
     }
 
     #[test]
@@ -633,6 +647,7 @@ enabled = false
         assert_eq!(parsed.integrations.codex_cli.native_dir, None);
         assert_eq!(parsed.integrations.pi.mode, IntegrationPreference::Auto);
         assert_eq!(parsed.integrations.pi.native_dir, None);
+        assert_eq!(parsed.ui.theme, ThemeName::Catppuccin);
     }
 
     #[test]
@@ -656,6 +671,9 @@ native_dir = "/tmp/codex-native"
 [integrations.pi]
 mode = "native"
 native_dir = "/tmp/pi-native"
+
+[ui]
+theme = "dracula"
 "#,
         )
         .expect("config should parse");
@@ -693,6 +711,32 @@ native_dir = "/tmp/pi-native"
             parsed.integrations.pi.native_dir,
             Some(Path::new("/tmp/pi-native").to_path_buf())
         );
+        assert_eq!(parsed.ui.theme, ThemeName::Dracula);
+    }
+
+    #[test]
+    fn config_parsing_supports_all_public_theme_names() {
+        let cases = [
+            ("catppuccin", ThemeName::Catppuccin),
+            ("gruvbox", ThemeName::Gruvbox),
+            ("tokyo-night", ThemeName::TokyoNight),
+            ("nord", ThemeName::Nord),
+            ("dracula", ThemeName::Dracula),
+            ("terminal", ThemeName::Terminal),
+            ("no-color", ThemeName::NoColor),
+        ];
+
+        for (label, expected) in cases {
+            let parsed: AppConfig = toml::from_str(&format!(
+                r#"
+[ui]
+theme = "{label}"
+"#
+            ))
+            .expect("config should parse");
+
+            assert_eq!(parsed.ui.theme, expected);
+        }
     }
 
     #[test]

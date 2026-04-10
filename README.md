@@ -13,6 +13,9 @@ mise run setup
 # Run the fast validation gate
 mise run check
 
+# Run the UX-focused validation lane and refresh screenshots/GIFs
+mise run verify-ux
+
 # Run foreman from source
 mise run dev
 ```
@@ -63,6 +66,24 @@ tmux new-session -d -s alpha "sh -lc \"printf '%s\n' 'Claude Code ready'; exec s
 foreman
 ```
 
+Common dashboard keys:
+- `j` / `k` move through the tree
+- `Tab` or `1` / `2` / `3` switches panel focus
+- `i` composes for the selected pane
+- `/` starts search
+- `s` starts flash jump
+- `t` cycles the active theme
+- `?` opens help
+
+Theme selection:
+
+```toml
+[ui]
+theme = "catppuccin" # catppuccin | gruvbox | tokyo-night | nord | dracula | terminal | no-color
+```
+
+You can also cycle themes live with `t` in normal mode.
+
 Contributor docs:
 - [`docs/tour.md`](docs/tour.md) — repo quickstart and reading order
 - [`docs/workflows.md`](docs/workflows.md) — durable workflow and validation notes
@@ -89,6 +110,9 @@ Contributor docs:
 - Normal startup now enters the interactive dashboard loop with live tmux
   polling, direct input, popup focus-close behavior, and binary-level tmux E2E
   coverage.
+- The dashboard now supports built-in TUI palettes (`catppuccin`, `gruvbox`,
+  `tokyo-night`, `nord`, `dracula`, `terminal`) plus a `no-color` fallback,
+  with config-based default selection and runtime cycling via `t`.
 
 ## Harness Support Matrix
 
@@ -255,6 +279,7 @@ mise run plan -- <slug>
 | `mise run ci` | CI entrypoint (= check) |
 | `mise run plan -- <slug>` | Create a plan directory for a unit of work |
 | `mise run verify` | Heavy validation (integration, docker, security) |
+| `mise run verify-ux` | Focused TUI/runtime smoke plus VHS artifact refresh |
 
 ## GitHub Actions
 

@@ -1,0 +1,3 @@
+root=/var/folders/kf/js4h91w14pl7zwfgnvj896b00000gq/T/foreman-ux-visual-7neo14im
+socket=/var/folders/kf/js4h91w14pl7zwfgnvj896b00000gq/T/foreman-ux-visual-7neo14im/tmux.sock
+log_dir=/var/folders/kf/js4h91w14pl7zwfgnvj896b00000gq/T/foreman-ux-visual-7neo14im/logs

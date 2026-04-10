@@ -3,6 +3,7 @@
 # MISE depends=["setup"]
 import os
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -111,5 +112,11 @@ _run_task("check")
 
 log_step("Phase 2: stack-specific verification")
 verify_rust()
+
+if shutil.which("vhs"):
+    log_step("Phase 3: UX artifact refresh")
+    _run_task("verify-ux", "--capture-only")
+else:
+    log_step("Phase 3: UX artifact refresh skipped (`vhs` not installed)")
 
 log_ok("Verification complete")

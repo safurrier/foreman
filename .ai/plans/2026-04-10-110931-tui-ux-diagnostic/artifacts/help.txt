@@ -1,0 +1,24 @@
+┌Header────────────────────────────────────────────────────────────────────────┐
+│Foreman | mode=HELP | focus=SIDEBAR | visible_targets=9 | cpu=199% mem=79% | p│
+└──────────────────────────────────────────────────────────────────────────────┘
+┌* Sidebar────────────────┐┌Preview────────────────────────────────────────────┐
+│> Session  beta          ││Selected session: beta                             │
+│  Window   sh            ││Windows: 1                                         │
+│  Pane     M1┌Help──────────────────────────────────────────────┐             │
+│[ATTN]       │Help                                              │k.           │
+│  Session  al│                                                  │             │
+│  Window   sh│j/k or arrows: move                               │             │
+│  Pane     M1│Enter: select                                     │oreman       │
+│[IDLE]       │Tab or focus command: move focus                  │             │
+│  Session  ga│i: compose direct input                           │             │
+│  Window   sh│p: toggle PR detail                               │             │
+│  Pane     M1│Shift+O: open PR in browser                       │             │
+│[IDLE]       │Shift+Y: copy PR URL                              │─────────────┘
+│             └──────────────────────────────────────────────────┘─────────────┐
+│                         ││Direct input is available for the selected pane.   │
+│                         ││                                                   │
+│                         ││                                                   │
+└─────────────────────────┘└───────────────────────────────────────────────────┘
+┌Footer────────────────────────────────────────────────────────────────────────┐
+│MODE: HELP | FOCUS: SIDEBAR | ? Close | q Quit                                │
+└──────────────────────────────────────────────────────────────────────────────┘

@@ -101,7 +101,7 @@ impl DashboardRuntime {
         self.logger.debug("dashboard_event_loop_started")?;
 
         loop {
-            terminal.draw(|frame| render(frame, &self.state))?;
+            terminal.draw(|frame| render(frame, &self.state, self.runtime.theme))?;
 
             let timeout = poll_interval.saturating_sub(last_inventory_refresh.elapsed());
             if event::poll(timeout)? {
@@ -271,6 +271,9 @@ impl DashboardRuntime {
                 }
                 Effect::LogNotificationDecision { decision } => {
                     self.logger.log_notification_decision(&decision)?;
+                }
+                Effect::CycleTheme => {
+                    self.runtime.theme = self.runtime.theme.next();
                 }
                 Effect::Quit => {
                     should_quit = true;

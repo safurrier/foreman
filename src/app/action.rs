@@ -65,6 +65,7 @@ pub enum Action {
     ToggleShowNonAgentPanes,
     ToggleSessionCollapsed(SessionId),
     SetSortMode(SortMode),
+    CycleTheme,
     Noop,
 }
 
@@ -164,6 +165,7 @@ pub fn action_for_command(state: &AppState, command: Command) -> Action {
             SortMode::RecentActivity => SortMode::AttentionFirst,
             SortMode::AttentionFirst => SortMode::RecentActivity,
         }),
+        Command::CycleTheme => Action::CycleTheme,
         Command::Quit => Action::RequestQuit,
     }
 }
@@ -357,6 +359,10 @@ mod tests {
         assert_eq!(
             action_for_command(&state, Command::CycleNotificationProfile),
             Action::CycleNotificationProfile
+        );
+        assert_eq!(
+            action_for_command(&state, Command::CycleTheme),
+            Action::CycleTheme
         );
     }
 

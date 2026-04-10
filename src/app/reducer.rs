@@ -43,6 +43,7 @@ pub enum Effect {
     LogNotificationDecision {
         decision: NotificationDecision,
     },
+    CycleTheme,
     Quit,
 }
 
@@ -266,12 +267,14 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
         } => {
             if state.inventory.window(&window_id).is_some() {
                 state.mode = Mode::Rename;
+                state.focus = Focus::Input;
                 state.modal = Some(ModalState::rename_window(window_id, current_name));
             }
         }
         Action::OpenSpawnModal { session_id } => {
             if state.inventory.contains_session(&session_id) {
                 state.mode = Mode::Spawn;
+                state.focus = Focus::Input;
                 state.modal = Some(ModalState::spawn_window(session_id));
             }
         }
@@ -383,6 +386,9 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             state.reconcile_selection();
             reconcile_visible_selection(state);
             reconcile_pull_request_detail(state);
+        }
+        Action::CycleTheme => {
+            return vec![Effect::CycleTheme];
         }
         Action::Noop => {}
     }
@@ -541,6 +547,7 @@ fn reconcile_interaction_state(state: &mut AppState) {
 
     if !modal_is_valid {
         state.mode = Mode::Normal;
+        state.focus = Focus::Sidebar;
         state.modal = None;
     }
 
@@ -649,8 +656,8 @@ fn notification_effects_for_refresh(
 #[cfg(test)]
 mod tests {
     use crate::app::{
-        inventory, reduce, Action, AgentStatus, AppState, DraftEdit, FlashNavigateKind, Focus,
-        HarnessKind, ModalState, Mode, OperatorAlertLevel, OperatorAlertSource, PaneBuilder,
+        inventory, reduce, Action, AgentStatus, AppState, DraftEdit, Effect, FlashNavigateKind,
+        Focus, HarnessKind, ModalState, Mode, OperatorAlertLevel, OperatorAlertSource, PaneBuilder,
         SelectionDirection, SelectionTarget, SessionBuilder, SortMode, WindowBuilder,
     };
     use crate::services::pull_requests::{PullRequestData, PullRequestLookup, PullRequestStatus};
@@ -1516,5 +1523,14 @@ mod tests {
             super::Effect::LogNotificationDecision { decision }
                 if decision.request.is_none()
         ));
+    }
+
+    #[test]
+    fn cycle_theme_emits_runtime_effect() {
+        let mut state = AppState::with_inventory(sample_inventory());
+
+        let effects = reduce(&mut state, Action::CycleTheme);
+
+        assert_eq!(effects, vec![Effect::CycleTheme]);
     }
 }

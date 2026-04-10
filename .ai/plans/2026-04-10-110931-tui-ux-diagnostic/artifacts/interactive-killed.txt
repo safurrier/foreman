@@ -1,0 +1,36 @@
+┌Header────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│Foreman | mode=NORMAL | focus=SIDEBAR | visible_targets=12 | cpu=182% mem=81% | pr=#1 OPEN | notify=MUTED             │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌* Sidebar──────────────────────────────┐┌Preview──────────────────────────────────────────────────────────────────────┐
+│> Session  beta                        ││Selected session: beta                                                       │
+│  Window   beta-main                   ││Windows: 1                                                                   │
+│  Pane     M1-AFurrier [ATTN]          ││                                                                             │
+│  Session  alpha                       ││Expand or choose a pane to inspect work.                                     │
+│  Window   agents                      ││                                                                             │
+│  Pane     M1-AFurrier [IDLE]          ││Workspace: /Users/alex.furrier/git_repositories/foreman                      │
+│  Session  dashboard                   ││Notifications: MUTED                                                         │
+│  Window   target/debug/foreman        ││PR: #1 OPEN - Release foreman 1.0                                            │
+│  Pane     M1-AFurrier [IDLE]          ││                                                                             │
+│  Session  gamma                       ││Pull Request                                                                 │
+│  Window   agents                      ││#1 OPEN                                                                      │
+│  Pane     M1-AFurrier [IDLE]          ││Title: Release foreman 1.0                                                   │
+│                                       ││Repo: foreman                                                                │
+│                                       ││Branches: feat/add-foreman-spec -> main                                      │
+│                                       ││Author: safurrier                                                            │
+│                                       ││URL: https://github.com/safurrier/foreman/pull/1                             │
+│                                       ││Actions: p toggle | O open | Y copy                                          │
+│                                       ││                                                                             │
+│                                       ││                                                                             │
+│                                       ││                                                                             │
+│                                       │└─────────────────────────────────────────────────────────────────────────────┘
+│                                       │┌Input────────────────────────────────────────────────────────────────────────┐
+│                                       ││Direct input is available for the selected pane.                             │
+│                                       ││                                                                             │
+│                                       ││                                                                             │
+│                                       ││                                                                             │
+│                                       ││                                                                             │
+│                                       ││                                                                             │
+└───────────────────────────────────────┘└─────────────────────────────────────────────────────────────────────────────┘
+┌Footer────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│MODE: NORMAL | FOCUS: SIDEBAR | ? Help | / Search | s Flash | p PR | O Open | Y Copy | m Mute | n Profile | q Quit    │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

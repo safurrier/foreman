@@ -1,0 +1,24 @@
+┌Header────────────────────────────────────────────────────────────────────────┐
+│Foreman | mode=SEARCH | focus=SIDEBAR | visible_targets=9 | cpu=167% mem=79% |│
+└──────────────────────────────────────────────────────────────────────────────┘
+┌* Sidebar────────────────┐┌Preview────────────────────────────────────────────┐
+│  Session  beta          ││Selected session: alpha                            │
+│  Window   sh            ││Windows: 1                                         │
+│  Pane     M1-AFurrier   ││                                                   │
+│[ATTN]                   ││Expand or choose a pane to inspect work.           │
+│> Session  alpha         ││                                                   │
+│  Window   sh    ┌Search────────────────────────────────────┐                 │
+│  Pane     M1-AFu│Query: <empty>                            │es/foreman       │
+│[IDLE]           │Matches: 9                                │                 │
+│  Session  gamma │                                          │                 │
+│  Window   sh    │Type to filter                            │                 │
+│  Pane     M1-AFu└──────────────────────────────────────────┘                 │
+│[IDLE]                   │└───────────────────────────────────────────────────┘
+│                         │┌Input──────────────────────────────────────────────┐
+│                         ││Direct input is available for the selected pane.   │
+│                         ││                                                   │
+│                         ││                                                   │
+└─────────────────────────┘└───────────────────────────────────────────────────┘
+┌Footer────────────────────────────────────────────────────────────────────────┐
+│MODE: SEARCH | FOCUS: SIDEBAR | Type Filter | Enter Confirm | Esc Restore     │
+└──────────────────────────────────────────────────────────────────────────────┘

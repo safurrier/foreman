@@ -40,7 +40,18 @@ real external seam.
 | Render | Ratatui buffer tests |
 | Adapter contract | Fake-backed tmux, notifications, PRs |
 | Runtime smoke | Real tmux fixture, compiled `foreman` binary |
+| UX artifact refresh | `vhs` walkthrough and screenshots from the live binary across at least one branded palette and the no-color fallback |
 | Real harness E2E | Opt-in ignored tests with the actual external CLI |
+
+Focused UX lane:
+
+```bash
+mise run verify-ux
+```
+
+If `vhs` is installed, `mise run verify` now refreshes the UX GIF and PNG
+artifacts through `mise run verify-ux --capture-only` after the heavier Rust
+checks pass.
 
 Opt-in real harness commands:
 

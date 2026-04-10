@@ -194,10 +194,10 @@ native_dir = "{native_dir}"
     );
 
     fixture.wait_for_alt_capture_attempts(&dashboard_pane, "Foreman", 200);
-    fixture.wait_for_alt_capture_attempts(&dashboard_pane, "MODE: NORMAL", 200);
+    fixture.wait_for_alt_capture_attempts(&dashboard_pane, "Foreman | NORMAL", 200);
 
     fixture.send_keys(&dashboard_pane, &["j", "j"]);
-    fixture.wait_for_alt_capture_attempts(&dashboard_pane, "Selected pane:", 80);
+    fixture.wait_for_alt_capture_attempts(&dashboard_pane, "Press i to compose for", 80);
 
     fixture.send_keys(
         &dashboard_pane,

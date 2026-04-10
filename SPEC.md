@@ -170,6 +170,7 @@ yet expose a stable contract.
 - The operator can change focus between the sidebar, preview, and input regions.
 - The operator can collapse and expand session groups.
 - The operator can trigger focus on the selected pane.
+- The operator can cycle the active theme at runtime.
 - Escape semantics cancel or dismiss the current mode according to context.
 
 **R11. Pane focus behavior**
@@ -283,6 +284,9 @@ yet expose a stable contract.
 - Config supports notification backend preference.
 - Config supports a small set of built-in named notification profiles.
 - Config supports selection of the active notification profile.
+- Config supports selection of the default UI theme.
+- Built-in UI themes include `catppuccin`, `gruvbox`, `tokyo-night`, `nord`,
+  `dracula`, `terminal`, and `no-color`.
 - Config may override the local signal directory or equivalent bridge path for
   harnesses that use file-backed native integrations.
 - Backward-compatible migration from an older flatter notification-sound format may be supported.
@@ -389,6 +393,7 @@ yet expose a stable contract.
 ```bash
 mise run check
 mise run verify
+mise run verify-ux
 mise run ci
 ```
 
@@ -432,6 +437,8 @@ mise run ci
 
 - Given visible sessions and panes, keyboard navigation advances through visible targets.
 - Activating a session header expands or collapses that session.
+- Given the dashboard is running, pressing `t` cycles the active theme without
+  changing selection or mode.
 
 **A9. Popup auto-exit**
 
@@ -505,6 +512,9 @@ mise run ci
 **A19. Validation stack**
 
 - Given a clean checkout, when local validation commands run, unit tests pass and the expected local quality gate succeeds.
+- Given `vhs` is available locally, when `mise run verify-ux` runs, focused TUI
+  smoke tests pass and fresh visual artifacts can be generated from the live
+  binary.
 - When CI runs, build, test, formatting, and lint checks succeed.
 
 ### Definition of done

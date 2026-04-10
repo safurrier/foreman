@@ -181,6 +181,10 @@ pub fn recognize_harness(
 ) -> Option<HarnessKind> {
     let observation = CompatibilityObservation::new(current_command, title, preview);
 
+    if is_foreman_surface(observation) {
+        return None;
+    }
+
     if matches_any(observation, claude::recognition_tokens()) {
         return Some(HarnessKind::ClaudeCode);
     }
@@ -290,6 +294,23 @@ fn activity_score_for_status(status: AgentStatus) -> u64 {
     }
 }
 
+fn is_foreman_surface(observation: CompatibilityObservation<'_>) -> bool {
+    let preview = observation.preview.to_ascii_lowercase();
+
+    observation
+        .current_command
+        .and_then(|command| command.split_whitespace().next())
+        .map(command_basename)
+        .is_some_and(|command| command == "foreman")
+        || (preview.contains("foreman | ")
+            && preview.contains("targets")
+            && preview.contains("compose"))
+}
+
+fn command_basename(command: &str) -> &str {
+    command.rsplit('/').next().unwrap_or(command)
+}
+
 pub(crate) fn matches_any<T>(
     observation: CompatibilityObservation<'_>,
     needles: impl IntoIterator<Item = T>,
@@ -365,6 +386,18 @@ mod tests {
     #[test]
     fn returns_none_for_unrecognized_panes() {
         assert_eq!(recognize_harness(Some("zsh"), "notes", "plain shell"), None);
+    }
+
+    #[test]
+    fn returns_none_for_foreman_dashboard_surface() {
+        assert_eq!(
+            recognize_harness(
+                Some("sh"),
+                "dashboard",
+                "Foreman | NORMAL | cpu=? mem=? | 3 targets | pr=NONE | notify=MUTED\n* Targets\nCompose"
+            ),
+            None
+        );
     }
 
     #[test]

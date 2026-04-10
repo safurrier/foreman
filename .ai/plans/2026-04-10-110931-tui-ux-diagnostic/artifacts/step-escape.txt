@@ -1,0 +1,24 @@
+┌Header────────────────────────────────────────────────────────────────────────┐
+│Foreman | mode=NORMAL | focus=SIDEBAR | visible_targets=9 | cpu=167% mem=79% |│
+└──────────────────────────────────────────────────────────────────────────────┘
+┌* Sidebar────────────────┐┌Preview────────────────────────────────────────────┐
+│  Session  beta          ││Selected pane: M1-AFurrier                         │
+│  Window   sh            ││Status: IDLE                                       │
+│  Pane     M1-AFurrier   ││Harness: Pi                                        │
+│[ATTN]                   ││Command: sleep                                     │
+│  Session  alpha         ││                                                   │
+│  Window   sh            ││Pi ready                                           │
+│  Pane     M1-AFurrier   ││                                                   │
+│[IDLE]                   ││Workspace:                                         │
+│  Session  gamma         ││/Users/alex.furrier/git_repositories/foreman       │
+│  Window   sh            ││Notifications: MUTED                               │
+│> Pane     M1-AFurrier   ││PR: #1 OPEN - Release foreman 1.0                  │
+│[IDLE]                   │└───────────────────────────────────────────────────┘
+│                         │┌Input──────────────────────────────────────────────┐
+│                         ││Direct input is available for the selected pane.   │
+│                         ││                                                   │
+│                         ││                                                   │
+└─────────────────────────┘└───────────────────────────────────────────────────┘
+┌Footer────────────────────────────────────────────────────────────────────────┐
+│MODE: NORMAL | FOCUS: SIDEBAR | ? Help | / Search | s Flash | p PR | O Open | │
+└──────────────────────────────────────────────────────────────────────────────┘
