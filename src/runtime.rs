@@ -484,10 +484,17 @@ impl DashboardRuntime {
         {
             self.pending_pull_request_lookup = None;
         }
+        let previous_pull_request_alert = self
+            .state
+            .operator_alert
+            .as_ref()
+            .filter(|alert| alert.source == OperatorAlertSource::PullRequests)
+            .cloned();
         self.apply_runtime_action(Action::SetPullRequestLookup {
             workspace_path,
             lookup,
         })?;
+        self.log_pull_request_alert_transition(previous_pull_request_alert)?;
         Ok(())
     }
 
@@ -534,6 +541,25 @@ impl DashboardRuntime {
         let alert = OperatorAlert::new(source, level, message);
         self.logger.log_operator_alert(&alert)?;
         self.apply_runtime_action(Action::SetOperatorAlert(Some(alert)))?;
+        Ok(())
+    }
+
+    fn log_pull_request_alert_transition(
+        &mut self,
+        previous_alert: Option<OperatorAlert>,
+    ) -> Result<(), RuntimeError> {
+        let current_alert = self
+            .state
+            .operator_alert
+            .as_ref()
+            .filter(|alert| alert.source == OperatorAlertSource::PullRequests)
+            .cloned();
+        if current_alert != previous_alert {
+            if let Some(alert) = current_alert.as_ref() {
+                self.logger.log_operator_alert(alert)?;
+            }
+        }
+
         Ok(())
     }
 

@@ -40,6 +40,10 @@ impl TmuxFixture {
         &self.socket_path
     }
 
+    pub fn root_path(&self) -> &Path {
+        self._root.path()
+    }
+
     pub fn new_session(&self, session_name: &str, command: &str) -> String {
         self.run_checked_retry(&[
             "new-session",
@@ -72,15 +76,19 @@ impl TmuxFixture {
     }
 
     pub fn wait_for_capture_attempts(&self, target: &str, needle: &str, attempts: usize) {
+        let mut last_capture = String::new();
         for _ in 0..attempts {
             let capture = self.capture(target);
+            last_capture = capture.clone();
             if capture.contains(needle) {
                 return;
             }
             thread::sleep(Duration::from_millis(50));
         }
 
-        panic!("pane {target} never contained expected text: {needle}");
+        panic!(
+            "pane {target} never contained expected text: {needle}\nlast capture:\n{last_capture}"
+        );
     }
 
     #[allow(dead_code)]
@@ -89,15 +97,44 @@ impl TmuxFixture {
     }
 
     pub fn wait_for_alt_capture_attempts(&self, target: &str, needle: &str, attempts: usize) {
+        let mut last_capture = String::new();
         for _ in 0..attempts {
             let capture = self.capture_alt(target);
+            last_capture = capture.clone();
             if capture.contains(needle) {
                 return;
             }
             thread::sleep(Duration::from_millis(50));
         }
 
-        panic!("pane {target} never contained expected alternate-screen text: {needle}");
+        panic!(
+            "pane {target} never contained expected alternate-screen text: {needle}\nlast capture:\n{last_capture}"
+        );
+    }
+
+    pub fn wait_for_alt_capture_not_contains(&self, target: &str, needle: &str) {
+        self.wait_for_alt_capture_not_contains_attempts(target, needle, 80);
+    }
+
+    pub fn wait_for_alt_capture_not_contains_attempts(
+        &self,
+        target: &str,
+        needle: &str,
+        attempts: usize,
+    ) {
+        let mut last_capture = String::new();
+        for _ in 0..attempts {
+            let capture = self.capture_alt(target);
+            last_capture = capture.clone();
+            if !capture.contains(needle) {
+                return;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+
+        panic!(
+            "pane {target} still contained unexpected text: {needle}\nlast capture:\n{last_capture}"
+        );
     }
 
     #[allow(dead_code)]
@@ -144,6 +181,34 @@ impl TmuxFixture {
             (active == "1").then(|| pane_id.to_string())
         })
         .expect("active pane should exist")
+    }
+
+    pub fn wait_for_active_pane_in(&self, target: &str, expected: &str) {
+        for _ in 0..40 {
+            if self.active_pane_in(target) == expected {
+                return;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+
+        panic!(
+            "session {target} never focused expected pane {expected}; active pane was {}",
+            self.active_pane_in(target)
+        );
+    }
+
+    pub fn resize_window(&self, target: &str, width: u16, height: u16) {
+        let width = width.to_string();
+        let height = height.to_string();
+        self.run_checked(&[
+            "resize-window",
+            "-t",
+            target,
+            "-x",
+            width.as_str(),
+            "-y",
+            height.as_str(),
+        ]);
     }
 
     fn capture(&self, target: &str) -> String {

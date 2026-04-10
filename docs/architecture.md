@@ -238,7 +238,8 @@ CI defines "passing." Local commands mirror CI exactly:
 
 ```bash
 mise run check    # fast: fmt + lint + typecheck + unit tests  (on push)
-mise run verify   # heavy: integration, security, docker        (on PR)
+mise run verify   # heavy: integration + release gauntlet + docker  (on PR)
+mise run verify-release  # compiled-binary operator gauntlet + report
 mise run verify-ux  # focused TUI/runtime smoke + perf smoke + VHS capture
 ```
 

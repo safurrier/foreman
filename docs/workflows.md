@@ -40,6 +40,7 @@ real external seam.
 | Render | Ratatui buffer tests |
 | Adapter contract | Fake-backed tmux, notifications, PRs |
 | Runtime smoke | Real tmux fixture, compiled `foreman` binary |
+| Release gauntlet | Compiled-binary operator walkthroughs with temporary tmux worlds plus a durable checklist/report artifact |
 | UX artifact refresh | `vhs` walkthrough and screenshots from the live binary across at least one branded palette and the no-color fallback |
 | Navigation perf smoke | Real tmux run with a fake PR backend plus run-log timing assertions |
 | Real harness E2E | Opt-in ignored tests with the actual external CLI |
@@ -50,9 +51,20 @@ Focused UX lane:
 mise run verify-ux
 ```
 
+Release-confidence lane:
+
+```bash
+mise run verify-release
+```
+
 If `vhs` is installed, `mise run verify` now refreshes the UX GIF and PNG
 artifacts through `mise run verify-ux --capture-only` after the heavier Rust
 checks pass.
+
+`mise run verify` now also runs `mise run verify-release`, which reruns the
+compiled-binary release gauntlet serially and writes a report under:
+
+`.ai/plans/2026-04-10-151735-release-validation-gauntlet/artifacts/`
 
 `mise run verify-ux` also runs the ignored `runtime_profiling` smoke so lag
 regressions caused by synchronous lookup work show up in the heavy lane instead
@@ -61,6 +73,12 @@ of only in manual UX testing.
 The runtime smoke in that lane now covers the live help/legend surface plus
 harness-view cycling and acting on the filtered selection inside a real tmux
 server.
+
+The release gauntlet expands that proof into three coherent compiled-binary
+journeys:
+- startup, discovery, theme, help, and harness filtering
+- compose, focus, search, flash, sort, rename, spawn, and kill
+- PR state, notification policy, graceful degradation, and operator-alert logging
 
 Opt-in real harness commands:
 

@@ -30,3 +30,9 @@ description: >
 | A17 Pull request graceful degradation | `tests/pull_requests.rs` | Add runtime gauntlet coverage for missing tooling and soft-failure visibility |
 | A18 Notification behavior | `tests/notification_runtime.rs`, `tests/notifications.rs` | Add release-checklist coverage for completion, attention, suppression, and backend order |
 | A19 Validation stack | `.mise/tasks/verify`, `.mise/tasks/verify-ux` | Add `verify-release` or equivalent release-confidence lane with artifacts and checklist output |
+
+Completed proof from this slice:
+
+- `tests/release_gauntlet.rs`
+- `.mise/tasks/verify-release`
+- `.ai/plans/2026-04-10-151735-release-validation-gauntlet/artifacts/release-validation-report.md`

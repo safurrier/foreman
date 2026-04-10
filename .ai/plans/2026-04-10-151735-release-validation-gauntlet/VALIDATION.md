@@ -41,3 +41,46 @@ sed -n '1,240p' tests/support/tmux.rs
 sed -n '1,220p' tests/tmux_actions.rs
 sed -n '1,220p' tests/notification_runtime.rs
 ```
+
+Implementation and final validation:
+
+- Added reusable scenario helpers in `tests/support/release.rs` and extended
+  `tests/support/tmux.rs` for better alternate-screen, focus, resize, and file
+  assertions.
+- Added `tests/release_gauntlet.rs` with three compiled-binary walkthroughs:
+  startup/discovery, action flows, and PR/notification/degradation behavior.
+- Added `.mise/tasks/verify-release` and wired `mise run verify` to include the
+  release-confidence gauntlet and generated report artifact.
+- Synced `README.md`, `SPEC.md`, `AGENTS.md`, `docs/architecture.md`, and
+  `docs/workflows.md` to the new release-validation contract.
+
+Artifacts:
+
+- `.ai/plans/2026-04-10-151735-release-validation-gauntlet/artifacts/release-validation-report.md`
+- `.ai/plans/2026-04-10-151735-release-validation-gauntlet/artifacts/release-gauntlet-output.txt`
+
+Commands run during implementation and closeout:
+
+```bash
+cargo test --test release_gauntlet release_startup_navigation_gauntlet_proves_discovery_filters_and_help -- --exact --nocapture
+cargo test --test release_gauntlet release_action_gauntlet_proves_search_flash_sort_and_pane_operations -- --exact --nocapture
+cargo test --test release_gauntlet release_integration_gauntlet_proves_pr_notifications_and_graceful_degradation -- --exact --nocapture
+mise run verify-release
+mise run check
+mise run verify
+python3 /Users/alex.furrier/.codex/skills/alex-ai-ai-context-engineering-files/scripts/verify_references.py .
+python3 /Users/alex.furrier/.codex/skills/alex-ai-ai-context-engineering-files/scripts/validate_frontmatter.py .
+```
+
+Final result:
+
+- `cargo test --test release_gauntlet -- --test-threads=1 --nocapture` passed
+  via `mise run verify-release`
+- `mise run check` passed
+- `mise run verify` passed, including:
+  - `cargo test --all-features`
+  - Docker build
+  - standalone release gauntlet
+  - `verify-ux` runtime/profiling smoke and VHS artifact refresh
+- Reference validation passed
+- Frontmatter validation passed

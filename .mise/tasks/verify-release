@@ -1,0 +1,91 @@
+#!/usr/bin/env -S uv run python
+# MISE description="Release-confidence gauntlet with compiled-binary tmux walkthroughs"
+# MISE depends=["setup"]
+import os
+import shlex
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, os.path.join(os.environ["MISE_PROJECT_ROOT"], "scripts"))
+from lib import PROJECT_ROOT, log_ok, log_step  # noqa: E402
+
+PLAN_DIR = PROJECT_ROOT / ".ai" / "plans" / "2026-04-10-151735-release-validation-gauntlet"
+ARTIFACT_DIR = PLAN_DIR / "artifacts"
+OUTPUT_PATH = ARTIFACT_DIR / "release-gauntlet-output.txt"
+REPORT_PATH = ARTIFACT_DIR / "release-validation-report.md"
+CHECKLIST_PATH = PLAN_DIR / "CHECKLIST.md"
+COMMAND = [
+    "cargo",
+    "test",
+    "--test",
+    "release_gauntlet",
+    "--",
+    "--test-threads=1",
+    "--nocapture",
+]
+
+
+def write_report(status: str) -> None:
+    timestamp = datetime.now(timezone.utc).isoformat()
+    rendered_command = " ".join(shlex.quote(part) for part in COMMAND)
+    REPORT_PATH.write_text(
+        "\n".join(
+            [
+                "# Release Validation Report",
+                "",
+                f"- Generated: `{timestamp}`",
+                f"- Status: `{status}`",
+                f"- Checklist: `{CHECKLIST_PATH.relative_to(PROJECT_ROOT)}`",
+                f"- Raw output: `{OUTPUT_PATH.relative_to(PROJECT_ROOT)}`",
+                "",
+                "## Command",
+                "",
+                "```bash",
+                rendered_command,
+                "```",
+                "",
+                "## Compiled-binary gauntlet coverage",
+                "",
+                "- `release_startup_navigation_gauntlet_proves_discovery_filters_and_help`",
+                "  covers startup logging, multi-session discovery, harness filtering, help/legend, theme cycling, and actionable focus/compose behavior in a temporary tmux socket.",
+                "- `release_action_gauntlet_proves_search_flash_sort_and_pane_operations`",
+                "  covers search confirm and cancel-restore, multiline compose, flash jump and jump+focus, sort cycling, rename, spawn, and kill flows through the compiled binary.",
+                "- `release_integration_gauntlet_proves_pr_notifications_and_graceful_degradation`",
+                "  covers PR lookup success and failure, browser/copy actions, notification backend fallback, mute/profile suppression, stable completion and attention transitions, and operator-visible failure logging.",
+                "",
+                "## Supporting proof kept outside the gauntlet",
+                "",
+                "- `tests/cli_config.rs` and `tests/bootstrap_observability.rs` cover config utility flow and startup log/bootstrap surfaces.",
+                "- `tests/claude_hook_bridge.rs`, `tests/codex_hook_bridge.rs`, and `tests/pi_hook_bridge.rs` cover native signal bridge correctness.",
+                "- `tests/claude_real_e2e.rs`, `tests/codex_real_e2e.rs`, and `tests/pi_real_e2e.rs` remain opt-in real-harness evidence for actual external CLIs.",
+                "- `tests/runtime_dashboard.rs` and `tests/runtime_profiling.rs` remain focused runtime/perf smokes that complement the broader release walkthrough.",
+                "",
+                "## Notes",
+                "",
+                "- This lane uses fake repos and fake notification/browser/clipboard helpers, but a real compiled `foreman` binary and a real tmux server.",
+                "- The gauntlet intentionally runs serially so pane focus, rename/spawn/kill, and notification timing remain deterministic.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
+
+log_step("Running release-confidence gauntlet")
+result = subprocess.run(COMMAND, cwd=PROJECT_ROOT, capture_output=True, text=True)
+output = f"{result.stdout}{result.stderr}"
+OUTPUT_PATH.write_text(output, encoding="utf-8")
+print(output, end="")
+
+status = "PASS" if result.returncode == 0 else "FAIL"
+write_report(status)
+
+if result.returncode != 0:
+    sys.exit(result.returncode)
+
+log_ok("Release gauntlet")
+log_ok(f"Report: {REPORT_PATH.relative_to(PROJECT_ROOT)}")

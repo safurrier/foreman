@@ -2,5 +2,5 @@ slug: release-validation-gauntlet
 branch: feat/add-foreman-spec
 created: 2026-04-10
 pr:
-status: in-progress
+status: complete
 source: user: plan a release-grade operator validation gauntlet with temporary tmux scenarios and a full feature checklist

@@ -333,6 +333,7 @@ yet expose a stable contract.
 | `mise run setup` | Install tools and project dependencies |
 | `mise run check` | Fast quality gate for format, lint, typecheck, and test |
 | `mise run verify` | Heavier validation beyond the fast gate |
+| `mise run verify-release` | Release-confidence compiled-binary tmux gauntlet with checklist/report artifact |
 | `mise run ci` | CI entrypoint, aligned with local quality checks |
 
 ## Invariants
@@ -527,6 +528,9 @@ mise run ci
 - Given `vhs` is available locally, when `mise run verify-ux` runs, focused TUI
   smoke tests pass and fresh visual artifacts can be generated from the live
   binary.
+- Given `mise run verify-release` runs, the compiled binary completes the
+  startup/discovery, action, and integration gauntlets inside temporary tmux
+  worlds and emits a durable checklist/report artifact.
 - Given the focused runtime smoke runs, help/legend display, harness-view
   cycling, and acting on the filtered selection all work in the compiled binary
   inside real tmux.

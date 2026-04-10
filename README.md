@@ -16,6 +16,9 @@ mise run check
 # Run the UX-focused validation lane and refresh screenshots/GIFs
 mise run verify-ux
 
+# Run the release-confidence operator gauntlet
+mise run verify-release
+
 # Run foreman from source
 mise run dev
 ```
@@ -286,6 +289,7 @@ mise run plan -- <slug>
 | `mise run ci` | CI entrypoint (= check) |
 | `mise run plan -- <slug>` | Create a plan directory for a unit of work |
 | `mise run verify` | Heavy validation (integration, docker, security) |
+| `mise run verify-release` | Release-confidence compiled-binary tmux gauntlet plus checklist/report artifact |
 | `mise run verify-ux` | Focused TUI/runtime smoke, navigation perf smoke, plus VHS artifact refresh |
 
 ## GitHub Actions
@@ -300,8 +304,9 @@ mise run plan -- <slug>
 
 1. Bump `Cargo.toml` to the intended release version.
 2. Merge the release branch to `main`.
-3. Push a matching annotated tag such as `v1.0.0`.
-4. GitHub Actions verifies the repo and publishes release bundles.
+3. Run `mise run verify-release` if you want the release-confidence report locally before tagging.
+4. Push a matching annotated tag such as `v1.0.0`.
+5. GitHub Actions verifies the repo and publishes release bundles.
 
 Each release archive contains:
 - `foreman`

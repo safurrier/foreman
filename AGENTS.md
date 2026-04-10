@@ -36,7 +36,8 @@ Key steering files:
 ```bash
 mise run setup      # install tools and dependencies
 mise run check      # fast gate: fmt + lint + typecheck + test
-mise run verify     # heavy gate: integration + docker
+mise run verify     # heavy gate: integration + release gauntlet + docker
+mise run verify-release  # compiled-binary release-confidence walkthroughs
 mise run dev        # run the app locally
 ```
 
@@ -47,6 +48,7 @@ Normal workflow:
 4. Run `mise run check`
 5. Before pushing: `/plan-sync`, `/spec-sync`, `/context-engineering update`, `/docs-workflow update`
 6. Run `mise run verify` before merge
+7. Use `mise run verify-release` when you want the standalone release report artifact
 
 CI mirrors `mise run ci` for the fast gate. Pull requests also run
 `mise run verify`.

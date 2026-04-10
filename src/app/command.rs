@@ -79,9 +79,7 @@ pub fn map_key_event(key: KeyEvent, focus: Focus, mode: Mode) -> Option<Command>
         (Mode::Normal, _, KeyCode::Char('x'), KeyModifiers::NONE) => Some(Command::RequestKill),
         (Mode::Normal, _, KeyCode::Char('/'), KeyModifiers::NONE) => Some(Command::Search),
         (Mode::Normal, _, KeyCode::Char('s'), KeyModifiers::NONE) => Some(Command::FlashNavigate),
-        (Mode::Normal, _, KeyCode::Char('S'), KeyModifiers::SHIFT) => {
-            Some(Command::FlashNavigateFocus)
-        }
+        (Mode::Normal, _, KeyCode::Char('S'), _) => Some(Command::FlashNavigateFocus),
         (Mode::Normal, _, KeyCode::Char('p'), KeyModifiers::NONE) => {
             Some(Command::TogglePullRequestDetail)
         }
@@ -91,20 +89,12 @@ pub fn map_key_event(key: KeyEvent, focus: Focus, mode: Mode) -> Option<Command>
         (Mode::Normal, _, KeyCode::Char('n'), KeyModifiers::NONE) => {
             Some(Command::CycleNotificationProfile)
         }
-        (Mode::Normal, _, KeyCode::Char('O'), KeyModifiers::SHIFT) => {
-            Some(Command::OpenPullRequest)
-        }
-        (Mode::Normal, _, KeyCode::Char('Y'), KeyModifiers::SHIFT) => {
-            Some(Command::CopyPullRequestUrl)
-        }
-        (Mode::Normal, _, KeyCode::Char('R'), KeyModifiers::SHIFT) => Some(Command::RenameWindow),
-        (Mode::Normal, _, KeyCode::Char('N'), KeyModifiers::SHIFT) => Some(Command::SpawnAgent),
-        (Mode::Normal, _, KeyCode::Char('H'), KeyModifiers::SHIFT) => {
-            Some(Command::ToggleNonAgentSessions)
-        }
-        (Mode::Normal, _, KeyCode::Char('P'), KeyModifiers::SHIFT) => {
-            Some(Command::ToggleNonAgentPanes)
-        }
+        (Mode::Normal, _, KeyCode::Char('O'), _) => Some(Command::OpenPullRequest),
+        (Mode::Normal, _, KeyCode::Char('Y'), _) => Some(Command::CopyPullRequestUrl),
+        (Mode::Normal, _, KeyCode::Char('R'), _) => Some(Command::RenameWindow),
+        (Mode::Normal, _, KeyCode::Char('N'), _) => Some(Command::SpawnAgent),
+        (Mode::Normal, _, KeyCode::Char('H'), _) => Some(Command::ToggleNonAgentSessions),
+        (Mode::Normal, _, KeyCode::Char('P'), _) => Some(Command::ToggleNonAgentPanes),
         (Mode::Normal, _, KeyCode::Char('h'), KeyModifiers::NONE) => {
             Some(Command::CycleHarnessFilter)
         }
@@ -308,6 +298,10 @@ mod tests {
             Some(Command::FlashNavigate)
         );
         assert_eq!(
+            map_key_event(key(KeyCode::Char('S')), Focus::Sidebar, Mode::Normal),
+            Some(Command::FlashNavigateFocus)
+        );
+        assert_eq!(
             map_key_event(
                 KeyEvent::new(KeyCode::Char('S'), KeyModifiers::SHIFT),
                 Focus::Sidebar,
@@ -332,6 +326,10 @@ mod tests {
             Some(Command::CycleNotificationProfile)
         );
         assert_eq!(
+            map_key_event(key(KeyCode::Char('O')), Focus::Sidebar, Mode::Normal),
+            Some(Command::OpenPullRequest)
+        );
+        assert_eq!(
             map_key_event(
                 KeyEvent::new(KeyCode::Char('O'), KeyModifiers::SHIFT),
                 Focus::Sidebar,
@@ -340,12 +338,32 @@ mod tests {
             Some(Command::OpenPullRequest)
         );
         assert_eq!(
+            map_key_event(key(KeyCode::Char('Y')), Focus::Sidebar, Mode::Normal),
+            Some(Command::CopyPullRequestUrl)
+        );
+        assert_eq!(
             map_key_event(
                 KeyEvent::new(KeyCode::Char('Y'), KeyModifiers::SHIFT),
                 Focus::Sidebar,
                 Mode::Normal
             ),
             Some(Command::CopyPullRequestUrl)
+        );
+        assert_eq!(
+            map_key_event(key(KeyCode::Char('N')), Focus::Sidebar, Mode::Normal),
+            Some(Command::SpawnAgent)
+        );
+        assert_eq!(
+            map_key_event(key(KeyCode::Char('R')), Focus::Sidebar, Mode::Normal),
+            Some(Command::RenameWindow)
+        );
+        assert_eq!(
+            map_key_event(key(KeyCode::Char('H')), Focus::Sidebar, Mode::Normal),
+            Some(Command::ToggleNonAgentSessions)
+        );
+        assert_eq!(
+            map_key_event(key(KeyCode::Char('P')), Focus::Sidebar, Mode::Normal),
+            Some(Command::ToggleNonAgentPanes)
         );
     }
 }
