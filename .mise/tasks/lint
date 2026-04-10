@@ -1,47 +1,15 @@
 #!/usr/bin/env -S uv run python
-# MISE description="Run lint checks (non-modifying)"
+# MISE description="Run Rust lint checks (non-modifying)"
 # MISE depends=["setup"]
 import os
 import sys
 
 sys.path.insert(0, os.path.join(os.environ["MISE_PROJECT_ROOT"], "scripts"))
-from lib import (  # noqa: E402
-    PROJECT_ROOT,
-    dispatch_module,
-    dispatch_stack,
-    get_shape,
-    log_ok,
-    log_step,
-    run,
-    run_per_module,
+from lib import PROJECT_ROOT, log_ok, log_step, run  # noqa: E402
+
+log_step("Linting Rust code")
+run(
+    ["cargo", "clippy", "--all-targets", "--all-features", "--", "-D", "warnings"],
+    cwd=PROJECT_ROOT,
 )
-
-
-def lint_python(cwd=PROJECT_ROOT):
-    log_step("Linting Python code")
-    run(["uv", "run", "ruff", "check", "."], cwd=cwd)
-    log_ok("Python lint")
-
-
-def lint_go(cwd=PROJECT_ROOT):
-    log_step("Linting Go code")
-    run(["golangci-lint", "run", "./..."], cwd=cwd)
-    log_ok("Go lint")
-
-
-def lint_rust(cwd=PROJECT_ROOT):
-    log_step("Linting Rust code")
-    run(
-        ["cargo", "clippy", "--all-targets", "--all-features", "--", "-D", "warnings"],
-        cwd=cwd,
-    )
-    log_ok("Rust lint")
-
-
-if get_shape() == "apps":
-    run_per_module(
-        "lint",
-        dispatch_module({"python": lint_python, "go": lint_go, "rust": lint_rust}),
-    )
-else:
-    dispatch_stack({"python": lint_python, "go": lint_go, "rust": lint_rust})
+log_ok("Rust lint")

@@ -48,7 +48,7 @@ The Rust stack uses:
 
 **Negative / Trade-offs**:
 
-- <!-- list accepted trade-offs, e.g., "Go compilation adds ~30s to cold CI runs" -->
+- Cold builds and the heavy validation gate are slower than the normal edit loop.
 
 ## Alternatives Considered
 

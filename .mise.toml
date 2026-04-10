@@ -11,6 +11,3 @@ rust = "stable"
 
 [env]
 MISE_PROJECT_ROOT = "{{config_root}}"
-SCAFFOLD_PROJECT_NAME  = "foreman"
-SCAFFOLD_PROJECT_SHAPE = "single"
-SCAFFOLD_PROJECT_STACK = "rust"

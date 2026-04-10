@@ -7,14 +7,60 @@ Current crate version: `1.0.0`
 ## Quick Start
 
 ```bash
-# Install dependencies
+# Fetch Rust dependencies and hooks
 mise run setup
 
-# Run quality checks
+# Run the fast validation gate
 mise run check
 
-# Start development
+# Run foreman from source
 mise run dev
+```
+
+## Install Locally
+
+Requirements:
+- `tmux`
+- Rust toolchain with `cargo`
+
+Install the binaries from this checkout:
+
+```bash
+mise run install-local
+```
+
+That installs:
+- `foreman`
+- `foreman-claude-hook`
+- `foreman-codex-hook`
+- `foreman-pi-hook`
+
+First-run setup:
+
+```bash
+foreman --init-config
+foreman --config-path
+foreman --help
+```
+
+If you want to try it without installing into `~/.cargo/bin`:
+
+```bash
+cargo run -- --help
+mise run dev
+```
+
+To install into a temporary root for testing:
+
+```bash
+mise run install-local -- --root /tmp/foreman-install
+```
+
+Minimal tmux smoke run:
+
+```bash
+tmux new-session -d -s alpha "sh -lc \"printf '%s\n' 'Claude Code ready'; exec sleep 600\""
+foreman
 ```
 
 Contributor docs:
@@ -202,9 +248,10 @@ mise run plan -- <slug>
 | `mise run lint` | Run lint checks (non-modifying) |
 | `mise run typecheck` | Run static type analysis |
 | `mise run test` | Run Rust unit, integration, and smoke tests |
-| `mise run build` | Build artifacts |
+| `mise run build` | Build release binaries |
+| `mise run install-local` | Install `foreman` and the hook binaries locally |
 | `mise run check` | Fast quality gate (fmt + lint + typecheck + test) |
-| `mise run dev` | Start local development |
+| `mise run dev` | Run `foreman` from source |
 | `mise run ci` | CI entrypoint (= check) |
 | `mise run plan -- <slug>` | Create a plan directory for a unit of work |
 | `mise run verify` | Heavy validation (integration, docker, security) |

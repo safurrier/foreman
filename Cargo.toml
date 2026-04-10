@@ -1,6 +1,7 @@
 [package]
 name = "foreman"
 version = "1.0.0"
+default-run = "foreman"
 edition = "2021"
 description = "TUI for managing AI agents across tmux"
 

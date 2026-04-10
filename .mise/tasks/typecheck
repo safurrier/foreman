@@ -1,51 +1,12 @@
 #!/usr/bin/env -S uv run python
-# MISE description="Run static type analysis"
+# MISE description="Run Rust type and borrow checks"
 # MISE depends=["setup"]
 import os
 import sys
 
 sys.path.insert(0, os.path.join(os.environ["MISE_PROJECT_ROOT"], "scripts"))
-from lib import (  # noqa: E402
-    PROJECT_ROOT,
-    dispatch_module,
-    dispatch_stack,
-    get_shape,
-    log_ok,
-    log_step,
-    run,
-    run_per_module,
-)
+from lib import PROJECT_ROOT, log_ok, log_step, run  # noqa: E402
 
-
-def typecheck_python(cwd=PROJECT_ROOT):
-    log_step("Type-checking Python code")
-    run(["uv", "run", "ty", "check"], cwd=cwd)
-    log_ok("Python typecheck")
-
-
-def typecheck_go(cwd=PROJECT_ROOT):
-    # Go's type checking is integrated into the compiler.
-    # `go vet` provides the closest equivalent static analysis.
-    log_step("Type-checking Go code (go vet)")
-    run(["go", "vet", "./..."], cwd=cwd)
-    log_ok("Go typecheck")
-
-
-def typecheck_rust(cwd=PROJECT_ROOT):
-    # Rust's type + borrow checking via cargo check (faster than full build).
-    log_step("Type-checking Rust code (cargo check)")
-    run(["cargo", "check", "--all-targets", "--all-features"], cwd=cwd)
-    log_ok("Rust typecheck")
-
-
-if get_shape() == "apps":
-    run_per_module(
-        "typecheck",
-        dispatch_module(
-            {"python": typecheck_python, "go": typecheck_go, "rust": typecheck_rust}
-        ),
-    )
-else:
-    dispatch_stack(
-        {"python": typecheck_python, "go": typecheck_go, "rust": typecheck_rust}
-    )
+log_step("Type-checking Rust code (cargo check)")
+run(["cargo", "check", "--all-targets", "--all-features"], cwd=PROJECT_ROOT)
+log_ok("Rust typecheck")
