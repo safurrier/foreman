@@ -73,3 +73,24 @@ What would enable more one-shot execution next time:
 - encode the non-interactive shell-wrapper rule in architecture or a skill
 - keep config-owned runtime policy grouped into small context structs early, so
   `clippy::too_many_arguments` never becomes cleanup work at the end
+
+## 2026-04-10 09:40 - Final spec sync needed one more support-matrix pass
+
+The biggest remaining drift was not a missing feature. It was that the top-level
+spec and README made the native-heavy path very visible, but they did not spell
+out the whole shipped support matrix as directly as they could. Adding the
+matrix made it clear that Claude, Codex, and Pi have native overlays today,
+while Gemini CLI and OpenCode are still compatibility-only.
+
+The other repo-level drift was smaller but worth fixing: several plan
+`META.yaml` files used `completed`, while the repo's documented lifecycle uses
+`complete`. That kind of metadata mismatch does not break the product, but it
+does weaken the plan contract the repo is trying to keep deterministic.
+
+The same pass also surfaced a validation wrinkle that was worth fixing in repo
+code rather than hand-waving away as local state. `mise run verify` only needs
+to build a public Docker image here, but Docker was inheriting stale `gcr`
+credential helpers from the user's global config and emitting noisy auth
+warnings before the build succeeded. Moving the build step onto a temporary
+clean `DOCKER_CONFIG` while preserving the active Docker host made the heavy
+gate deterministic again.

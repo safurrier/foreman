@@ -121,6 +121,12 @@ yet expose a stable contract.
 - Pi
 - Gemini CLI
 - OpenCode
+- The current v1 support matrix is:
+- Claude Code: compatibility mode and native mode
+- Codex CLI: compatibility mode and native mode
+- Pi: compatibility mode and native mode
+- Gemini CLI: compatibility mode
+- OpenCode: compatibility mode
 - Foreman distinguishes recognized agent panes from unrecognized panes.
 - The rebuild plan prioritizes integrations in this order:
 - Claude Code as the first first-class native integration
@@ -404,7 +410,7 @@ mise run ci
 
 **A4. Agent detection**
 
-- Given panes running supported agent families, when the monitor refreshes, those panes appear as recognized agents rather than generic panes.
+- Given panes running supported agent families, including Claude Code, Codex CLI, Pi, Gemini CLI, and OpenCode signatures, when the monitor refreshes, those panes appear as recognized agents rather than generic panes.
 
 **A5. Integration mode selection**
 

@@ -69,3 +69,28 @@ Notes:
   observing a simulated working-to-idle completion notification end to end.
 - The notification backend wrapper now uses `sh -c` rather than `sh -lc`, which
   keeps non-interactive backend resolution deterministic across environments.
+
+## 2026-04-10 09:45 - Final spec and repo-sync pass
+
+- `cargo test --test tmux_supported_harnesses`
+  Result: pass
+- `cargo test`
+  Result: pass
+- `mise run check`
+  Result: pass
+- `mise run verify`
+  Result: pass
+- `python3 /Users/alex.furrier/.codex/skills/alex-ai-ai-context-engineering-files/scripts/verify_references.py .`
+  Result: pass
+- `python3 /Users/alex.furrier/.codex/skills/alex-ai-ai-context-engineering-files/scripts/validate_frontmatter.py .`
+  Result: pass
+
+Notes:
+- `tests/tmux_supported_harnesses.rs` now gives `A4` a live tmux smoke test for
+  the full shipped harness matrix, including Gemini CLI and OpenCode.
+- The top-level support matrix is now explicit in `SPEC.md`, `README.md`, and
+  `docs/architecture.md`.
+- Plan metadata now uses the documented `status: complete` form consistently.
+- `.mise/tasks/verify` now builds Docker with a temporary clean
+  `DOCKER_CONFIG` plus the active Docker host, so stale global `gcr` helpers do
+  not inject auth noise into this public-image validation path.

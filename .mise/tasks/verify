@@ -2,8 +2,10 @@
 # MISE description="Heavy validation gate (integration, docker, security, docs)"
 # MISE depends=["setup"]
 import os
+import json
 import subprocess
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.join(os.environ["MISE_PROJECT_ROOT"], "scripts"))
 from lib import (  # noqa: E402
@@ -27,6 +29,70 @@ def _run_task(name: str, *args: str) -> None:
         sys.exit(r.returncode)
 
 
+def _docker_host_from_current_context() -> str | None:
+    if os.environ.get("DOCKER_HOST"):
+        return os.environ["DOCKER_HOST"]
+
+    context_name = os.environ.get("DOCKER_CONTEXT")
+    if not context_name:
+        result = subprocess.run(
+            ["docker", "context", "show"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return None
+        context_name = result.stdout.strip()
+
+    if not context_name:
+        return None
+
+    result = subprocess.run(
+        ["docker", "context", "inspect", context_name],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+
+    try:
+        context = json.loads(result.stdout)[0]
+        return context["Endpoints"]["docker"]["Host"]
+    except (IndexError, KeyError, json.JSONDecodeError):
+        return None
+
+
+def _build_docker_image(cwd=PROJECT_ROOT) -> None:
+    log_step("Building Docker image")
+
+    # Build with a clean Docker config so stale credential helpers in the
+    # user's global config do not block this public-image validation path.
+    env = {**os.environ}
+    docker_host = _docker_host_from_current_context()
+    if docker_host:
+        env["DOCKER_HOST"] = docker_host
+        env.pop("DOCKER_CONTEXT", None)
+
+    with tempfile.TemporaryDirectory(prefix="foreman-docker-config-") as docker_config:
+        with open(
+            os.path.join(docker_config, "config.json"),
+            "w",
+            encoding="utf-8",
+        ) as handle:
+            json.dump({"auths": {}, "credHelpers": {}}, handle)
+        env["DOCKER_CONFIG"] = docker_config
+
+        result = subprocess.run(
+            ["docker", "build", "-t", f"{get_project_name()}:verify", "."],
+            cwd=cwd,
+            env=env,
+        )
+        if result.returncode != 0:
+            sys.exit(result.returncode)
+
+    log_ok("Docker build")
+
+
 def verify_python(cwd=PROJECT_ROOT):
     integration_dir = cwd / "tests" / "integration"
     if integration_dir.is_dir():
@@ -36,9 +102,7 @@ def verify_python(cwd=PROJECT_ROOT):
 
     dockerfile = cwd / "Dockerfile"
     if dockerfile.exists():
-        log_step("Building Docker image")
-        run(["docker", "build", "-t", f"{get_project_name()}:verify", "."], cwd=cwd)
-        log_ok("Docker build")
+        _build_docker_image(cwd)
 
 
 def verify_go(cwd=PROJECT_ROOT):
@@ -56,9 +120,7 @@ def verify_go(cwd=PROJECT_ROOT):
 
     dockerfile = cwd / "Dockerfile"
     if dockerfile.exists():
-        log_step("Building Docker image")
-        run(["docker", "build", "-t", f"{get_project_name()}:verify", "."], cwd=cwd)
-        log_ok("Docker build")
+        _build_docker_image(cwd)
 
 
 def verify_rust(cwd=PROJECT_ROOT):
@@ -76,9 +138,7 @@ def verify_rust(cwd=PROJECT_ROOT):
 
     dockerfile = cwd / "Dockerfile"
     if dockerfile.exists():
-        log_step("Building Docker image")
-        run(["docker", "build", "-t", f"{get_project_name()}:verify", "."], cwd=cwd)
-        log_ok("Docker build")
+        _build_docker_image(cwd)
 
 
 log_step("Running verification suite")

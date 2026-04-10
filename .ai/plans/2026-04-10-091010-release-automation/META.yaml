@@ -1,0 +1,6 @@
+slug: release-automation
+branch: feat/add-foreman-spec
+created: 2026-04-10
+pr:
+status: complete
+source: user requested GitHub Actions release automation, a 1.0 release pass, and PR readiness after the product work landed

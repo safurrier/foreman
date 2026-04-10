@@ -47,7 +47,7 @@ testable as the app grows.
 | App state core | Own `Command`, `Action`, `Mode`, `Focus`, selection state, filters, sort mode, modal state, and reducer logic |
 | Ratatui renderer | Render header, sidebar, preview, input, footer, help, and overlays from pure state |
 | tmux adapter | Discover sessions/windows/panes, capture pane output, focus panes, send input, rename windows, create windows, and kill panes |
-| Harness integrations | Detect supported harness families, translate compatibility signals, and overlay native signals such as Claude, Codex, and Pi when available |
+| Harness integrations | Detect supported harness families, translate compatibility signals for Claude, Codex, Pi, Gemini CLI, and OpenCode, and overlay native signals for Claude, Codex, and Pi when available |
 | Pull request service | Resolve pull request metadata for the selected workspace, and own browser-open and clipboard-copy seams with graceful degradation |
 | Notification service | Apply pure suppression and cooldown policy, build dispatcher order from typed config, dispatch best-effort notifications with backend fallback, and surface observable decisions |
 | System stats service | Capture a lightweight local CPU and memory pressure snapshot for the header without turning Foreman into a telemetry system |
@@ -158,6 +158,9 @@ testable as the app grows.
 - Pi native bridging follows the same reducer-agnostic boundary, but the
   transport is a thin Pi extension that calls a Foreman companion binary on
   `agent_start`, `agent_end`, and `session_shutdown`.
+- Gemini CLI and OpenCode currently ship as compatibility-only integrations, so
+  their operator-visible status comes from tmux-visible process and capture
+  heuristics until a better native seam exists.
 - Compatibility heuristics are allowed to be lower confidence, but they must
   fail soft rather than hide the pane entirely.
 - All tmux, GitHub, browser, clipboard, and notification effects flow through
@@ -233,6 +236,13 @@ CI defines "passing." Local commands mirror CI exactly:
 mise run check    # fast: fmt + lint + typecheck + unit tests  (on push)
 mise run verify   # heavy: integration, security, docker        (on PR)
 ```
+
+GitHub Actions currently maps those workflows like this:
+- `.github/workflows/ci.yml` runs `mise run ci` on pushes to `main` and pull
+  requests to `main`, and runs `mise run verify` for pull requests.
+- `.github/workflows/release.yml` runs on version tags, re-verifies the repo,
+  builds release archives for the supported target runners, and publishes the
+  GitHub release bundles.
 
 ### Test strategy by layer
 

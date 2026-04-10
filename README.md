@@ -2,6 +2,8 @@
 
 TUI for managing AI agents across tmux
 
+Current crate version: `1.0.0`
+
 ## Quick Start
 
 ```bash
@@ -21,7 +23,8 @@ mise run dev
 - `foreman --debug` enables debug-level run logging without changing the normal
   interactive startup path.
 - Normal startup bootstraps config, logging, tmux inventory, native Claude,
-  Codex, and Pi overlays, and header-level system stats.
+  Codex, and Pi overlays, Gemini CLI and OpenCode compatibility detection, and
+  header-level system stats.
 - Config now controls notification cooldowns, backend order, startup profile,
   and per-harness native-vs-compatibility preference.
 - `foreman-claude-hook` bridges official Claude Code hook events into Foreman's
@@ -36,6 +39,16 @@ mise run dev
 - Normal startup now enters the interactive dashboard loop with live tmux
   polling, direct input, popup focus-close behavior, and binary-level tmux E2E
   coverage.
+
+## Harness Support Matrix
+
+| Harness | Compatibility mode | Native mode |
+|---------|--------------------|-------------|
+| Claude Code | yes | yes |
+| Codex CLI | yes | yes |
+| Pi | yes | yes |
+| Gemini CLI | yes | no |
+| OpenCode | yes | no |
 
 ## Claude Code Native Hooks
 
@@ -191,6 +204,28 @@ mise run plan -- <slug>
 | `mise run ci` | CI entrypoint (= check) |
 | `mise run plan -- <slug>` | Create a plan directory for a unit of work |
 | `mise run verify` | Heavy validation (integration, docker, security) |
+
+## GitHub Actions
+
+- `.github/workflows/ci.yml` runs the fast gate on pushes to `main` and on pull
+  requests targeting `main`, and runs `mise run verify` on pull requests.
+- `.github/workflows/release.yml` runs on `v*` tags, verifies the repo,
+  builds release bundles for Linux x86_64, macOS x86_64, and macOS aarch64,
+  and publishes a GitHub release.
+
+## Release Process
+
+1. Bump `Cargo.toml` to the intended release version.
+2. Merge the release branch to `main`.
+3. Push a matching annotated tag such as `v1.0.0`.
+4. GitHub Actions verifies the repo and publishes release bundles.
+
+Each release archive contains:
+- `foreman`
+- `foreman-claude-hook`
+- `foreman-codex-hook`
+- `foreman-pi-hook`
+- `README.md`
 
 ## Project Structure
 

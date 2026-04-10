@@ -2,5 +2,5 @@ slug: claude-hook-native-e2e
 branch: feat/add-foreman-spec
 created: 2026-04-09
 pr:
-status: completed
+status: complete
 source: User request to add real Claude-native proof, research hook behavior, and close the E2E gap.
