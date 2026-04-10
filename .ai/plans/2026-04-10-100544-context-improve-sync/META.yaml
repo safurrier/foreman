@@ -1,0 +1,6 @@
+slug: context-improve-sync
+branch: feat/add-foreman-spec
+created: 2026-04-10
+pr: https://github.com/safurrier/foreman/pull/1
+status: in-progress
+source: User requested a context-improve pass that mines .ai artifacts for durable workflow rough edges and quickstart gaps.

@@ -17,6 +17,10 @@ mise run check
 mise run dev
 ```
 
+Contributor docs:
+- [`docs/tour.md`](docs/tour.md) — repo quickstart and reading order
+- [`docs/workflows.md`](docs/workflows.md) — durable workflow and validation notes
+
 ## Current Status
 
 - `foreman --config-path` and `foreman --init-config` are live.
