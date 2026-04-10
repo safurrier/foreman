@@ -184,6 +184,40 @@ pub fn apply_native_signals<S: ClaudeNativeSignalSource>(
     summary
 }
 
+pub(crate) fn compatibility_fallback_summary(
+    inventory: &Inventory,
+    warn_missing_native: bool,
+) -> ClaudeNativeOverlaySummary {
+    let fallback_to_compatibility = inventory
+        .sessions
+        .iter()
+        .flat_map(|session| session.windows.iter())
+        .flat_map(|window| window.panes.iter())
+        .filter(|pane| {
+            matches!(
+                pane.agent.as_ref(),
+                Some(agent)
+                    if agent.harness == HarnessKind::ClaudeCode
+                        && agent.integration_mode == IntegrationMode::Compatibility
+            )
+        })
+        .count();
+
+    let mut summary = ClaudeNativeOverlaySummary {
+        applied: 0,
+        fallback_to_compatibility,
+        warnings: Vec::new(),
+    };
+    if warn_missing_native && fallback_to_compatibility > 0 {
+        summary.warnings.push(
+            "claude native preference requested but no native signal source was configured"
+                .to_string(),
+        );
+    }
+
+    summary
+}
+
 fn parse_native_status(status: &str) -> Result<AgentStatus, ClaudeNativeSignalError> {
     match status.trim().to_ascii_lowercase().as_str() {
         "working" => Ok(AgentStatus::Working),
@@ -207,7 +241,10 @@ fn native_activity_score(status: AgentStatus) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_native_signals, compatibility_status, FileClaudeNativeSignalSource};
+    use super::{
+        apply_native_signals, compatibility_fallback_summary, compatibility_status,
+        FileClaudeNativeSignalSource,
+    };
     use crate::app::{
         inventory, AgentStatus, HarnessKind, IntegrationMode, PaneBuilder, SessionBuilder,
         WindowBuilder,
@@ -304,5 +341,22 @@ mod tests {
         assert_eq!(agent.status, AgentStatus::Working);
         assert_eq!(summary.applied, 0);
         assert_eq!(summary.fallback_to_compatibility, 1);
+    }
+
+    #[test]
+    fn missing_native_source_can_report_compatibility_fallback() {
+        let inventory = inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:agents").pane(
+                PaneBuilder::agent("%1", HarnessKind::ClaudeCode)
+                    .status(AgentStatus::Working)
+                    .integration_mode(IntegrationMode::Compatibility),
+            ),
+        )]);
+
+        let summary = compatibility_fallback_summary(&inventory, true);
+
+        assert_eq!(summary.applied, 0);
+        assert_eq!(summary.fallback_to_compatibility, 1);
+        assert_eq!(summary.warnings.len(), 1);
     }
 }

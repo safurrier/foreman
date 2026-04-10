@@ -1,4 +1,5 @@
 use foreman::app::NotificationKind;
+use foreman::config::LogVerbosity;
 use foreman::services::logging::RunLogger;
 use foreman::services::notifications::{
     CommandNotificationBackend, NotificationDecision, NotificationDecisionReason,
@@ -55,8 +56,8 @@ fn shell_backed_notification_dispatcher_falls_back_and_logs_selection() {
         .dispatch(&request)
         .expect("fallback backend should succeed");
 
-    let mut logger =
-        RunLogger::start(&temp_dir.path().join("logs"), 2).expect("logger should start");
+    let mut logger = RunLogger::start(&temp_dir.path().join("logs"), 2, LogVerbosity::Info)
+        .expect("logger should start");
     logger
         .log_notification_decision(&NotificationDecision {
             pane_id: request.pane_id.clone(),

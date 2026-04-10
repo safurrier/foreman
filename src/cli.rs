@@ -3,9 +3,7 @@ use crate::app::{
     AppState, InventorySummary, OperatorAlert, OperatorAlertLevel, OperatorAlertSource,
 };
 use crate::config::{load_config, resolve_paths, write_default_config, ConfigError, RuntimeConfig};
-use crate::integrations::{
-    apply_claude_native_signals, ClaudeNativeOverlaySummary, FileClaudeNativeSignalSource,
-};
+use crate::integrations::{apply_configured_claude_signals, ClaudeNativeOverlaySummary};
 use crate::services::logging::{RunLogSummary, RunLogger};
 use crate::services::system_stats::{SysinfoSystemStatsBackend, SystemStatsService};
 use clap::Parser;
@@ -35,6 +33,9 @@ pub struct Cli {
 
     #[arg(long = "no-notify")]
     pub no_notify: bool,
+
+    #[arg(long)]
+    pub debug: bool,
 
     #[arg(long, hide = true)]
     pub log_dir: Option<PathBuf>,
@@ -173,9 +174,16 @@ pub(crate) fn prepare_bootstrap(
     let file_config = load_config(&paths.config_file)?;
     let runtime = RuntimeConfig::from_sources(paths, file_config, cli);
 
-    let mut logger =
-        RunLogger::start(&runtime.log_dir, runtime.log_retention).map_err(ConfigError::Io)?;
+    let mut logger = RunLogger::start(
+        &runtime.log_dir,
+        runtime.log_retention,
+        runtime.log_verbosity,
+    )
+    .map_err(ConfigError::Io)?;
     logger.log_bootstrap(&runtime).map_err(ConfigError::Io)?;
+    logger
+        .debug("bootstrap_debug_logging_enabled")
+        .map_err(ConfigError::Io)?;
     let (state, claude_native) = bootstrap_state(&runtime);
     let inventory = state.inventory_summary();
     logger.log_inventory(&inventory).map_err(ConfigError::Io)?;
@@ -212,14 +220,11 @@ pub(crate) fn bootstrap_state(runtime: &RuntimeConfig) -> (AppState, ClaudeNativ
     let adapter = TmuxAdapter::new(SystemTmuxBackend::new(runtime.tmux_socket.clone()));
     match adapter.load_inventory(runtime.capture_lines) {
         Ok(mut inventory) => {
-            let claude_native = if let Some(dir) = &runtime.claude_native_dir {
-                apply_claude_native_signals(
-                    &mut inventory,
-                    &FileClaudeNativeSignalSource::new(dir.clone()),
-                )
-            } else {
-                ClaudeNativeOverlaySummary::default()
-            };
+            let claude_native = apply_configured_claude_signals(
+                &mut inventory,
+                runtime.claude_native_dir.as_deref(),
+                runtime.claude_integration_preference,
+            );
 
             let mut state = AppState {
                 popup_mode: runtime.popup,
@@ -227,6 +232,8 @@ pub(crate) fn bootstrap_state(runtime: &RuntimeConfig) -> (AppState, ClaudeNativ
                 ..AppState::with_inventory(inventory)
             };
             state.notifications.muted = !runtime.notifications_enabled;
+            state.notifications.profile = runtime.notification_profile;
+            state.notifications.cooldown_ticks = runtime.notification_cooldown_ticks;
             (state, claude_native)
         }
         Err(error) => {
@@ -242,6 +249,8 @@ pub(crate) fn bootstrap_state(runtime: &RuntimeConfig) -> (AppState, ClaudeNativ
                 ..AppState::default()
             };
             state.notifications.muted = !runtime.notifications_enabled;
+            state.notifications.profile = runtime.notification_profile;
+            state.notifications.cooldown_ticks = runtime.notification_cooldown_ticks;
             (state, ClaudeNativeOverlaySummary::default())
         }
     }

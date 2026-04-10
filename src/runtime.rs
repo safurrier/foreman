@@ -4,12 +4,10 @@ use crate::app::{
     OperatorAlertLevel, OperatorAlertSource,
 };
 use crate::cli::PreparedBootstrap;
-use crate::integrations::{
-    apply_claude_native_signals, ClaudeNativeOverlaySummary, FileClaudeNativeSignalSource,
-};
+use crate::integrations::{apply_configured_claude_signals, ClaudeNativeOverlaySummary};
 use crate::services::logging::RunLogger;
 use crate::services::notifications::{
-    CommandNotificationBackend, NotificationDispatcher, NotificationRequest,
+    build_notification_dispatcher, NotificationDispatcher, NotificationRequest,
 };
 use crate::services::pull_requests::{
     PullRequestLookup, PullRequestService, SystemPullRequestBackend,
@@ -80,7 +78,7 @@ impl DashboardRuntime {
         Self {
             tmux,
             pull_requests: PullRequestService::new(SystemPullRequestBackend::new()),
-            notifications: default_notification_dispatcher(),
+            notifications: build_notification_dispatcher(&prepared.runtime.notification_backends),
             system_stats: SystemStatsService::new(SysinfoSystemStatsBackend::new()),
             last_pull_request_lookup: BTreeMap::new(),
             runtime: prepared.runtime,
@@ -97,6 +95,7 @@ impl DashboardRuntime {
         let mut last_inventory_refresh = Instant::now();
 
         self.logger.info("dashboard_started")?;
+        self.logger.debug("dashboard_event_loop_started")?;
 
         loop {
             terminal.draw(|frame| render(frame, &self.state))?;
@@ -280,6 +279,7 @@ impl DashboardRuntime {
     }
 
     fn refresh_inventory(&mut self) -> Result<(), RuntimeError> {
+        self.logger.debug("inventory_refresh_started")?;
         match self.load_inventory_with_native() {
             Ok((inventory, claude_native)) => {
                 self.apply_runtime_action(Action::SetStartupError(None))?;
@@ -317,14 +317,11 @@ impl DashboardRuntime {
             .load_inventory(self.runtime.capture_lines)
             .map_err(|error| error.to_string())?;
 
-        let claude_native = if let Some(dir) = &self.runtime.claude_native_dir {
-            apply_claude_native_signals(
-                &mut inventory,
-                &FileClaudeNativeSignalSource::new(dir.clone()),
-            )
-        } else {
-            ClaudeNativeOverlaySummary::default()
-        };
+        let claude_native = apply_configured_claude_signals(
+            &mut inventory,
+            self.runtime.claude_native_dir.as_deref(),
+            self.runtime.claude_integration_preference,
+        );
 
         Ok((inventory, claude_native))
     }
@@ -420,27 +417,6 @@ impl DashboardRuntime {
         self.apply_runtime_action(Action::SetOperatorAlert(Some(alert)))?;
         Ok(())
     }
-}
-
-fn default_notification_dispatcher() -> NotificationDispatcher {
-    NotificationDispatcher::new(vec![
-        Box::new(CommandNotificationBackend::new(
-            "notify-send",
-            "sh",
-            [
-                "-lc",
-                r#"notify-send "$FOREMAN_NOTIFY_TITLE" "$FOREMAN_NOTIFY_BODY""#,
-            ],
-        )),
-        Box::new(CommandNotificationBackend::new(
-            "osascript",
-            "sh",
-            [
-                "-lc",
-                r#"osascript -e 'display notification (system attribute "FOREMAN_NOTIFY_BODY") with title (system attribute "FOREMAN_NOTIFY_TITLE")'"#,
-            ],
-        )),
-    ])
 }
 
 struct TerminalGuard;

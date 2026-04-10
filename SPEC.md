@@ -51,7 +51,7 @@ yet expose a stable contract.
 - **subagent**: A child task or delegated unit of work surfaced by an agent that supports this concept.
 - **flash navigation**: Short-label jump navigation that lets the operator quickly target any visible item.
 - **pull request panel**: The product surface that shows pull request status and related actions for the selected workspace.
-- **notification profile**: A named set of notification sound settings.
+- **notification profile**: A named notification-behavior preset that determines which status transitions emit alerts.
 - **native mode**: An integration path that consumes structured events, hooks, or machine-readable output from a supported agent harness.
 - **compatibility mode**: A fallback integration path that infers state from tmux-visible process and terminal behavior when no structured integration is available.
 
@@ -92,6 +92,7 @@ yet expose a stable contract.
 - The CLI can load a user config file.
 - The CLI can override runtime polling and capture settings from the command line.
 - The CLI can enable popup behavior.
+- The CLI can enable debug logging mode.
 - The CLI can disable notifications for the current run.
 
 **R3. File logging**
@@ -259,6 +260,8 @@ yet expose a stable contract.
 - It supports debug logging mode.
 - It supports notification suppression for a single run.
 - It supports runtime overrides for monitoring cadence and capture depth.
+- Hook-based native integrations may ship companion helper commands when the
+  main dashboard process is not the right place to consume hook stdin directly.
 
 ### Config contract
 
@@ -270,8 +273,10 @@ yet expose a stable contract.
 - Config supports notification enablement.
 - Config supports notification cooldowns.
 - Config supports notification backend preference.
-- Config supports named notification profiles.
+- Config supports a small set of built-in named notification profiles.
 - Config supports selection of the active notification profile.
+- Config may override the local signal directory or equivalent bridge path for
+  harnesses that use file-backed native integrations.
 - Backward-compatible migration from an older flatter notification-sound format may be supported.
 
 ### Agent integration contract
@@ -336,7 +341,7 @@ yet expose a stable contract.
 ### Selection invariants
 
 - Refreshes do not leave the dashboard pointing at an invalid target.
-- Multi-selection remains logically stable across refresh and sorting changes.
+- Selection remains logically stable across refresh and sorting changes.
 - Collapsed and expanded session state persists across refreshes.
 
 ### Integration precedence invariant
@@ -389,6 +394,7 @@ mise run ci
 **A2. Normal startup logging**
 
 - Given a normal interactive run, when the dashboard starts, it creates a fresh run log, updates the latest-log pointer, and retains only recent logs.
+- Given debug logging mode, startup writes debug lines in addition to the normal structured run log.
 
 **A3. Multi-session discovery**
 
@@ -402,6 +408,7 @@ mise run ci
 
 - Given a supported harness with native integration available, when the dashboard discovers that agent, it uses native mode as the authoritative source of status.
 - Given native integration is not available and the harness is still visible in tmux, the dashboard falls back to compatibility mode instead of dropping the pane entirely.
+- Given config forces compatibility mode for Claude, native signal data does not override compatibility status for that run.
 
 **A6. Default hiding and toggle behavior**
 
@@ -430,6 +437,8 @@ mise run ci
 
 - Given the product is being rebuilt from scratch, when the first native integration is delivered, Claude Code is the first harness supported in native mode.
 - Completion and needs-attention detection for Claude Code are reliable enough to drive notifications without terminal-only parsing as the primary signal.
+- Foreman ships a supported Claude Code hook bridge so native status does not
+  depend on ad hoc user scripts.
 
 **A12. Pane operations**
 
@@ -463,6 +472,8 @@ mise run ci
 
 - Given notifications are enabled, agent completion emits a completion notification unless suppression rules apply.
 - Given notifications are enabled, entry into a `needs attention` state emits an attention notification unless suppression rules apply.
+- Given multiple notification backends are configured, Foreman uses configured backend order and falls back when an earlier backend fails.
+- Given the startup notification profile excludes a transition kind, that transition is suppressed until the operator changes profile at runtime.
 - Muting and profile switching are reflected in the UI.
 
 **A19. Validation stack**

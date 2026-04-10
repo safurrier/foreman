@@ -1,3 +1,6 @@
+use clap::Parser;
+use foreman::app::NotificationProfile;
+use foreman::cli::{run, Cli, RunOutcome};
 use std::process::Command;
 use tempfile::tempdir;
 
@@ -68,4 +71,60 @@ fn default_run_creates_run_log_and_latest_log() {
 
     let log_contents = std::fs::read_to_string(latest_log).expect("latest log should be readable");
     assert!(log_contents.contains("bootstrap_complete"));
+    assert!(!log_contents.contains("[DEBUG]"));
+}
+
+#[test]
+fn debug_flag_emits_debug_log_lines() {
+    let config_dir = tempdir().expect("config dir should exist");
+    let log_dir = tempdir().expect("log dir should exist");
+
+    let output = Command::new(foreman_bin())
+        .args(["--bootstrap-only", "--debug"])
+        .env("FOREMAN_CONFIG_HOME", config_dir.path())
+        .env("FOREMAN_LOG_DIR", log_dir.path())
+        .output()
+        .expect("command should run");
+
+    assert!(output.status.success());
+
+    let log_contents =
+        std::fs::read_to_string(log_dir.path().join("latest.log")).expect("log should exist");
+    assert!(log_contents.contains("[DEBUG] bootstrap_debug_logging_enabled"));
+}
+
+#[test]
+fn bootstrap_uses_notification_defaults_from_config() {
+    let temp_dir = tempdir().expect("temp dir should exist");
+    let config_file = temp_dir.path().join("config.toml");
+    std::fs::write(
+        &config_file,
+        r#"
+[notifications]
+enabled = true
+cooldown_ticks = 7
+active_profile = "attention-only"
+"#,
+    )
+    .expect("config should be written");
+
+    let cli = Cli::parse_from([
+        "foreman",
+        "--config-file",
+        config_file.to_str().expect("utf-8 path"),
+        "--log-dir",
+        temp_dir.path().join("logs").to_str().expect("utf-8 path"),
+    ]);
+
+    let outcome = run(cli).expect("bootstrap should succeed");
+    let summary = match outcome {
+        RunOutcome::Bootstrapped(summary) => summary,
+        other => panic!("expected bootstrapped outcome, got {other:?}"),
+    };
+
+    assert_eq!(
+        summary.state.notifications.profile,
+        NotificationProfile::AttentionOnly
+    );
+    assert_eq!(summary.state.notifications.cooldown_ticks, 7);
 }

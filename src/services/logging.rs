@@ -1,5 +1,5 @@
 use crate::app::{InventorySummary, OperatorAlert};
-use crate::config::RuntimeConfig;
+use crate::config::{LogVerbosity, RuntimeConfig};
 use crate::integrations::ClaudeNativeOverlaySummary;
 use crate::services::notifications::{
     NotificationDecision, NotificationDispatchReceipt, NotificationError, NotificationRequest,
@@ -19,6 +19,7 @@ const LATEST_LOG_NAME: &str = "latest.log";
 pub struct RunLogger {
     run_path: PathBuf,
     latest_path: PathBuf,
+    verbosity: LogVerbosity,
     run_file: File,
     latest_file: File,
 }
@@ -30,7 +31,11 @@ pub struct RunLogSummary {
 }
 
 impl RunLogger {
-    pub fn start(log_dir: &Path, retain_run_logs: usize) -> io::Result<Self> {
+    pub fn start(
+        log_dir: &Path,
+        retain_run_logs: usize,
+        verbosity: LogVerbosity,
+    ) -> io::Result<Self> {
         fs::create_dir_all(log_dir)?;
 
         let run_id = current_run_id();
@@ -50,6 +55,7 @@ impl RunLogger {
         let mut logger = Self {
             run_path,
             latest_path,
+            verbosity,
             run_file,
             latest_file,
         };
@@ -62,11 +68,19 @@ impl RunLogger {
         self.write_line("INFO", message)
     }
 
+    pub fn debug(&mut self, message: &str) -> io::Result<()> {
+        if self.verbosity.includes_debug() {
+            self.write_line("DEBUG", message)
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn log_bootstrap(&mut self, runtime: &RuntimeConfig) -> io::Result<()> {
         self.write_line(
             "INFO",
             &format!(
-                "bootstrap_complete config={} poll_interval_ms={} capture_lines={} popup={} pr_monitoring_enabled={} pr_poll_interval_ms={} notifications_enabled={} tmux_socket={}",
+                "bootstrap_complete config={} poll_interval_ms={} capture_lines={} popup={} pr_monitoring_enabled={} pr_poll_interval_ms={} notifications_enabled={} notification_cooldown_ticks={} notification_profile={} notification_backends={} claude_integration_preference={} log_verbosity={} tmux_socket={}",
                 runtime.config_file.display(),
                 runtime.poll_interval_ms,
                 runtime.capture_lines,
@@ -74,6 +88,16 @@ impl RunLogger {
                 runtime.pull_request_monitoring_enabled,
                 runtime.pull_request_poll_interval_ms,
                 runtime.notifications_enabled,
+                runtime.notification_cooldown_ticks,
+                runtime.notification_profile.label(),
+                runtime
+                    .notification_backends
+                    .iter()
+                    .map(|backend| backend.label())
+                    .collect::<Vec<_>>()
+                    .join(","),
+                runtime.claude_integration_preference.label(),
+                runtime.log_verbosity.label(),
                 runtime
                     .tmux_socket
                     .as_deref()
@@ -286,7 +310,9 @@ mod tests {
     use crate::app::{
         InventorySummary, NotificationKind, OperatorAlert, OperatorAlertLevel, OperatorAlertSource,
     };
-    use crate::config::RuntimeConfig;
+    use crate::config::{
+        IntegrationPreference, LogVerbosity, NotificationBackendName, RuntimeConfig,
+    };
     use crate::integrations::ClaudeNativeOverlaySummary;
     use crate::services::notifications::{
         NotificationDecision, NotificationDecisionReason, NotificationDispatchReceipt,
@@ -303,12 +329,20 @@ mod tests {
             log_dir: log_dir.to_path_buf(),
             tmux_socket: None,
             claude_native_dir: None,
+            log_verbosity: LogVerbosity::Info,
             poll_interval_ms: 1_000,
             capture_lines: 200,
             popup: false,
             pull_request_monitoring_enabled: true,
             pull_request_poll_interval_ms: 30_000,
             notifications_enabled: true,
+            notification_cooldown_ticks: 3,
+            notification_backends: vec![
+                NotificationBackendName::NotifySend,
+                NotificationBackendName::OsaScript,
+            ],
+            notification_profile: crate::app::NotificationProfile::All,
+            claude_integration_preference: IntegrationPreference::Auto,
             log_retention: 2,
         }
     }
@@ -317,7 +351,8 @@ mod tests {
     fn start_creates_run_log_and_latest_log() {
         let temp_dir = tempdir().expect("temp dir should exist");
 
-        let mut logger = RunLogger::start(temp_dir.path(), 5).expect("logger should start");
+        let mut logger =
+            RunLogger::start(temp_dir.path(), 5, LogVerbosity::Info).expect("logger should start");
         logger.info("hello").expect("log write should succeed");
 
         let summary = logger.summary();
@@ -348,7 +383,8 @@ mod tests {
         )
         .expect("old log should be created");
 
-        let _logger = RunLogger::start(temp_dir.path(), 2).expect("logger should start");
+        let _logger =
+            RunLogger::start(temp_dir.path(), 2, LogVerbosity::Info).expect("logger should start");
 
         let mut run_logs: Vec<_> = std::fs::read_dir(temp_dir.path())
             .expect("log dir should be readable")
@@ -366,7 +402,8 @@ mod tests {
     fn bootstrap_log_writes_runtime_summary() {
         let temp_dir = tempdir().expect("temp dir should exist");
         let runtime = runtime_config(temp_dir.path());
-        let mut logger = RunLogger::start(temp_dir.path(), 2).expect("logger should start");
+        let mut logger =
+            RunLogger::start(temp_dir.path(), 2, LogVerbosity::Info).expect("logger should start");
 
         logger
             .log_bootstrap(&runtime)
@@ -378,12 +415,43 @@ mod tests {
         assert!(contents.contains("poll_interval_ms=1000"));
         assert!(contents.contains("pr_monitoring_enabled=true"));
         assert!(contents.contains("pr_poll_interval_ms=30000"));
+        assert!(contents.contains("notification_cooldown_ticks=3"));
+        assert!(contents.contains("notification_profile=ALL"));
+        assert!(contents.contains("notification_backends=notify-send,osascript"));
+        assert!(contents.contains("claude_integration_preference=auto"));
+        assert!(contents.contains("log_verbosity=info"));
+    }
+
+    #[test]
+    fn debug_log_lines_only_write_when_enabled() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let mut info_logger =
+            RunLogger::start(temp_dir.path(), 5, LogVerbosity::Info).expect("logger should start");
+        info_logger
+            .debug("debug_only_message")
+            .expect("debug write should succeed");
+
+        let info_contents = std::fs::read_to_string(info_logger.summary().run_path)
+            .expect("run log should be readable");
+        assert!(!info_contents.contains("debug_only_message"));
+
+        let debug_dir = tempdir().expect("temp dir should exist");
+        let mut debug_logger = RunLogger::start(debug_dir.path(), 5, LogVerbosity::Debug)
+            .expect("logger should start");
+        debug_logger
+            .debug("debug_only_message")
+            .expect("debug write should succeed");
+
+        let debug_contents = std::fs::read_to_string(debug_logger.summary().run_path)
+            .expect("run log should be readable");
+        assert!(debug_contents.contains("[DEBUG] debug_only_message"));
     }
 
     #[test]
     fn inventory_log_writes_visible_counts() {
         let temp_dir = tempdir().expect("temp dir should exist");
-        let mut logger = RunLogger::start(temp_dir.path(), 2).expect("logger should start");
+        let mut logger =
+            RunLogger::start(temp_dir.path(), 2, LogVerbosity::Info).expect("logger should start");
 
         logger
             .log_inventory(&InventorySummary {
@@ -407,7 +475,8 @@ mod tests {
     #[test]
     fn system_stats_log_writes_header_snapshot() {
         let temp_dir = tempdir().expect("temp dir should exist");
-        let mut logger = RunLogger::start(temp_dir.path(), 2).expect("logger should start");
+        let mut logger =
+            RunLogger::start(temp_dir.path(), 2, LogVerbosity::Info).expect("logger should start");
 
         logger
             .log_system_stats(&SystemStatsSnapshot {
@@ -426,7 +495,8 @@ mod tests {
     #[test]
     fn claude_native_log_writes_summary_counts() {
         let temp_dir = tempdir().expect("temp dir should exist");
-        let mut logger = RunLogger::start(temp_dir.path(), 2).expect("logger should start");
+        let mut logger =
+            RunLogger::start(temp_dir.path(), 2, LogVerbosity::Info).expect("logger should start");
 
         logger
             .log_claude_native_summary(&ClaudeNativeOverlaySummary {
@@ -446,7 +516,8 @@ mod tests {
     #[test]
     fn notification_logs_capture_decisions_and_backend_results() {
         let temp_dir = tempdir().expect("temp dir should exist");
-        let mut logger = RunLogger::start(temp_dir.path(), 2).expect("logger should start");
+        let mut logger =
+            RunLogger::start(temp_dir.path(), 2, LogVerbosity::Info).expect("logger should start");
         let request = NotificationRequest {
             pane_id: "alpha:claude".into(),
             pane_title: "claude-main".to_string(),
@@ -492,7 +563,8 @@ mod tests {
     #[test]
     fn operator_alert_log_captures_source_and_level() {
         let temp_dir = tempdir().expect("temp dir should exist");
-        let mut logger = RunLogger::start(temp_dir.path(), 2).expect("logger should start");
+        let mut logger =
+            RunLogger::start(temp_dir.path(), 2, LogVerbosity::Info).expect("logger should start");
 
         logger
             .log_operator_alert(&OperatorAlert::new(
@@ -513,7 +585,8 @@ mod tests {
     #[test]
     fn pull_request_lookup_log_records_workspace_and_outcome() {
         let temp_dir = tempdir().expect("temp dir should exist");
-        let mut logger = RunLogger::start(temp_dir.path(), 2).expect("logger should start");
+        let mut logger =
+            RunLogger::start(temp_dir.path(), 2, LogVerbosity::Info).expect("logger should start");
 
         logger
             .log_pull_request_lookup(

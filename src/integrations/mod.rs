@@ -1,13 +1,19 @@
 mod claude;
+mod claude_hook;
 mod codex;
 mod gemini;
 mod opencode;
 
 use crate::app::{AgentSnapshot, AgentStatus, HarnessKind, IntegrationMode, Inventory};
+use crate::config::IntegrationPreference;
 pub use claude::{
     apply_native_signals as apply_claude_native_signals, ClaudeNativeOverlaySummary,
     FileClaudeNativeSignalSource,
 };
+pub use claude_hook::{
+    bridge_claude_hook_input, ClaudeHookBridgeError, ClaudeHookBridgeRequest, ClaudeHookEventKind,
+};
+use std::path::Path;
 
 const WORKING_STATUS_DEBOUNCE_POLLS: u8 = 2;
 
@@ -79,6 +85,29 @@ pub fn stabilize_inventory(previous: &Inventory, next: &mut Inventory) {
 
                 debounce_snapshot(previous_agent, current);
             }
+        }
+    }
+}
+
+pub fn apply_configured_claude_signals(
+    inventory: &mut Inventory,
+    native_dir: Option<&Path>,
+    preference: IntegrationPreference,
+) -> ClaudeNativeOverlaySummary {
+    match preference {
+        IntegrationPreference::Compatibility => ClaudeNativeOverlaySummary::default(),
+        IntegrationPreference::Auto | IntegrationPreference::Native => {
+            if let Some(dir) = native_dir {
+                return claude::apply_native_signals(
+                    inventory,
+                    &FileClaudeNativeSignalSource::new(dir.to_path_buf()),
+                );
+            }
+
+            claude::compatibility_fallback_summary(
+                inventory,
+                matches!(preference, IntegrationPreference::Native),
+            )
         }
     }
 }

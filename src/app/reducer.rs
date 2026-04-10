@@ -5,7 +5,8 @@ use crate::app::state::{
 };
 use crate::integrations::stabilize_inventory;
 use crate::services::notifications::{
-    evaluate_inventory_notifications, NotificationDecision, NotificationRequest,
+    evaluate_inventory_notifications, NotificationDecision, NotificationPolicyContext,
+    NotificationRequest,
 };
 use crate::services::pull_requests::PullRequestLookup;
 
@@ -617,10 +618,13 @@ fn notification_effects_for_refresh(
     let decisions = evaluate_inventory_notifications(
         previous_inventory,
         &state.inventory,
-        state.selected_pane_id().as_ref(),
-        state.notifications.muted,
-        state.notifications.profile,
-        state.notifications.refresh_tick,
+        NotificationPolicyContext {
+            selected_pane_id: state.selected_pane_id().as_ref(),
+            muted: state.notifications.muted,
+            profile: state.notifications.profile,
+            refresh_tick: state.notifications.refresh_tick,
+            cooldown_ticks: state.notifications.cooldown_ticks,
+        },
         &state.notifications.cooldowns,
     );
 

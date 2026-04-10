@@ -255,3 +255,15 @@ record the actual validation runs.
   Result: fail after Rust checks and smoke tests passed; the local Docker/Colima
   socket was unavailable and `gcloud.auth.docker-helper` could not refresh
   registry credentials in non-interactive mode
+
+## 2026-04-09 15:20 - Post-runtime environment rerun
+
+- `colima start`
+  Result: pass
+- `docker info`
+  Result: pass
+- `mise run verify`
+  Result: pass
+
+The earlier heavy-validation failure was caused by the stopped local Colima
+profile behind the active Docker context rather than a Rust/runtime defect.

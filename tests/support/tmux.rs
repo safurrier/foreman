@@ -68,7 +68,11 @@ impl TmuxFixture {
     }
 
     pub fn wait_for_capture(&self, target: &str, needle: &str) {
-        for _ in 0..40 {
+        self.wait_for_capture_attempts(target, needle, 40);
+    }
+
+    pub fn wait_for_capture_attempts(&self, target: &str, needle: &str, attempts: usize) {
+        for _ in 0..attempts {
             let capture = self.capture(target);
             if capture.contains(needle) {
                 return;
@@ -81,7 +85,11 @@ impl TmuxFixture {
 
     #[allow(dead_code)]
     pub fn wait_for_alt_capture(&self, target: &str, needle: &str) {
-        for _ in 0..80 {
+        self.wait_for_alt_capture_attempts(target, needle, 80);
+    }
+
+    pub fn wait_for_alt_capture_attempts(&self, target: &str, needle: &str, attempts: usize) {
+        for _ in 0..attempts {
             let capture = self.capture_alt(target);
             if capture.contains(needle) {
                 return;

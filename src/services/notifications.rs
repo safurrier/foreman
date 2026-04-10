@@ -2,11 +2,10 @@ use crate::app::{
     AgentStatus, Inventory, NotificationCooldownKey, NotificationKind, NotificationProfile, Pane,
     PaneId,
 };
+use crate::config::NotificationBackendName;
 use std::fmt;
 use std::path::PathBuf;
 use std::process::Command;
-
-pub const DEFAULT_NOTIFICATION_COOLDOWN_TICKS: u64 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotificationRequest {
@@ -47,6 +46,15 @@ pub struct NotificationDecision {
     pub kind: NotificationKind,
     pub reason: NotificationDecisionReason,
     pub request: Option<NotificationRequest>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NotificationPolicyContext<'a> {
+    pub selected_pane_id: Option<&'a PaneId>,
+    pub muted: bool,
+    pub profile: NotificationProfile,
+    pub refresh_tick: u64,
+    pub cooldown_ticks: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -95,6 +103,13 @@ pub struct NotificationDispatcher {
 impl NotificationDispatcher {
     pub fn new(backends: Vec<Box<dyn NotificationBackend>>) -> Self {
         Self { backends }
+    }
+
+    pub fn backend_names(&self) -> Vec<String> {
+        self.backends
+            .iter()
+            .map(|backend| backend.name().to_string())
+            .collect()
     }
 
     pub fn dispatch(
@@ -189,13 +204,16 @@ impl NotificationBackend for CommandNotificationBackend {
     }
 }
 
+pub fn build_notification_dispatcher(
+    backends: &[NotificationBackendName],
+) -> NotificationDispatcher {
+    NotificationDispatcher::new(backends.iter().copied().map(configured_backend).collect())
+}
+
 pub fn evaluate_inventory_notifications(
     previous: &Inventory,
     current: &Inventory,
-    selected_pane_id: Option<&PaneId>,
-    muted: bool,
-    profile: NotificationProfile,
-    refresh_tick: u64,
+    context: NotificationPolicyContext<'_>,
     cooldowns: &std::collections::BTreeMap<NotificationCooldownKey, u64>,
 ) -> Vec<NotificationDecision> {
     current
@@ -209,7 +227,7 @@ pub fn evaluate_inventory_notifications(
             let (kind, transition_reason) =
                 transition_kind(previous_agent.status, current_agent.status)?;
 
-            if muted {
+            if context.muted {
                 return Some(NotificationDecision {
                     pane_id: pane.id.clone(),
                     kind,
@@ -218,7 +236,7 @@ pub fn evaluate_inventory_notifications(
                 });
             }
 
-            if !profile.allows(kind) {
+            if !context.profile.allows(kind) {
                 return Some(NotificationDecision {
                     pane_id: pane.id.clone(),
                     kind,
@@ -227,7 +245,7 @@ pub fn evaluate_inventory_notifications(
                 });
             }
 
-            if selected_pane_id == Some(&pane.id) {
+            if context.selected_pane_id == Some(&pane.id) {
                 return Some(NotificationDecision {
                     pane_id: pane.id.clone(),
                     kind,
@@ -241,7 +259,7 @@ pub fn evaluate_inventory_notifications(
                 kind,
             };
             if cooldowns.get(&cooldown_key).is_some_and(|last_tick| {
-                refresh_tick.saturating_sub(*last_tick) < DEFAULT_NOTIFICATION_COOLDOWN_TICKS
+                context.refresh_tick.saturating_sub(*last_tick) < context.cooldown_ticks
             }) {
                 return Some(NotificationDecision {
                     pane_id: pane.id.clone(),
@@ -259,6 +277,27 @@ pub fn evaluate_inventory_notifications(
             })
         })
         .collect()
+}
+
+fn configured_backend(name: NotificationBackendName) -> Box<dyn NotificationBackend> {
+    match name {
+        NotificationBackendName::NotifySend => Box::new(CommandNotificationBackend::new(
+            name.label(),
+            "sh",
+            [
+                "-c",
+                r#"notify-send "$FOREMAN_NOTIFY_TITLE" "$FOREMAN_NOTIFY_BODY""#,
+            ],
+        )),
+        NotificationBackendName::OsaScript => Box::new(CommandNotificationBackend::new(
+            name.label(),
+            "sh",
+            [
+                "-c",
+                r#"osascript -e 'display notification (system attribute "FOREMAN_NOTIFY_BODY") with title (system attribute "FOREMAN_NOTIFY_TITLE")'"#,
+            ],
+        )),
+    }
 }
 
 fn transition_kind(
@@ -307,13 +346,15 @@ fn notification_request(pane: &Pane, kind: NotificationKind) -> NotificationRequ
 #[cfg(test)]
 mod tests {
     use super::{
-        evaluate_inventory_notifications, NotificationBackend, NotificationDecisionReason,
-        NotificationDispatcher, NotificationError,
+        build_notification_dispatcher, evaluate_inventory_notifications, NotificationBackend,
+        NotificationDecisionReason, NotificationDispatcher, NotificationError,
+        NotificationPolicyContext,
     };
     use crate::app::{
         inventory, AgentStatus, HarnessKind, NotificationCooldownKey, NotificationKind,
         NotificationProfile, PaneBuilder, SessionBuilder, WindowBuilder,
     };
+    use crate::config::NotificationBackendName;
     use std::cell::RefCell;
     use std::path::PathBuf;
     use std::rc::Rc;
@@ -337,10 +378,13 @@ mod tests {
         let decisions = evaluate_inventory_notifications(
             &previous,
             &current,
-            None,
-            false,
-            NotificationProfile::All,
-            4,
+            NotificationPolicyContext {
+                selected_pane_id: None,
+                muted: false,
+                profile: NotificationProfile::All,
+                refresh_tick: 4,
+                cooldown_ticks: 3,
+            },
             &Default::default(),
         );
 
@@ -361,10 +405,13 @@ mod tests {
         let decisions = evaluate_inventory_notifications(
             &previous,
             &current,
-            Some(&"alpha:claude".into()),
-            false,
-            NotificationProfile::All,
-            4,
+            NotificationPolicyContext {
+                selected_pane_id: Some(&"alpha:claude".into()),
+                muted: false,
+                profile: NotificationProfile::All,
+                refresh_tick: 4,
+                cooldown_ticks: 3,
+            },
             &Default::default(),
         );
 
@@ -391,10 +438,13 @@ mod tests {
         let profile_filtered = evaluate_inventory_notifications(
             &previous,
             &current,
-            None,
-            false,
-            NotificationProfile::AttentionOnly,
-            5,
+            NotificationPolicyContext {
+                selected_pane_id: None,
+                muted: false,
+                profile: NotificationProfile::AttentionOnly,
+                refresh_tick: 5,
+                cooldown_ticks: 3,
+            },
             &Default::default(),
         );
         assert_eq!(
@@ -405,15 +455,35 @@ mod tests {
         let cooldown_filtered = evaluate_inventory_notifications(
             &previous,
             &current,
-            None,
-            false,
-            NotificationProfile::All,
-            5,
+            NotificationPolicyContext {
+                selected_pane_id: None,
+                muted: false,
+                profile: NotificationProfile::All,
+                refresh_tick: 5,
+                cooldown_ticks: 3,
+            },
             &cooldowns,
         );
         assert_eq!(
             cooldown_filtered[0].reason,
             NotificationDecisionReason::CooldownActive
+        );
+
+        let custom_cooldown = evaluate_inventory_notifications(
+            &previous,
+            &current,
+            NotificationPolicyContext {
+                selected_pane_id: None,
+                muted: false,
+                profile: NotificationProfile::All,
+                refresh_tick: 5,
+                cooldown_ticks: 2,
+            },
+            &cooldowns,
+        );
+        assert_eq!(
+            custom_cooldown[0].reason,
+            NotificationDecisionReason::WorkingBecameReady
         );
     }
 
@@ -509,6 +579,18 @@ mod tests {
         assert_eq!(
             calls.borrow().as_slice(),
             &["primary:needs_attention".to_string()]
+        );
+    }
+
+    #[test]
+    fn configured_dispatcher_keeps_requested_backend_order() {
+        let dispatcher = build_notification_dispatcher(&[
+            NotificationBackendName::OsaScript,
+            NotificationBackendName::NotifySend,
+        ]);
+        assert_eq!(
+            dispatcher.backend_names(),
+            vec!["osascript".to_string(), "notify-send".to_string()]
         );
     }
 }

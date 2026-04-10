@@ -1,0 +1,6 @@
+slug: full-spec-gap-closure
+branch: feat/add-foreman-spec
+created: 2026-04-09
+pr:
+status: completed
+source: close the remaining full-v1 spec gaps after the interactive runtime landed

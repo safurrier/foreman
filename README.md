@@ -18,11 +18,79 @@ mise run dev
 ## Current Status
 
 - `foreman --config-path` and `foreman --init-config` are live.
+- `foreman --debug` enables debug-level run logging without changing the normal
+  interactive startup path.
 - Normal startup bootstraps config, logging, tmux inventory, native Claude
   overlays, and header-level system stats.
+- Config now controls notification cooldowns, backend order, startup profile,
+  and Claude native-vs-compatibility preference.
+- `foreman-claude-hook` bridges official Claude Code hook events into Foreman's
+  per-pane native status files, with a default state path and optional
+  config-level override.
 - Normal startup now enters the interactive dashboard loop with live tmux
   polling, direct input, popup focus-close behavior, and binary-level tmux E2E
   coverage.
+
+## Claude Code Native Hooks
+
+Foreman now ships a small companion binary, `foreman-claude-hook`, for Claude
+Code native status integration. The bridge reads official Claude hook JSON on
+stdin, uses `TMUX_PANE` to identify the pane, and writes the per-pane signal
+file that Foreman overlays in native mode.
+
+By default the bridge writes to the state-path sibling of the run logs. You can
+override that path with `[integrations.claude_code].native_dir` in
+`config.toml`.
+
+Example `.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "foreman-claude-hook"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt|elicitation_dialog",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "foreman-claude-hook"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "foreman-claude-hook"
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "foreman-claude-hook"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
 
 ## Starting New Work
 
@@ -67,3 +135,6 @@ This project uses [mise](https://mise.jdx.dev/) as the task runner. All quality 
 are accessible via `mise run <task>`.
 
 CI calls a single entrypoint: `mise run ci`.
+
+If your local Docker context points at Colima, `mise run verify` expects the
+active Colima profile to be running before the Docker build step starts.

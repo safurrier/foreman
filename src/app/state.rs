@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -116,7 +117,8 @@ impl NotificationKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum NotificationProfile {
     #[default]
     All,
@@ -604,13 +606,27 @@ pub struct NotificationCooldownKey {
     pub kind: NotificationKind,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotificationState {
     pub muted: bool,
     pub profile: NotificationProfile,
     pub refresh_tick: u64,
+    pub cooldown_ticks: u64,
     pub cooldowns: BTreeMap<NotificationCooldownKey, u64>,
     pub last_status: Option<String>,
+}
+
+impl Default for NotificationState {
+    fn default() -> Self {
+        Self {
+            muted: false,
+            profile: NotificationProfile::default(),
+            refresh_tick: 0,
+            cooldown_ticks: crate::config::DEFAULT_NOTIFICATION_COOLDOWN_TICKS,
+            cooldowns: BTreeMap::new(),
+            last_status: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

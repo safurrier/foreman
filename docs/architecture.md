@@ -42,14 +42,14 @@ testable as the app grows.
 
 | Component | Purpose |
 |---|---|
-| CLI + config | Parse startup flags, config path/init flows, runtime overrides, popup mode, and notification toggles |
+| CLI + config | Parse startup flags, config path/init flows, public debug logging, runtime overrides, popup mode, notification policy defaults, and per-harness integration preference |
 | Runtime loop | Own terminal setup, event polling, redraw cadence, effect execution, and runtime-level soft-failure alerting during interactive runs |
 | App state core | Own `Command`, `Action`, `Mode`, `Focus`, selection state, filters, sort mode, modal state, and reducer logic |
 | Ratatui renderer | Render header, sidebar, preview, input, footer, help, and overlays from pure state |
 | tmux adapter | Discover sessions/windows/panes, capture pane output, focus panes, send input, rename windows, create windows, and kill panes |
 | Harness integrations | Detect supported harness families, translate compatibility signals, and overlay native signals such as Claude when available |
 | Pull request service | Resolve pull request metadata for the selected workspace, and own browser-open and clipboard-copy seams with graceful degradation |
-| Notification service | Apply pure suppression and cooldown policy, dispatch best-effort notifications with backend fallback, and surface observable decisions |
+| Notification service | Apply pure suppression and cooldown policy, build dispatcher order from typed config, dispatch best-effort notifications with backend fallback, and surface observable decisions |
 | System stats service | Capture a lightweight local CPU and memory pressure snapshot for the header without turning Foreman into a telemetry system |
 | Logging + telemetry | Persist structured run logs, latest-run pointer, retention cleanup, and header-level system stats |
 
@@ -79,6 +79,8 @@ testable as the app grows.
   content come from an external process and may be stale, partial, or missing.
 - **Harness boundary**: native integration signals are more structured but still
   external to Foreman and may disconnect or downgrade to compatibility mode.
+  For Claude Code, those signals arrive through official hook events bridged
+  into per-pane JSON files keyed by `TMUX_PANE`.
 - **Local tooling boundary**: Git, GitHub-aware commands, browser openers,
   clipboard tools, and notification backends are optional dependencies and must
   fail soft.
@@ -126,9 +128,9 @@ testable as the app grows.
   sidebar row indexes or cursor position.
 - Pull request cache entries, detail-panel state, and auto-open suppression are
   keyed by workspace path in `AppState`.
-- Notification mute state, profile, refresh tick, and per-pane cooldowns also
-  live in `AppState`; refresh reconciliation emits notification effects but does
-  not choose notification backends directly.
+- Notification mute state, profile, refresh tick, configured cooldown, and
+  per-pane cooldowns also live in `AppState`; refresh reconciliation emits
+  notification effects but does not choose notification backends directly.
 - Header system stats and the latest operator-visible alert also live in
   `AppState`, so rendering stays pure and failure surfaces remain testable.
 - Pull request detail may auto-open on first discovery, but once the operator
@@ -141,6 +143,11 @@ testable as the app grows.
 
 - Native integration state wins over compatibility heuristics when both are
   available for the same agent.
+- Harness mode preference is typed config owned by runtime/bootstrap code; the
+  reducer only consumes the resulting inventory state.
+- Claude Code hook bridging is outside the reducer and renderer. The bridge
+  reads hook stdin, resolves the pane identity, and writes atomic signal files
+  that runtime later consumes.
 - Compatibility heuristics are allowed to be lower confidence, but they must
   fail soft rather than hide the pane entirely.
 - All tmux, GitHub, browser, clipboard, and notification effects flow through
@@ -151,7 +158,8 @@ testable as the app grows.
 
 ### Persistence and runtime boundaries
 
-- Config is user-scoped, typed, and safe to load with defaults.
+- Config is user-scoped, typed, safe to load with defaults, and additive so
+  older config files continue to parse when new fields land.
 - Logs are user-scoped, keep a latest-run pointer, and clean up old runs
   automatically.
 - No reliance on absolute paths, mutable global state, or undeclared local
@@ -269,13 +277,14 @@ boundaries unless an ADR changes them.
 
 | Module | Purpose | Docs |
 |---|---|---|
-| src/cli.rs | CLI flags, config path/init flows, runtime override parsing, and bootstrap wiring | `SPEC.md` |
+| src/cli.rs | CLI flags, config path/init flows, debug logging flag, runtime override parsing, and bootstrap wiring | `SPEC.md` |
+| src/bin/foreman-claude-hook.rs | Claude Code hook bridge CLI that resolves the signal directory and writes native per-pane status files | This document |
 | src/runtime.rs | Interactive terminal setup, event polling, redraw cadence, effect execution, and runtime-level soft-failure handling | This document |
 | src/app/ | Core state, commands, actions, reducer, selectors, drafts, modal targets, and UI-facing invariants | This document |
 | src/ui/ | Ratatui layout, widgets, rendering, and buffer-test helpers | This document |
 | src/adapters/tmux.rs | tmux discovery, capture, pane working-directory lookup, focus, send-input, rename, spawn, and kill seam; transport only, no status heuristics | `SPEC.md` |
-| src/integrations/ | Harness recognition, compatibility status derivation, debounce logic, and native-over-compatibility precedence overlays | `SPEC.md` |
-| src/services/notifications.rs | Notification policy, cooldowns, backend fallback, and dispatch seams | `SPEC.md` |
+| src/integrations/ | Harness recognition, compatibility status derivation, debounce logic, hook-to-signal bridging, native-over-compatibility precedence overlays, and config-driven Claude mode preference | `SPEC.md` |
+| src/services/notifications.rs | Notification policy, configured cooldowns, backend-order wiring, backend fallback, and dispatch seams | `SPEC.md` |
 | src/services/pull_requests.rs | Pull request lookup, browser/copy effects, and degradation behavior | `SPEC.md` |
 | src/services/system_stats.rs | Header-level CPU and memory pressure snapshots behind a small service seam | This document |
 | src/services/logging.rs | Run logs, latest-run pointer, retention cleanup, and bootstrap/inventory summaries | `SPEC.md` |
