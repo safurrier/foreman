@@ -83,3 +83,16 @@ The useful rule here is to treat a one-off failure in the tmux-heavy suite as a
 signal to rerun the exact test and then the full fast gate before changing
 behavioral code. That keeps the response proportional and avoids papering over
 timing noise with unnecessary product changes.
+
+## 2026-04-10 12:10 - heavy CI exposed a transient tmux startup race
+
+The next failing CI leg was not another shell-compatibility bug or a product
+regression. `CI/Full Validation` failed in `claude_native` because the very
+first tmux `new-session` call sometimes hit `server exited unexpectedly` under
+the heavier verification load, while immediate reruns passed.
+
+The durable fix was to harden the shared tmux fixture, not the app code. The
+fixture now retries transient tmux startup errors during session creation and
+pane splits. That stabilized the same test path locally, including repeated
+reruns of the previously flaky Claude-native bootstrap and a full
+`mise run verify`.

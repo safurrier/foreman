@@ -103,3 +103,18 @@ Notes:
   fixes were staged.
 - The release branch was kept blocked until the full `check` suite passed
   again, so the portability fix and the validation trail stayed aligned.
+
+## 2026-04-10 12:10
+
+- `cargo test --test claude_native bootstrap_prefers_claude_native_signal_and_falls_back_to_compatibility -- --nocapture`
+  - pass 10 consecutive runs
+- `mise run verify`
+  - pass
+
+Notes:
+- `CI/Full Validation` failed on the first tmux bootstrap in `claude_native`
+  with `server exited unexpectedly`, even though the same suite passed locally
+  in lighter runs.
+- The shared tmux fixture now retries transient startup errors such as
+  `server exited unexpectedly` and `no server running` for session creation and
+  pane splits, which made the heavy local verification path green again.

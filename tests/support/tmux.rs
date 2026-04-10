@@ -41,7 +41,7 @@ impl TmuxFixture {
     }
 
     pub fn new_session(&self, session_name: &str, command: &str) -> String {
-        self.run_checked(&[
+        self.run_checked_retry(&[
             "new-session",
             "-d",
             "-P",
@@ -55,7 +55,7 @@ impl TmuxFixture {
 
     #[allow(dead_code)]
     pub fn split_window(&self, target: &str, command: &str) -> String {
-        self.run_checked(&[
+        self.run_checked_retry(&[
             "split-window",
             "-d",
             "-P",
@@ -205,10 +205,51 @@ impl TmuxFixture {
             .trim()
             .to_string()
     }
+
+    fn run_checked_retry(&self, args: &[&str]) -> String {
+        const RETRIES: usize = 5;
+
+        let mut last_error = None;
+        for attempt in 0..RETRIES {
+            let output = Command::new("tmux")
+                .arg("-S")
+                .arg(&self.socket_path)
+                .args(args)
+                .output()
+                .expect("tmux command should run");
+
+            if output.status.success() {
+                return String::from_utf8(output.stdout)
+                    .expect("tmux output should be utf-8")
+                    .trim()
+                    .to_string();
+            }
+
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            if attempt + 1 == RETRIES || !is_transient_server_error(&stderr) {
+                last_error = Some(stderr);
+                break;
+            }
+
+            thread::sleep(Duration::from_millis(50));
+            last_error = Some(stderr);
+        }
+
+        panic!(
+            "tmux command failed: tmux -S {} {}\nstderr: {}",
+            self.socket_path.display(),
+            args.join(" "),
+            last_error.unwrap_or_else(|| "unknown tmux error".to_string())
+        );
+    }
 }
 
 fn shell_escape(input: &str) -> String {
     format!("'{}'", input.replace('\'', r#"'\''"#))
+}
+
+fn is_transient_server_error(stderr: &str) -> bool {
+    stderr.contains("server exited unexpectedly") || stderr.contains("no server running")
 }
 
 impl Drop for TmuxFixture {

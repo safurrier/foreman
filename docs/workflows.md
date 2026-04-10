@@ -55,6 +55,10 @@ FOREMAN_REAL_PI_E2E=1 cargo test --test pi_real_e2e -- --ignored --nocapture
 - Use `sh` in tmux fixture commands. Do not assume `zsh`.
 - If a dashboard smoke test sends input or focuses a pane, make sure the target
   pane is recognized as an agent by the harness-detection layer.
+- If tmux CI fails with `server exited unexpectedly` or `no server running` at
+  the first session bootstrap, inspect fixture portability and startup timing
+  before changing product code. Foreman's shared fixture already retries those
+  transient startup errors.
 - Keep alternate-screen capture fallbacks in mind. Detached tmux panes can
   return a successful but blank alternate-screen capture.
 - Write native-signal fixture files atomically so refresh polls never see a
