@@ -5,8 +5,8 @@ use crate::app::{
 };
 use crate::cli::PreparedBootstrap;
 use crate::integrations::{
-    apply_configured_claude_signals, apply_configured_codex_signals, ClaudeNativeOverlaySummary,
-    CodexNativeOverlaySummary,
+    apply_configured_claude_signals, apply_configured_codex_signals, apply_configured_pi_signals,
+    ClaudeNativeOverlaySummary, CodexNativeOverlaySummary, PiNativeOverlaySummary,
 };
 use crate::services::logging::RunLogger;
 use crate::services::notifications::{
@@ -284,7 +284,7 @@ impl DashboardRuntime {
     fn refresh_inventory(&mut self) -> Result<(), RuntimeError> {
         self.logger.debug("inventory_refresh_started")?;
         match self.load_inventory_with_native() {
-            Ok((inventory, claude_native, codex_native)) => {
+            Ok((inventory, claude_native, codex_native, pi_native)) => {
                 self.apply_runtime_action(Action::SetStartupError(None))?;
                 self.clear_alert_source(OperatorAlertSource::Tmux)?;
                 self.apply_runtime_action(Action::ReplaceInventory(inventory))?;
@@ -298,6 +298,10 @@ impl DashboardRuntime {
                 self.logger.log_codex_native_summary(&codex_native)?;
                 for warning in &codex_native.warnings {
                     self.logger.log_codex_native_warning(warning)?;
+                }
+                self.logger.log_pi_native_summary(&pi_native)?;
+                for warning in &pi_native.warnings {
+                    self.logger.log_pi_native_warning(warning)?;
                 }
             }
             Err(error_message) => {
@@ -323,6 +327,7 @@ impl DashboardRuntime {
             crate::app::Inventory,
             ClaudeNativeOverlaySummary,
             CodexNativeOverlaySummary,
+            PiNativeOverlaySummary,
         ),
         String,
     > {
@@ -341,8 +346,13 @@ impl DashboardRuntime {
             self.runtime.codex_native_dir.as_deref(),
             self.runtime.codex_integration_preference,
         );
+        let pi_native = apply_configured_pi_signals(
+            &mut inventory,
+            self.runtime.pi_native_dir.as_deref(),
+            self.runtime.pi_integration_preference,
+        );
 
-        Ok((inventory, claude_native, codex_native))
+        Ok((inventory, claude_native, codex_native, pi_native))
     }
 
     fn refresh_system_stats(&mut self) -> Result<(), RuntimeError> {

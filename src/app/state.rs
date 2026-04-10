@@ -156,6 +156,7 @@ impl NotificationProfile {
 pub enum HarnessKind {
     ClaudeCode,
     CodexCli,
+    Pi,
     GeminiCli,
     OpenCode,
 }

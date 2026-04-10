@@ -4,8 +4,8 @@ use crate::app::{
 };
 use crate::config::{load_config, resolve_paths, write_default_config, ConfigError, RuntimeConfig};
 use crate::integrations::{
-    apply_configured_claude_signals, apply_configured_codex_signals, ClaudeNativeOverlaySummary,
-    CodexNativeOverlaySummary,
+    apply_configured_claude_signals, apply_configured_codex_signals, apply_configured_pi_signals,
+    ClaudeNativeOverlaySummary, CodexNativeOverlaySummary, PiNativeOverlaySummary,
 };
 use crate::services::logging::{RunLogSummary, RunLogger};
 use crate::services::system_stats::{SysinfoSystemStatsBackend, SystemStatsService};
@@ -53,6 +53,9 @@ pub struct Cli {
     pub codex_native_dir: Option<PathBuf>,
 
     #[arg(long, hide = true)]
+    pub pi_native_dir: Option<PathBuf>,
+
+    #[arg(long, hide = true)]
     pub bootstrap_only: bool,
 }
 
@@ -71,6 +74,7 @@ pub struct BootstrapSummary {
     pub inventory: InventorySummary,
     pub claude_native: ClaudeNativeOverlaySummary,
     pub codex_native: CodexNativeOverlaySummary,
+    pub pi_native: PiNativeOverlaySummary,
 }
 
 pub(crate) struct PreparedBootstrap {
@@ -79,6 +83,7 @@ pub(crate) struct PreparedBootstrap {
     pub state: AppState,
     pub claude_native: ClaudeNativeOverlaySummary,
     pub codex_native: CodexNativeOverlaySummary,
+    pub pi_native: PiNativeOverlaySummary,
 }
 
 impl PreparedBootstrap {
@@ -90,6 +95,7 @@ impl PreparedBootstrap {
             state: self.state,
             claude_native: self.claude_native,
             codex_native: self.codex_native,
+            pi_native: self.pi_native,
         }
     }
 }
@@ -193,7 +199,7 @@ pub(crate) fn prepare_bootstrap(
     logger
         .debug("bootstrap_debug_logging_enabled")
         .map_err(ConfigError::Io)?;
-    let (state, claude_native, codex_native) = bootstrap_state(&runtime);
+    let (state, claude_native, codex_native, pi_native) = bootstrap_state(&runtime);
     let inventory = state.inventory_summary();
     logger.log_inventory(&inventory).map_err(ConfigError::Io)?;
     logger
@@ -221,6 +227,14 @@ pub(crate) fn prepare_bootstrap(
             .log_codex_native_warning(warning)
             .map_err(ConfigError::Io)?;
     }
+    logger
+        .log_pi_native_summary(&pi_native)
+        .map_err(ConfigError::Io)?;
+    for warning in &pi_native.warnings {
+        logger
+            .log_pi_native_warning(warning)
+            .map_err(ConfigError::Io)?;
+    }
 
     Ok(PreparedBootstrap {
         runtime,
@@ -228,6 +242,7 @@ pub(crate) fn prepare_bootstrap(
         state,
         claude_native,
         codex_native,
+        pi_native,
     })
 }
 
@@ -237,6 +252,7 @@ pub(crate) fn bootstrap_state(
     AppState,
     ClaudeNativeOverlaySummary,
     CodexNativeOverlaySummary,
+    PiNativeOverlaySummary,
 ) {
     let system_stats = SystemStatsService::new(SysinfoSystemStatsBackend::new())
         .snapshot()
@@ -254,6 +270,11 @@ pub(crate) fn bootstrap_state(
                 runtime.codex_native_dir.as_deref(),
                 runtime.codex_integration_preference,
             );
+            let pi_native = apply_configured_pi_signals(
+                &mut inventory,
+                runtime.pi_native_dir.as_deref(),
+                runtime.pi_integration_preference,
+            );
 
             let mut state = AppState {
                 popup_mode: runtime.popup,
@@ -263,7 +284,7 @@ pub(crate) fn bootstrap_state(
             state.notifications.muted = !runtime.notifications_enabled;
             state.notifications.profile = runtime.notification_profile;
             state.notifications.cooldown_ticks = runtime.notification_cooldown_ticks;
-            (state, claude_native, codex_native)
+            (state, claude_native, codex_native, pi_native)
         }
         Err(error) => {
             let mut state = AppState {
@@ -284,6 +305,7 @@ pub(crate) fn bootstrap_state(
                 state,
                 ClaudeNativeOverlaySummary::default(),
                 CodexNativeOverlaySummary::default(),
+                PiNativeOverlaySummary::default(),
             )
         }
     }

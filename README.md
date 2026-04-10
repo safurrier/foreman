@@ -20,14 +20,17 @@ mise run dev
 - `foreman --config-path` and `foreman --init-config` are live.
 - `foreman --debug` enables debug-level run logging without changing the normal
   interactive startup path.
-- Normal startup bootstraps config, logging, tmux inventory, native Claude and
-  Codex overlays, and header-level system stats.
+- Normal startup bootstraps config, logging, tmux inventory, native Claude,
+  Codex, and Pi overlays, and header-level system stats.
 - Config now controls notification cooldowns, backend order, startup profile,
   and per-harness native-vs-compatibility preference.
 - `foreman-claude-hook` bridges official Claude Code hook events into Foreman's
   per-pane native status files, with a default state path and optional
   config-level override.
 - `foreman-codex-hook` bridges official Codex hook events into the same
+  per-pane native status model, with its own default state path and optional
+  config-level override.
+- `foreman-pi-hook` bridges Pi extension lifecycle events into that same
   per-pane native status model, with its own default state path and optional
   config-level override.
 - Normal startup now enters the interactive dashboard loop with live tmux
@@ -132,6 +135,37 @@ Example repo-local `.codex/hooks.json`:
       }
     ]
   }
+}
+```
+
+## Pi Native Extension Bridge
+
+Foreman also ships `foreman-pi-hook` for Pi native status integration. Pi does
+not use the same external hook JSON surface as Claude Code or Codex CLI here;
+instead, a small Pi extension calls the bridge on Pi lifecycle events and the
+bridge writes the per-pane signal file that Foreman overlays in native mode.
+
+By default the bridge writes next to Foreman's run logs under `pi-native`. You
+can override that path with `[integrations.pi].native_dir` in `config.toml`.
+
+Example project-local `.pi/extensions/foreman.ts`:
+
+```typescript
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { spawnSync } from "node:child_process";
+
+export default function (pi: ExtensionAPI) {
+  const runHook = (event: string) => {
+    const args = ["--event", event];
+    if (process.env.TMUX_PANE) {
+      args.push("--pane-id", process.env.TMUX_PANE);
+    }
+    spawnSync("foreman-pi-hook", args, { stdio: "inherit" });
+  };
+
+  pi.on("agent_start", async () => runHook("agent-start"));
+  pi.on("agent_end", async () => runHook("agent-end"));
+  pi.on("session_shutdown", async () => runHook("session-shutdown"));
 }
 ```
 

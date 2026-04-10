@@ -118,12 +118,14 @@ yet expose a stable contract.
 - Foreman recognizes these supported harness families:
 - Claude Code
 - Codex CLI
+- Pi
 - Gemini CLI
 - OpenCode
 - Foreman distinguishes recognized agent panes from unrecognized panes.
 - The rebuild plan prioritizes integrations in this order:
 - Claude Code as the first first-class native integration
 - Codex CLI next
+- Pi after Codex, using the harness extension lifecycle rather than tmux-only parsing
 - Additional harnesses afterward, using native integrations where practical and compatibility integrations otherwise
 
 **R7. Visibility controls**
@@ -408,7 +410,7 @@ mise run ci
 
 - Given a supported harness with native integration available, when the dashboard discovers that agent, it uses native mode as the authoritative source of status.
 - Given native integration is not available and the harness is still visible in tmux, the dashboard falls back to compatibility mode instead of dropping the pane entirely.
-- Given config forces compatibility mode for Claude or Codex, native signal data does not override compatibility status for that run.
+- Given config forces compatibility mode for Claude, Codex, or Pi, native signal data does not override compatibility status for that run.
 
 **A6. Default hiding and toggle behavior**
 
@@ -447,6 +449,16 @@ mise run ci
   primary source.
 - Foreman ships a supported Codex hook bridge so Codex native status does not
   depend on ad hoc user scripts.
+
+**A11c. Pi native extension support**
+
+- Given Pi native integration is configured, Pi lifecycle events can drive
+  native `working` and `idle` status without terminal parsing as the primary
+  source.
+- Foreman ships a supported Pi bridge and documented extension pattern so Pi
+  native status does not depend on ad hoc user scripts.
+- Real Pi-binary E2E proves a dashboard-sent prompt can produce native Pi
+  signals and a completion notification.
 
 **A12. Pane operations**
 

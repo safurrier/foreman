@@ -211,6 +211,7 @@ impl IntegrationPreference {
 pub struct IntegrationConfig {
     pub claude_code: HarnessIntegrationConfig,
     pub codex_cli: HarnessIntegrationConfig,
+    pub pi: HarnessIntegrationConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -246,6 +247,7 @@ pub struct RuntimeConfig {
     pub tmux_socket: Option<PathBuf>,
     pub claude_native_dir: Option<PathBuf>,
     pub codex_native_dir: Option<PathBuf>,
+    pub pi_native_dir: Option<PathBuf>,
     pub log_verbosity: LogVerbosity,
     pub poll_interval_ms: u64,
     pub capture_lines: usize,
@@ -258,6 +260,7 @@ pub struct RuntimeConfig {
     pub notification_profile: NotificationProfile,
     pub claude_integration_preference: IntegrationPreference,
     pub codex_integration_preference: IntegrationPreference,
+    pub pi_integration_preference: IntegrationPreference,
     pub log_retention: usize,
 }
 
@@ -273,6 +276,11 @@ impl RuntimeConfig {
             .clone()
             .or(file_config.integrations.codex_cli.native_dir.clone())
             .or_else(|| Some(default_codex_native_dir(&paths.log_dir)));
+        let pi_native_dir = cli
+            .pi_native_dir
+            .clone()
+            .or(file_config.integrations.pi.native_dir.clone())
+            .or_else(|| Some(default_pi_native_dir(&paths.log_dir)));
 
         Self {
             config_file: paths.config_file,
@@ -280,6 +288,7 @@ impl RuntimeConfig {
             tmux_socket: cli.tmux_socket.clone(),
             claude_native_dir,
             codex_native_dir,
+            pi_native_dir,
             log_verbosity: if cli.debug {
                 LogVerbosity::Debug
             } else {
@@ -304,6 +313,7 @@ impl RuntimeConfig {
             notification_profile: file_config.notifications.active_profile,
             claude_integration_preference: file_config.integrations.claude_code.mode,
             codex_integration_preference: file_config.integrations.codex_cli.mode,
+            pi_integration_preference: file_config.integrations.pi.mode,
             log_retention: file_config.logging.retain_run_logs,
         }
     }
@@ -372,6 +382,10 @@ pub fn default_codex_native_dir(log_dir: &Path) -> PathBuf {
     default_native_dir(log_dir, "codex-native")
 }
 
+pub fn default_pi_native_dir(log_dir: &Path) -> PathBuf {
+    default_native_dir(log_dir, "pi-native")
+}
+
 fn default_native_dir(log_dir: &Path, leaf: &str) -> PathBuf {
     let state_dir = log_dir.parent().unwrap_or(log_dir);
     state_dir.join(leaf)
@@ -421,10 +435,10 @@ fn resolve_log_dir(env: &PathEnvironment) -> Result<PathBuf, ConfigError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        default_claude_native_dir, default_codex_native_dir, resolve_paths_with_env,
-        write_default_config, AppConfig, ConfigError, IntegrationPreference, LoggingConfig,
-        NotificationBackendName, NotificationConfig, PathEnvironment, PullRequestConfig,
-        RuntimeConfig, DEFAULT_NOTIFICATION_COOLDOWN_TICKS,
+        default_claude_native_dir, default_codex_native_dir, default_pi_native_dir,
+        resolve_paths_with_env, write_default_config, AppConfig, ConfigError,
+        IntegrationPreference, LoggingConfig, NotificationBackendName, NotificationConfig,
+        PathEnvironment, PullRequestConfig, RuntimeConfig, DEFAULT_NOTIFICATION_COOLDOWN_TICKS,
     };
     use crate::app::NotificationProfile;
     use crate::cli::Cli;
@@ -499,6 +513,7 @@ mod tests {
             parsed.integrations.codex_cli.mode,
             IntegrationPreference::Auto
         );
+        assert_eq!(parsed.integrations.pi.mode, IntegrationPreference::Auto);
     }
 
     #[test]
@@ -545,6 +560,10 @@ mod tests {
             runtime.codex_native_dir,
             Some(default_codex_native_dir(Path::new("/tmp/logs")))
         );
+        assert_eq!(
+            runtime.pi_native_dir,
+            Some(default_pi_native_dir(Path::new("/tmp/logs")))
+        );
         assert_eq!(runtime.log_verbosity, super::LogVerbosity::Debug);
         assert!(runtime.popup);
         assert!(runtime.pull_request_monitoring_enabled);
@@ -568,6 +587,10 @@ mod tests {
         );
         assert_eq!(
             runtime.codex_integration_preference,
+            IntegrationPreference::Auto
+        );
+        assert_eq!(
+            runtime.pi_integration_preference,
             IntegrationPreference::Auto
         );
     }
@@ -608,6 +631,8 @@ enabled = false
             IntegrationPreference::Auto
         );
         assert_eq!(parsed.integrations.codex_cli.native_dir, None);
+        assert_eq!(parsed.integrations.pi.mode, IntegrationPreference::Auto);
+        assert_eq!(parsed.integrations.pi.native_dir, None);
     }
 
     #[test]
@@ -627,6 +652,10 @@ native_dir = "/tmp/foreman-native"
 [integrations.codex_cli]
 mode = "native"
 native_dir = "/tmp/codex-native"
+
+[integrations.pi]
+mode = "native"
+native_dir = "/tmp/pi-native"
 "#,
         )
         .expect("config should parse");
@@ -659,6 +688,11 @@ native_dir = "/tmp/codex-native"
             parsed.integrations.codex_cli.native_dir,
             Some(Path::new("/tmp/codex-native").to_path_buf())
         );
+        assert_eq!(parsed.integrations.pi.mode, IntegrationPreference::Native);
+        assert_eq!(
+            parsed.integrations.pi.native_dir,
+            Some(Path::new("/tmp/pi-native").to_path_buf())
+        );
     }
 
     #[test]
@@ -674,6 +708,14 @@ native_dir = "/tmp/codex-native"
         assert_eq!(
             default_codex_native_dir(Path::new("/tmp/foreman/logs")),
             Path::new("/tmp/foreman/codex-native")
+        );
+    }
+
+    #[test]
+    fn default_pi_native_dir_is_sibling_of_log_dir() {
+        assert_eq!(
+            default_pi_native_dir(Path::new("/tmp/foreman/logs")),
+            Path::new("/tmp/foreman/pi-native")
         );
     }
 }

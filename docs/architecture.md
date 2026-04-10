@@ -47,7 +47,7 @@ testable as the app grows.
 | App state core | Own `Command`, `Action`, `Mode`, `Focus`, selection state, filters, sort mode, modal state, and reducer logic |
 | Ratatui renderer | Render header, sidebar, preview, input, footer, help, and overlays from pure state |
 | tmux adapter | Discover sessions/windows/panes, capture pane output, focus panes, send input, rename windows, create windows, and kill panes |
-| Harness integrations | Detect supported harness families, translate compatibility signals, and overlay native signals such as Claude and Codex when available |
+| Harness integrations | Detect supported harness families, translate compatibility signals, and overlay native signals such as Claude, Codex, and Pi when available |
 | Pull request service | Resolve pull request metadata for the selected workspace, and own browser-open and clipboard-copy seams with graceful degradation |
 | Notification service | Apply pure suppression and cooldown policy, build dispatcher order from typed config, dispatch best-effort notifications with backend fallback, and surface observable decisions |
 | System stats service | Capture a lightweight local CPU and memory pressure snapshot for the header without turning Foreman into a telemetry system |
@@ -81,7 +81,9 @@ testable as the app grows.
   external to Foreman and may disconnect or downgrade to compatibility mode.
   For Claude Code and Codex CLI, those signals arrive through official hook
   events bridged into per-pane JSON files keyed by `TMUX_PANE` or an explicit
-  pane id when the hook runs outside tmux.
+  pane id when the hook runs outside tmux. For Pi, those signals arrive through
+  Pi extension lifecycle events that call a small Foreman companion command,
+  which writes the same per-pane JSON files.
 - **Local tooling boundary**: Git, GitHub-aware commands, browser openers,
   clipboard tools, and notification backends are optional dependencies and must
   fail soft.
@@ -153,6 +155,9 @@ testable as the app grows.
   real-binary validation is at the hook boundary itself. In local validation,
   `codex exec` emitted native hooks reliably in non-interactive mode while the
   same command inside a tmux TTY did not.
+- Pi native bridging follows the same reducer-agnostic boundary, but the
+  transport is a thin Pi extension that calls a Foreman companion binary on
+  `agent_start`, `agent_end`, and `session_shutdown`.
 - Compatibility heuristics are allowed to be lower confidence, but they must
   fail soft rather than hide the pane entirely.
 - All tmux, GitHub, browser, clipboard, and notification effects flow through
@@ -285,6 +290,7 @@ boundaries unless an ADR changes them.
 | src/cli.rs | CLI flags, config path/init flows, debug logging flag, runtime override parsing, and bootstrap wiring | `SPEC.md` |
 | src/bin/foreman-claude-hook.rs | Claude Code hook bridge CLI that resolves the signal directory and writes native per-pane status files | This document |
 | src/bin/foreman-codex-hook.rs | Codex hook bridge CLI that resolves the signal directory and writes native per-pane status files | This document |
+| src/bin/foreman-pi-hook.rs | Pi lifecycle bridge CLI that resolves the signal directory and writes native per-pane status files | This document |
 | src/runtime.rs | Interactive terminal setup, event polling, redraw cadence, effect execution, and runtime-level soft-failure handling | This document |
 | src/app/ | Core state, commands, actions, reducer, selectors, drafts, modal targets, and UI-facing invariants | This document |
 | src/ui/ | Ratatui layout, widgets, rendering, and buffer-test helpers | This document |

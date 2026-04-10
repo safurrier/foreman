@@ -5,6 +5,8 @@ mod codex_hook;
 mod gemini;
 mod native;
 mod opencode;
+mod pi;
+mod pi_hook;
 
 use crate::app::{AgentSnapshot, AgentStatus, HarnessKind, IntegrationMode, Inventory};
 use crate::config::IntegrationPreference;
@@ -22,6 +24,11 @@ pub use codex::{
 pub use codex_hook::{
     bridge_codex_hook_input, CodexHookBridgeError, CodexHookBridgeRequest, CodexHookEventKind,
 };
+pub use pi::{
+    apply_native_signals as apply_pi_native_signals, FilePiNativeSignalSource,
+    PiNativeOverlaySummary,
+};
+pub use pi_hook::{bridge_pi_event, PiHookBridgeError, PiHookBridgeRequest, PiHookEventKind};
 use std::path::Path;
 
 const WORKING_STATUS_DEBOUNCE_POLLS: u8 = 2;
@@ -144,6 +151,29 @@ pub fn apply_configured_codex_signals(
     }
 }
 
+pub fn apply_configured_pi_signals(
+    inventory: &mut Inventory,
+    native_dir: Option<&Path>,
+    preference: IntegrationPreference,
+) -> PiNativeOverlaySummary {
+    match preference {
+        IntegrationPreference::Compatibility => PiNativeOverlaySummary::default(),
+        IntegrationPreference::Auto | IntegrationPreference::Native => {
+            if let Some(dir) = native_dir {
+                return pi::apply_native_signals(
+                    inventory,
+                    &FilePiNativeSignalSource::new(dir.to_path_buf()),
+                );
+            }
+
+            pi::compatibility_fallback_summary(
+                inventory,
+                matches!(preference, IntegrationPreference::Native),
+            )
+        }
+    }
+}
+
 pub fn recognize_harness(
     current_command: Option<&str>,
     title: &str,
@@ -157,6 +187,10 @@ pub fn recognize_harness(
 
     if matches_any(observation, codex::recognition_tokens()) {
         return Some(HarnessKind::CodexCli);
+    }
+
+    if pi::recognizes(observation) {
+        return Some(HarnessKind::Pi);
     }
 
     if matches_any(observation, gemini::recognition_tokens()) {
@@ -177,6 +211,7 @@ pub fn compatibility_status(
     match harness {
         HarnessKind::ClaudeCode => claude::compatibility_status(observation),
         HarnessKind::CodexCli => codex::compatibility_status(observation),
+        HarnessKind::Pi => pi::compatibility_status(observation),
         HarnessKind::GeminiCli => gemini::compatibility_status(observation),
         HarnessKind::OpenCode => opencode::compatibility_status(observation),
     }
@@ -255,7 +290,7 @@ fn activity_score_for_status(status: AgentStatus) -> u64 {
     }
 }
 
-fn matches_any<T>(
+pub(crate) fn matches_any<T>(
     observation: CompatibilityObservation<'_>,
     needles: impl IntoIterator<Item = T>,
 ) -> bool
@@ -314,6 +349,10 @@ mod tests {
             Some(HarnessKind::CodexCli)
         );
         assert_eq!(
+            recognize_harness(Some("pi"), "shell", ""),
+            Some(HarnessKind::Pi)
+        );
+        assert_eq!(
             recognize_harness(None, "shell", "Gemini CLI ready"),
             Some(HarnessKind::GeminiCli)
         );
@@ -346,6 +385,15 @@ mod tests {
         ))
         .expect("snapshot should exist");
         assert_eq!(codex.status, AgentStatus::NeedsAttention);
+
+        let pi = compatibility_snapshot(observation(
+            Some("pi"),
+            "shell",
+            "Pi ready for the next task",
+        ))
+        .expect("snapshot should exist");
+        assert_eq!(pi.harness, HarnessKind::Pi);
+        assert_eq!(pi.status, AgentStatus::Idle);
 
         let gemini = compatibility_snapshot(observation(
             Some("zsh"),
