@@ -468,13 +468,16 @@ active_profile = "all"
     harness.fixture().send_keys(&dashboard, &["Y"]);
     harness.wait_for_file_contains(&clipboard_file, "https://example.com/pr/42");
 
+    let refresh_marker = "inventory_refresh_started";
+    let refresh_count = harness.log_occurrence_count(refresh_marker);
+    harness.wait_for_log_occurrence_count(refresh_marker, refresh_count + 1);
     harness.write_native_signal(&alpha.pane_id, r#"{"status":"idle","activity_score":44}"#);
     thread::sleep(Duration::from_millis(75));
     harness.write_native_signal(
         &alpha.pane_id,
         r#"{"status":"working","activity_score":120}"#,
     );
-    thread::sleep(Duration::from_millis(75));
+    harness.wait_for_log_occurrence_count(refresh_marker, refresh_count + 2);
     assert!(
         harness.nonempty_lines(&notification_file).is_empty(),
         "brief idle loss should not notify immediately"

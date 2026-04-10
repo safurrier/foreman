@@ -37,3 +37,9 @@ description: >
   `mise run verify-release` entrypoint, a generated report artifact, and `mise
   run verify` updated to include the release-confidence gauntlet before the UX
   capture phase.
+- 2026-04-10 17:34 MST — CI exposed a deeper issue behind the “brief idle”
+  gauntlet flake: working-signal debounce only applied to compatibility-mode
+  snapshots, so native-mode working-to-idle blips could still notify on a
+  single observed refresh. The real fix was to debounce same-harness native
+  snapshots as well, which made the release gauntlet stable and brought native
+  status behavior closer to the spec’s debounce requirement.

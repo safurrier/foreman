@@ -245,10 +245,7 @@ pub(crate) fn status_from_hints(
 }
 
 fn debounce_snapshot(previous: &AgentSnapshot, current: &mut AgentSnapshot) {
-    if previous.integration_mode != IntegrationMode::Compatibility
-        || current.integration_mode != IntegrationMode::Compatibility
-        || previous.harness != current.harness
-    {
+    if previous.harness != current.harness {
         current.status = current.observed_status;
         current.debounce_ticks = 0;
         return;
@@ -331,7 +328,8 @@ mod tests {
         CompatibilityObservation,
     };
     use crate::app::{
-        inventory, AgentStatus, HarnessKind, Inventory, PaneBuilder, SessionBuilder, WindowBuilder,
+        inventory, AgentStatus, HarnessKind, IntegrationMode, Inventory, PaneBuilder,
+        SessionBuilder, WindowBuilder,
     };
 
     fn observation<'a>(
@@ -544,19 +542,21 @@ mod tests {
     }
 
     #[test]
-    fn stabilize_inventory_ignores_non_compatibility_agents() {
+    fn stabilize_inventory_debounces_brief_native_working_signal_loss() {
         let previous = inventory([SessionBuilder::new("alpha").window(
             WindowBuilder::new("alpha:agents").pane(
                 PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
-                    .integration_mode(crate::app::IntegrationMode::Native)
-                    .status(AgentStatus::Working),
+                    .integration_mode(IntegrationMode::Native)
+                    .status(AgentStatus::Working)
+                    .observed_status(AgentStatus::Working),
             ),
         )]);
         let mut next = inventory([SessionBuilder::new("alpha").window(
             WindowBuilder::new("alpha:agents").pane(
                 PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
-                    .integration_mode(crate::app::IntegrationMode::Native)
-                    .status(AgentStatus::Idle),
+                    .integration_mode(IntegrationMode::Native)
+                    .status(AgentStatus::Idle)
+                    .observed_status(AgentStatus::Idle),
             ),
         )]);
 
@@ -568,6 +568,8 @@ mod tests {
             .agent
             .as_ref()
             .expect("agent should exist");
-        assert_eq!(pane.status, AgentStatus::Idle);
+        assert_eq!(pane.status, AgentStatus::Working);
+        assert_eq!(pane.observed_status, AgentStatus::Idle);
+        assert_eq!(pane.debounce_ticks, 1);
     }
 }

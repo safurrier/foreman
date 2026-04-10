@@ -142,6 +142,31 @@ impl ReleaseHarness {
         panic!("log {} never contained {}", log_path.display(), needle);
     }
 
+    pub fn log_occurrence_count(&self, needle: &str) -> usize {
+        fs::read_to_string(self.latest_log_path())
+            .unwrap_or_default()
+            .matches(needle)
+            .count()
+    }
+
+    pub fn wait_for_log_occurrence_count(&self, needle: &str, expected: usize) {
+        let log_path = self.latest_log_path();
+        for _ in 0..80 {
+            let count = self.log_occurrence_count(needle);
+            if count >= expected {
+                return;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+
+        panic!(
+            "log {} never reached {} occurrences of {}",
+            log_path.display(),
+            expected,
+            needle
+        );
+    }
+
     pub fn create_workspace(&self, name: &str) -> PathBuf {
         let path = self.fixture.root_path().join(name);
         fs::create_dir_all(&path).expect("workspace dir should exist");

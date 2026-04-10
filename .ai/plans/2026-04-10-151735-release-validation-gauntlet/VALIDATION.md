@@ -76,6 +76,9 @@ Final result:
 
 - `cargo test --test release_gauntlet -- --test-threads=1 --nocapture` passed
   via `mise run verify-release`
+- Native working-signal debounce now covers same-harness native snapshots as
+  well as compatibility snapshots, which removed the CI-only brief-idle
+  completion race in `release_integration_gauntlet`.
 - `mise run check` passed
 - `mise run verify` passed, including:
   - `cargo test --all-features`
