@@ -66,6 +66,9 @@ if not capture_only:
     log_step("Running live dashboard smoke")
     run(["cargo", "test", "--test", "runtime_dashboard"])
 
+log_step("Running navigation/performance smoke")
+run(["cargo", "test", "--test", "runtime_profiling", "--", "--ignored"])
+
 if shutil.which("vhs") is None:
     log_step("Skipping VHS capture because `vhs` is not installed")
     log_ok("UX verification complete")

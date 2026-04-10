@@ -37,9 +37,9 @@ fn interactive_binary_renders_dashboard_and_sends_input_to_selected_agent() {
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
 
     fixture.send_keys(&dashboard_pane, &["j", "j"]);
-    fixture.wait_for_alt_capture(&dashboard_pane, "Press i to compose for");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Compose ->");
 
-    fixture.send_keys(&dashboard_pane, &["i", "h", "i", "C-s"]);
+    fixture.send_keys(&dashboard_pane, &["i", "h", "i", "Enter"]);
     fixture.wait_for_capture(&agent_pane, "INPUT:hi");
 
     fixture.send_keys(&dashboard_pane, &["q"]);
@@ -71,7 +71,7 @@ fn interactive_binary_popup_focus_action_exits_after_success() {
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman");
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
 
-    fixture.send_keys(&dashboard_pane, &["j", "j", "f"]);
+    fixture.send_keys(&dashboard_pane, &["j", "f"]);
     fixture.wait_for_capture(&dashboard_pane, "FOREMAN_EXITED");
     assert_eq!(fixture.active_pane_in("alpha"), agent_pane);
 }

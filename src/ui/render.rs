@@ -359,7 +359,7 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, theme: &Theme, layout_m
                 plain_line(""),
                 plain_line(modal_draft_text(draft, "Type a new window name.")),
                 plain_line(""),
-                muted_line("Enter or Ctrl+S applies. Esc cancels.", theme),
+                muted_line("Enter applies. Esc cancels.", theme),
             ]),
             theme.overlay_border,
         ),
@@ -375,7 +375,7 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, theme: &Theme, layout_m
                     "Type the command for the new window.",
                 )),
                 plain_line(""),
-                muted_line("Enter or Ctrl+S spawns. Esc cancels.", theme),
+                muted_line("Enter spawns. Esc cancels.", theme),
             ]),
             theme.overlay_border,
         ),
@@ -494,7 +494,7 @@ fn sidebar_line(state: &AppState, theme: &Theme, target: &SelectionTarget) -> Li
                         session.name.clone(),
                         state.collapsed_sessions.contains(session_id),
                         session.attention_rank(),
-                        format!("{}w {}p", visible_windows.len(), visible_panes),
+                        format!("{}w/{}p", visible_windows.len(), visible_panes),
                     )
                 })
                 .unwrap_or_else(|| {
@@ -502,7 +502,7 @@ fn sidebar_line(state: &AppState, theme: &Theme, target: &SelectionTarget) -> Li
                         session_id.as_str().to_string(),
                         state.collapsed_sessions.contains(session_id),
                         AgentStatus::Unknown.attention_rank(),
-                        "0w 0p".to_string(),
+                        "0w/0p".to_string(),
                     )
                 });
             spans.push(Span::styled(
@@ -559,7 +559,7 @@ fn sidebar_line(state: &AppState, theme: &Theme, target: &SelectionTarget) -> Li
                 if selected { theme.selected } else { theme.base },
             ));
             spans.push(Span::styled(
-                format!("  {summary}"),
+                format!(" {summary}"),
                 if selected {
                     theme.selected
                 } else {
@@ -579,7 +579,7 @@ fn sidebar_line(state: &AppState, theme: &Theme, target: &SelectionTarget) -> Li
                 status_style(theme, status, pane.is_some_and(|pane| pane.is_agent())),
             ));
             spans.push(Span::styled(
-                format!("[{}] ", pane_harness_badge(pane)),
+                format!("{} ", pane_harness_badge(pane)),
                 if let Some(pane) = pane {
                     if pane.is_agent() {
                         status_style(theme, status, true)
@@ -671,9 +671,12 @@ fn preview_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Tex
                     format!("Window {}", window.navigation_title()),
                     theme.emphasis,
                 )]));
-                lines.push(plain_line(format!("Visible panes: {}", window.panes.len())));
+                lines.push(plain_line(format!(
+                    "Visible panes: {}",
+                    window.visible_panes(&state.filters, state.sort_mode).len()
+                )));
                 lines.push(muted_line(
-                    "Select a pane to inspect recent output or send direct input.",
+                    "Enter or f focuses the top visible pane. i composes there.",
                     theme,
                 ));
             } else {
@@ -689,9 +692,18 @@ fn preview_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Tex
                     format!("Session {}", session.name),
                     theme.emphasis,
                 )]));
-                lines.push(plain_line(format!("Windows: {}", session.windows.len())));
+                let visible_windows = session.visible_windows(&state.filters, state.sort_mode);
+                let visible_panes = visible_windows
+                    .iter()
+                    .map(|window| window.visible_panes(&state.filters, state.sort_mode).len())
+                    .sum::<usize>();
+                lines.push(plain_line(format!(
+                    "Visible: {} windows / {} panes",
+                    visible_windows.len(),
+                    visible_panes
+                )));
                 lines.push(muted_line(
-                    "Enter toggles collapse. Select a pane for output and direct actions.",
+                    "Enter toggles collapse. f or i acts on the top visible pane.",
                     theme,
                 ));
             } else {
@@ -751,9 +763,7 @@ fn preview_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Tex
 
 fn input_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Text<'static> {
     let mut lines = Vec::new();
-    let selected_pane = state
-        .selected_pane_id()
-        .and_then(|pane_id| state.inventory.pane(&pane_id));
+    let selected_pane = state.selected_actionable_pane();
     let target_label = selected_pane
         .map(|pane| {
             format!(
@@ -774,7 +784,7 @@ fn input_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Text<
         )]));
         lines.push(muted_line(
             format!(
-                "Ctrl+S sends {} Enter inserts a new line {} Esc cancels",
+                "Enter sends {} Ctrl+J newline {} Esc cancels",
                 theme.glyphs.separator, theme.glyphs.separator
             ),
             theme,
@@ -796,7 +806,7 @@ fn input_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Text<
             theme.emphasis,
         )]));
         lines.push(muted_line(
-            "Press i to resume editing or Esc to clear the mode.",
+            "Press i to resume or Esc to leave compose mode.",
             theme,
         ));
         lines.push(plain_line(""));
@@ -812,13 +822,13 @@ fn input_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Text<
 
     if selected_pane.is_some() {
         lines.push(Line::from(vec![Span::styled(
-            format!("Press i to compose for {target_label}"),
+            format!("Compose -> {target_label}"),
             theme.emphasis,
         )]));
         if state.focus == Focus::Input {
             lines.push(muted_line(
                 format!(
-                    "Enter starts compose {} f focuses the pane in tmux",
+                    "Enter starts compose {} f focuses tmux",
                     theme.glyphs.separator
                 ),
                 theme,
@@ -826,15 +836,15 @@ fn input_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Text<
         } else {
             lines.push(muted_line(
                 format!(
-                    "f focuses the pane in tmux {} Tab or 3 moves focus here",
-                    theme.glyphs.separator
+                    "i compose {} f tmux focus {} Tab or 3 moves focus here",
+                    theme.glyphs.separator, theme.glyphs.separator
                 ),
                 theme,
             ));
         }
     } else {
         lines.push(Line::from(vec![Span::styled(
-            "Select a pane, then press i to compose.",
+            "Select a row with an agent, then compose.",
             theme.emphasis,
         )]));
     }
@@ -845,47 +855,23 @@ fn input_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Text<
 fn footer_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Text<'static> {
     let sep = format!(" {} ", theme.glyphs.separator);
     let lines = match state.mode {
-        Mode::Input => vec![
-            format!("Mode {} compose", theme.glyphs.separator),
-            "Ctrl+S send  |  Enter newline  |  Esc cancel".to_string(),
-        ],
-        Mode::Search => vec![
-            "Search".to_string(),
-            "Type filter  |  Enter confirm  |  Esc restore".to_string(),
-        ],
-        Mode::FlashNavigate => vec![
-            "Flash jump".to_string(),
-            "Type a label  |  Esc cancel".to_string(),
-        ],
-        Mode::Rename => vec![
-            "Rename window".to_string(),
-            "Enter or Ctrl+S apply  |  Esc cancel".to_string(),
-        ],
-        Mode::Spawn => vec![
-            "Spawn window".to_string(),
-            "Enter or Ctrl+S spawn  |  Esc cancel".to_string(),
-        ],
-        Mode::ConfirmKill => vec![
-            "Kill pane".to_string(),
-            "Enter or y confirm  |  Esc or n cancel".to_string(),
-        ],
-        Mode::Help => vec![
-            "Help".to_string(),
-            "Esc or ? closes help  |  q quits".to_string(),
-        ],
+        Mode::Input => vec![format!("Enter send{sep}Ctrl+J newline{sep}Esc cancel")],
+        Mode::Search => vec![format!("Type filter{sep}Enter confirm{sep}Esc restore")],
+        Mode::FlashNavigate => vec![format!("Type a label{sep}Esc cancel")],
+        Mode::Rename => vec![format!("Enter apply{sep}Esc cancel")],
+        Mode::Spawn => vec![format!("Enter spawn{sep}Esc cancel")],
+        Mode::ConfirmKill => vec![format!("Enter or y confirm{sep}Esc or n cancel")],
+        Mode::Help => vec![format!("Esc or ? closes help{sep}q quits")],
         Mode::Normal | Mode::PreviewScroll => match layout_mode {
-            LayoutMode::Compact => vec![
-                format!("j/k move{sep}Enter open{sep}i compose{sep}f tmux focus"),
-                format!("/ search{sep}s flash{sep}R rename{sep}N spawn{sep}x kill{sep}q quit"),
-            ],
-            LayoutMode::Medium => vec![
-                format!("j/k move{sep}Enter open{sep}Tab or 1/2/3 panels{sep}i compose{sep}f tmux focus"),
-                format!("/ search{sep}s flash{sep}p PR{sep}R rename{sep}N spawn{sep}x kill{sep}H sessions{sep}P panes{sep}o sort{sep}t theme{sep}q quit"),
-            ],
-            LayoutMode::Wide => vec![
-                format!("j/k move{sep}Enter expand or focus{sep}Tab or 1/2/3 focus panels{sep}i compose{sep}f focus tmux pane"),
-                format!("/ search{sep}s jump{sep}S jump+focus{sep}p PR detail{sep}O open PR{sep}Y copy PR{sep}R rename{sep}N spawn{sep}x kill{sep}H sessions{sep}P panes{sep}o sort{sep}t theme{sep}m mute{sep}n profile{sep}q quit"),
-            ],
+            LayoutMode::Compact => {
+                vec![format!("j/k move{sep}Enter act{sep}i compose{sep}/ search{sep}? legend{sep}q quit")]
+            }
+            LayoutMode::Medium => vec![format!(
+                "j/k move{sep}Enter act{sep}f tmux{sep}i compose{sep}/ search{sep}s jump{sep}? legend{sep}q quit"
+            )],
+            LayoutMode::Wide => vec![format!(
+                "j/k move{sep}Enter act{sep}f tmux{sep}i compose{sep}/ search{sep}s jump{sep}p PR{sep}o sort{sep}t theme{sep}? legend{sep}q quit"
+            )],
         },
     };
 
@@ -896,33 +882,38 @@ fn help_text(theme: &Theme) -> Text<'static> {
     Text::from(vec![
         section_line("Navigate", theme),
         muted_line("j/k or arrows move.", theme),
-        muted_line("Enter expands a session or focuses a pane.", theme),
+        muted_line("Enter acts on the selected row.", theme),
         muted_line("Tab or 1/2/3 changes panel focus.", theme),
         plain_line(""),
-        section_line("Work With A Pane", theme),
-        muted_line("i composes for the selected pane.", theme),
+        section_line("Legend", theme),
         muted_line(
-            "f focuses the pane in tmux. x opens kill confirmation.",
+            format!(
+                "{} working  {} attention  {} idle  {} error  {} unknown",
+                theme.glyphs.working,
+                theme.glyphs.attention,
+                theme.glyphs.idle,
+                theme.glyphs.error,
+                theme.glyphs.unknown
+            ),
             theme,
         ),
-        muted_line("R renames a window. N spawns a new window.", theme),
+        muted_line("CLD Claude  CDX Codex  PI Pi", theme),
+        muted_line("GEM Gemini  OCD OpenCode  SH shell", theme),
+        plain_line(""),
+        section_line("Work With A Pane", theme),
+        muted_line("i compose. f tmux focus. x kill confirm.", theme),
+        muted_line("Enter sends. Ctrl+J newline. R rename. N spawn.", theme),
         plain_line(""),
         section_line("Discover", theme),
-        muted_line("/ searches visible targets. s flash-jumps.", theme),
-        muted_line("S flash-jumps and focuses the pane.", theme),
-        muted_line(
-            "p toggles PR detail. O opens the PR. Y copies the PR URL.",
-            theme,
-        ),
+        muted_line("/ search. s jump. S jump+focus.", theme),
+        muted_line("p PR detail. O open PR. Y copy URL.", theme),
         plain_line(""),
         section_line("View", theme),
         muted_line(
             "H toggles non-agent sessions. P toggles non-agent panes.",
             theme,
         ),
-        muted_line("o changes sort order. t cycles the active theme.", theme),
-        muted_line("m mutes notifications.", theme),
-        muted_line("n changes the notification profile. q quits.", theme),
+        muted_line("o sort. t theme. m mute. n profile. q quit.", theme),
     ])
 }
 
@@ -1242,8 +1233,10 @@ mod tests {
         let output = render_to_string_at(&state, ThemeName::Catppuccin, 80, 24);
 
         assert!(output.contains("Navigate"));
-        assert!(output.contains("R renames a window"));
-        assert!(output.contains("N spawns a new window"));
+        assert!(output.contains("Legend"));
+        assert!(output.contains("CLD Claude"));
+        assert!(output.contains("R rename"));
+        assert!(output.contains("N spawn"));
         assert!(output.contains("H toggles non-agent sessions"));
         assert!(output.contains("P toggles non-agent panes"));
     }
@@ -1259,7 +1252,8 @@ mod tests {
         assert!(output.contains("Compose for"));
         assert!(output.contains("hello"));
         assert!(output.contains("world"));
-        assert!(output.contains("Ctrl+S sends"));
+        assert!(output.contains("Enter sends"));
+        assert!(output.contains("Ctrl+J newline"));
     }
 
     #[test]
@@ -1321,8 +1315,8 @@ mod tests {
         let state = sample_state();
         let output = render_to_string(&state);
 
-        assert!(output.contains("[CLD] alpha"));
-        assert!(output.contains("[CDX] foreman"));
+        assert!(output.contains("CLD alpha"));
+        assert!(output.contains("CDX foreman"));
         assert!(!output.contains("Pane     "));
     }
 

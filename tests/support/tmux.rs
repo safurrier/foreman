@@ -100,6 +100,7 @@ impl TmuxFixture {
         panic!("pane {target} never contained expected alternate-screen text: {needle}");
     }
 
+    #[allow(dead_code)]
     pub fn shell_command(&self, line: &str) -> String {
         format!(
             "sh -lc \"printf '%s\\n' {}; exec sleep 60\"",
@@ -244,6 +245,7 @@ impl TmuxFixture {
     }
 }
 
+#[allow(dead_code)]
 fn shell_escape(input: &str) -> String {
     format!("'{}'", input.replace('\'', r#"'\''"#))
 }

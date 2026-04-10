@@ -1,7 +1,10 @@
 mod support;
 
 use foreman::adapters::tmux::{SystemTmuxBackend, TmuxAdapter};
-use foreman::app::{reduce, Action, AppState, Effect, SelectionTarget};
+use foreman::app::{
+    inventory, reduce, Action, AppState, Effect, HarnessKind, PaneBuilder, SelectionTarget,
+    SessionBuilder, WindowBuilder,
+};
 use support::tmux::TmuxFixture;
 
 #[test]
@@ -23,11 +26,14 @@ fn system_tmux_backend_focuses_target_pane() {
 
 #[test]
 fn popup_focus_effect_requests_close_after_success() {
-    let mut state = AppState {
-        selection: Some(SelectionTarget::Pane("%42".into())),
-        popup_mode: true,
-        ..AppState::default()
-    };
+    let inventory =
+        inventory([SessionBuilder::new("alpha")
+            .window(WindowBuilder::new("alpha:agents").pane(
+                PaneBuilder::agent("%42", HarnessKind::ClaudeCode).working_dir("/tmp/alpha"),
+            ))]);
+    let mut state = AppState::with_inventory(inventory);
+    state.selection = Some(SelectionTarget::Pane("%42".into()));
+    state.popup_mode = true;
 
     let effects = reduce(&mut state, Action::FocusSelectedPane);
 

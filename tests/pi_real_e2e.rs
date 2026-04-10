@@ -192,7 +192,7 @@ export default function (pi: ExtensionAPI) {{
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
 
     fixture.send_keys(&dashboard_pane, &["j", "j"]);
-    fixture.wait_for_alt_capture(&dashboard_pane, "Press i to compose for");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Compose ->");
 
     for key in [
         "i", "R", "u", "n", "Space", "`", "s", "l", "e", "e", "p", "Space", "1", "`", "Space", "u",

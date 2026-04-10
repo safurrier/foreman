@@ -69,11 +69,13 @@ foreman
 Common dashboard keys:
 - `j` / `k` move through the tree
 - `Tab` or `1` / `2` / `3` switches panel focus
-- `i` composes for the selected pane
+- `i` composes for the actionable agent row
+- `f` focuses the actionable pane in tmux
+- `Enter` sends in compose mode and acts on the selected row in normal mode
 - `/` starts search
 - `s` starts flash jump
 - `t` cycles the active theme
-- `?` opens help
+- `?` opens help and the legend
 
 Theme selection:
 
@@ -279,7 +281,7 @@ mise run plan -- <slug>
 | `mise run ci` | CI entrypoint (= check) |
 | `mise run plan -- <slug>` | Create a plan directory for a unit of work |
 | `mise run verify` | Heavy validation (integration, docker, security) |
-| `mise run verify-ux` | Focused TUI/runtime smoke plus VHS artifact refresh |
+| `mise run verify-ux` | Focused TUI/runtime smoke, navigation perf smoke, plus VHS artifact refresh |
 
 ## GitHub Actions
 

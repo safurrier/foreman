@@ -58,7 +58,7 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             }
         }
         Action::BeginInput => {
-            if state.selected_pane_id().is_some() {
+            if state.selected_actionable_pane_id().is_some() {
                 state.mode = Mode::Input;
                 state.focus = Focus::Input;
             }
@@ -234,9 +234,9 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             return notification_effects_for_refresh(state, &previous_inventory);
         }
         Action::FocusSelectedPane => {
-            if let Some(SelectionTarget::Pane(pane_id)) = state.selection.as_ref() {
+            if let Some(pane_id) = state.selected_actionable_pane_id() {
                 return vec![Effect::FocusPane {
-                    pane_id: pane_id.clone(),
+                    pane_id,
                     close_after: state.popup_mode,
                 }];
             }
@@ -305,7 +305,7 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
         }
         Action::SubmitActiveDraft => match state.mode {
             Mode::Input => {
-                if let Some(pane_id) = state.selected_pane_id() {
+                if let Some(pane_id) = state.selected_actionable_pane_id() {
                     if state.input_draft.is_blank() {
                         return Vec::new();
                     }
@@ -520,7 +520,7 @@ fn reconcile_flash_selection(state: &mut AppState) {
 }
 
 fn reconcile_interaction_state(state: &mut AppState) {
-    if state.mode == Mode::Input && state.selected_pane_id().is_none() {
+    if state.mode == Mode::Input && state.selected_actionable_pane_id().is_none() {
         state.mode = Mode::Normal;
         state.focus = Focus::Sidebar;
         state.input_draft.clear();

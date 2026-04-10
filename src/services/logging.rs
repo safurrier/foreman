@@ -291,6 +291,22 @@ impl RunLogger {
         )
     }
 
+    pub fn log_timing(&mut self, operation: &str, fields: &str) -> io::Result<()> {
+        self.debug(&format!("timing operation={operation} {fields}"))
+    }
+
+    pub fn log_slow_operation(
+        &mut self,
+        operation: &str,
+        threshold_ms: u128,
+        fields: &str,
+    ) -> io::Result<()> {
+        self.write_line(
+            "WARN",
+            &format!("slow_operation operation={operation} threshold_ms={threshold_ms} {fields}"),
+        )
+    }
+
     pub fn summary(&self) -> RunLogSummary {
         RunLogSummary {
             run_path: self.run_path.clone(),
@@ -494,6 +510,31 @@ mod tests {
         let debug_contents = std::fs::read_to_string(debug_logger.summary().run_path)
             .expect("run log should be readable");
         assert!(debug_contents.contains("[DEBUG] debug_only_message"));
+    }
+
+    #[test]
+    fn timing_and_slow_operation_logs_include_operation_metadata() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let mut logger =
+            RunLogger::start(temp_dir.path(), 5, LogVerbosity::Debug).expect("logger should start");
+
+        logger
+            .log_timing("action", "action=move-selection total_ms=4")
+            .expect("timing log should succeed");
+        logger
+            .log_slow_operation(
+                "pull_request_lookup",
+                75,
+                "workspace=/tmp/alpha elapsed_ms=301 trigger=selection-idle",
+            )
+            .expect("slow operation log should succeed");
+
+        let contents =
+            std::fs::read_to_string(logger.summary().run_path).expect("run log should be readable");
+        assert!(contents.contains("timing operation=action action=move-selection total_ms=4"));
+        assert!(contents.contains("slow_operation operation=pull_request_lookup"));
+        assert!(contents.contains("threshold_ms=75"));
+        assert!(contents.contains("elapsed_ms=301"));
     }
 
     #[test]

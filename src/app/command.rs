@@ -113,8 +113,12 @@ pub fn map_key_event(key: KeyEvent, focus: Focus, mode: Mode) -> Option<Command>
 fn map_modal_key_event(key: KeyEvent, mode: Mode) -> Option<Command> {
     match mode {
         Mode::Input => match (key.code, key.modifiers) {
-            (KeyCode::Char('s'), KeyModifiers::CONTROL) => Some(Command::SubmitDraft),
-            (KeyCode::Enter, _) => Some(Command::InsertNewline),
+            (KeyCode::Char('j'), KeyModifiers::CONTROL) | (KeyCode::Enter, KeyModifiers::SHIFT) => {
+                Some(Command::InsertNewline)
+            }
+            (KeyCode::Char('s'), KeyModifiers::CONTROL) | (KeyCode::Enter, _) => {
+                Some(Command::SubmitDraft)
+            }
             (KeyCode::Backspace, _) => Some(Command::Backspace),
             (KeyCode::Char(ch), modifiers) if is_text_input_modifiers(modifiers) => {
                 Some(Command::InsertChar(ch))
@@ -209,7 +213,7 @@ mod tests {
     fn input_mode_maps_editing_and_submit_keys() {
         assert_eq!(
             map_key_event(key(KeyCode::Enter), Focus::Input, Mode::Input),
-            Some(Command::InsertNewline)
+            Some(Command::SubmitDraft)
         );
         assert_eq!(
             map_key_event(
@@ -218,6 +222,14 @@ mod tests {
                 Mode::Input
             ),
             Some(Command::SubmitDraft)
+        );
+        assert_eq!(
+            map_key_event(
+                KeyEvent::new(KeyCode::Char('j'), KeyModifiers::CONTROL),
+                Focus::Input,
+                Mode::Input
+            ),
+            Some(Command::InsertNewline)
         );
         assert_eq!(
             map_key_event(key(KeyCode::Backspace), Focus::Input, Mode::Input),

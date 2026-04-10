@@ -238,7 +238,7 @@ CI defines "passing." Local commands mirror CI exactly:
 ```bash
 mise run check    # fast: fmt + lint + typecheck + unit tests  (on push)
 mise run verify   # heavy: integration, security, docker        (on PR)
-mise run verify-ux  # focused TUI/runtime smoke + VHS capture
+mise run verify-ux  # focused TUI/runtime smoke + perf smoke + VHS capture
 ```
 
 GitHub Actions currently maps those workflows like this:
@@ -255,7 +255,7 @@ GitHub Actions currently maps those workflows like this:
 | Unit tests | Reducer logic, command/action mapping, config parsing, status debouncing, precedence rules |
 | Ratatui buffer tests | Surface visibility, focus treatment, overlays, empty-state shell, monochrome-safe status presentation |
 | Adapter contract tests | tmux, harness, pull request, and notification seams with fakes or spies |
-| Real-environment smoke / E2E tests | End-to-end operator journeys that require a real CLI process, live tmux coordination, or other external tooling |
+| Real-environment smoke / E2E tests | End-to-end operator journeys that require a real CLI process, live tmux coordination, external tooling, or runtime/perf regression assertions from logs |
 
 ### Pre-push documentation and contract sync
 

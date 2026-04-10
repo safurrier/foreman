@@ -41,6 +41,7 @@ real external seam.
 | Adapter contract | Fake-backed tmux, notifications, PRs |
 | Runtime smoke | Real tmux fixture, compiled `foreman` binary |
 | UX artifact refresh | `vhs` walkthrough and screenshots from the live binary across at least one branded palette and the no-color fallback |
+| Navigation perf smoke | Real tmux run with a fake PR backend plus run-log timing assertions |
 | Real harness E2E | Opt-in ignored tests with the actual external CLI |
 
 Focused UX lane:
@@ -52,6 +53,10 @@ mise run verify-ux
 If `vhs` is installed, `mise run verify` now refreshes the UX GIF and PNG
 artifacts through `mise run verify-ux --capture-only` after the heavier Rust
 checks pass.
+
+`mise run verify-ux` also runs the ignored `runtime_profiling` smoke so lag
+regressions caused by synchronous lookup work show up in the heavy lane instead
+of only in manual UX testing.
 
 Opt-in real harness commands:
 

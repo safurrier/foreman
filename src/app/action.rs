@@ -69,6 +69,46 @@ pub enum Action {
     Noop,
 }
 
+impl Action {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::RequestMode(_) => "request-mode",
+            Self::BeginInput => "begin-input",
+            Self::BeginSearch => "begin-search",
+            Self::BeginFlash { .. } => "begin-flash",
+            Self::SetPullRequestLookup { .. } => "set-pull-request-lookup",
+            Self::SetSystemStats(_) => "set-system-stats",
+            Self::SetStartupError(_) => "set-startup-error",
+            Self::SetOperatorAlert(_) => "set-operator-alert",
+            Self::ToggleNotificationsMuted => "toggle-notifications-muted",
+            Self::CycleNotificationProfile => "cycle-notification-profile",
+            Self::TogglePullRequestDetail => "toggle-pull-request-detail",
+            Self::OpenSelectedPullRequest => "open-selected-pull-request",
+            Self::CopySelectedPullRequestUrl => "copy-selected-pull-request-url",
+            Self::CancelMode => "cancel-mode",
+            Self::RequestQuit => "request-quit",
+            Self::SetFocus(_) => "set-focus",
+            Self::SetSelection(_) => "set-selection",
+            Self::MoveSelection(_) => "move-selection",
+            Self::ReplaceInventory(_) => "replace-inventory",
+            Self::FocusSelectedPane => "focus-selected-pane",
+            Self::CommitSearchSelection => "commit-search-selection",
+            Self::OpenRenameModal { .. } => "open-rename-modal",
+            Self::OpenSpawnModal { .. } => "open-spawn-modal",
+            Self::OpenKillConfirmation { .. } => "open-kill-confirmation",
+            Self::EditDraft(_) => "edit-draft",
+            Self::SubmitActiveDraft => "submit-active-draft",
+            Self::ConfirmKill => "confirm-kill",
+            Self::ToggleShowNonAgentSessions => "toggle-show-non-agent-sessions",
+            Self::ToggleShowNonAgentPanes => "toggle-show-non-agent-panes",
+            Self::ToggleSessionCollapsed(_) => "toggle-session-collapsed",
+            Self::SetSortMode(_) => "set-sort-mode",
+            Self::CycleTheme => "cycle-theme",
+            Self::Noop => "noop",
+        }
+    }
+}
+
 pub fn action_for_command(state: &AppState, command: Command) -> Action {
     match command {
         Command::NavigateUp => Action::MoveSelection(SelectionDirection::Previous),
@@ -76,7 +116,7 @@ pub fn action_for_command(state: &AppState, command: Command) -> Action {
         Command::NavigateLeft => Action::SetFocus(state.focus.previous()),
         Command::NavigateRight => Action::SetFocus(state.focus.next()),
         Command::StartInput => {
-            if state.selected_pane_id().is_some() {
+            if state.selected_actionable_pane_id().is_some() {
                 Action::BeginInput
             } else {
                 Action::Noop
@@ -90,6 +130,7 @@ pub fn action_for_command(state: &AppState, command: Command) -> Action {
                     Some(SelectionTarget::Session(session_id)) => {
                         Action::ToggleSessionCollapsed(session_id.clone())
                     }
+                    Some(SelectionTarget::Window(_)) => Action::FocusSelectedPane,
                     Some(SelectionTarget::Pane(_)) => Action::FocusSelectedPane,
                     _ => Action::Noop,
                 }
@@ -108,7 +149,7 @@ pub fn action_for_command(state: &AppState, command: Command) -> Action {
         Command::FocusPreview => Action::SetFocus(Focus::Preview),
         Command::FocusInput => Action::SetFocus(Focus::Input),
         Command::FocusSelectedPane => Action::FocusSelectedPane,
-        Command::RequestKill => match state.selected_pane_id() {
+        Command::RequestKill => match state.selected_actionable_pane_id() {
             Some(pane_id) => Action::OpenKillConfirmation { pane_id },
             None => Action::Noop,
         },
@@ -202,6 +243,12 @@ mod tests {
             Action::ToggleSessionCollapsed("alpha".into())
         );
 
+        let state = state_with_selection(Some(SelectionTarget::Window("alpha:agents".into())));
+        assert_eq!(
+            action_for_command(&state, Command::Select),
+            Action::FocusSelectedPane
+        );
+
         let state = state_with_selection(Some(SelectionTarget::Pane("alpha:main".into())));
         assert_eq!(
             action_for_command(&state, Command::Select),
@@ -257,6 +304,22 @@ mod tests {
         assert_eq!(
             action_for_command(&state, Command::SubmitDraft),
             Action::SubmitActiveDraft
+        );
+    }
+
+    #[test]
+    fn start_input_and_kill_resolve_from_window_selection() {
+        let state = state_with_selection(Some(SelectionTarget::Window("alpha:agents".into())));
+
+        assert_eq!(
+            action_for_command(&state, Command::StartInput),
+            Action::BeginInput
+        );
+        assert_eq!(
+            action_for_command(&state, Command::RequestKill),
+            Action::OpenKillConfirmation {
+                pane_id: "alpha:main".into(),
+            }
         );
     }
 

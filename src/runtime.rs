@@ -31,6 +31,12 @@ use std::io::{self, Stdout};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+const SELECTION_PULL_REQUEST_LOOKUP_DEBOUNCE_MS: u64 = 180;
+const SLOW_RENDER_FRAME_MS: u128 = 33;
+const SLOW_ACTION_MS: u128 = 40;
+const SLOW_INVENTORY_REFRESH_MS: u128 = 200;
+const SLOW_PULL_REQUEST_LOOKUP_MS: u128 = 75;
+
 pub(crate) fn run(prepared: PreparedBootstrap) -> Result<(), RuntimeError> {
     let _terminal_guard = TerminalGuard::enter()?;
     let backend = CrosstermBackend::new(io::stdout());
@@ -38,7 +44,7 @@ pub(crate) fn run(prepared: PreparedBootstrap) -> Result<(), RuntimeError> {
     terminal.clear()?;
 
     let mut runtime = DashboardRuntime::new(prepared);
-    runtime.maybe_refresh_selected_pull_request(true)?;
+    runtime.maybe_refresh_selected_pull_request(true, "bootstrap")?;
     runtime.run_loop(&mut terminal)
 }
 
@@ -72,6 +78,13 @@ struct DashboardRuntime {
     notifications: NotificationDispatcher,
     system_stats: SystemStatsService<SysinfoSystemStatsBackend>,
     last_pull_request_lookup: BTreeMap<PathBuf, Instant>,
+    pending_pull_request_lookup: Option<PendingPullRequestLookup>,
+}
+
+#[derive(Debug, Clone)]
+struct PendingPullRequestLookup {
+    workspace_path: PathBuf,
+    due_at: Instant,
 }
 
 impl DashboardRuntime {
@@ -84,6 +97,7 @@ impl DashboardRuntime {
             notifications: build_notification_dispatcher(&prepared.runtime.notification_backends),
             system_stats: SystemStatsService::new(SysinfoSystemStatsBackend::new()),
             last_pull_request_lookup: BTreeMap::new(),
+            pending_pull_request_lookup: None,
             runtime: prepared.runtime,
             logger: prepared.logger,
             state: prepared.state,
@@ -101,24 +115,33 @@ impl DashboardRuntime {
         self.logger.debug("dashboard_event_loop_started")?;
 
         loop {
+            let render_started = Instant::now();
             terminal.draw(|frame| render(frame, &self.state, self.runtime.theme))?;
+            let render_elapsed_ms = render_started.elapsed().as_millis();
+            self.maybe_log_slow_operation(
+                "render_frame",
+                SLOW_RENDER_FRAME_MS,
+                render_elapsed_ms,
+                &format!("elapsed_ms={render_elapsed_ms}"),
+            )?;
 
-            let timeout = poll_interval.saturating_sub(last_inventory_refresh.elapsed());
+            let timeout = self
+                .next_wait_timeout(poll_interval.saturating_sub(last_inventory_refresh.elapsed()));
             if event::poll(timeout)? {
                 match event::read()? {
                     Event::Key(key) => {
                         if let Some(command) = map_key_event(key, self.state.focus, self.state.mode)
                         {
+                            let previous_workspace = self.state.selected_workspace_path();
                             let action = action_for_command(&self.state, command);
                             if self.apply_action(action)? {
                                 break;
                             }
-                            self.maybe_refresh_selected_pull_request(false)?;
+                            self.schedule_selected_pull_request_refresh(previous_workspace);
                         }
                     }
                     Event::Paste(text) => {
                         self.apply_paste(text)?;
-                        self.maybe_refresh_selected_pull_request(false)?;
                     }
                     Event::Resize(_, _)
                     | Event::Mouse(_)
@@ -126,6 +149,8 @@ impl DashboardRuntime {
                     | Event::FocusLost => {}
                 }
             }
+
+            self.run_pending_pull_request_refresh()?;
 
             if last_inventory_refresh.elapsed() >= poll_interval {
                 self.refresh_inventory()?;
@@ -150,8 +175,31 @@ impl DashboardRuntime {
     }
 
     fn apply_action(&mut self, action: Action) -> Result<bool, RuntimeError> {
+        let action_label = action.label();
+        let action_started = Instant::now();
+        let reduce_started = Instant::now();
         let effects = reduce(&mut self.state, action);
-        self.execute_effects(effects)
+        let reduce_ms = reduce_started.elapsed().as_millis();
+        let effect_count = effects.len();
+        let effects_started = Instant::now();
+        let should_quit = self.execute_effects(effects)?;
+        let effects_ms = effects_started.elapsed().as_millis();
+        let total_ms = action_started.elapsed().as_millis();
+
+        self.logger.log_timing(
+            "action",
+            &format!(
+                "action={action_label} reduce_ms={reduce_ms} effects={effect_count} effects_ms={effects_ms} total_ms={total_ms}"
+            ),
+        )?;
+        self.maybe_log_slow_operation(
+            "action",
+            SLOW_ACTION_MS,
+            total_ms,
+            &format!("action={action_label} total_ms={total_ms}"),
+        )?;
+
+        Ok(should_quit)
     }
 
     fn apply_runtime_action(&mut self, action: Action) -> Result<(), RuntimeError> {
@@ -285,7 +333,9 @@ impl DashboardRuntime {
     }
 
     fn refresh_inventory(&mut self) -> Result<(), RuntimeError> {
+        let refresh_started = Instant::now();
         self.logger.debug("inventory_refresh_started")?;
+        let mut outcome = "loaded";
         match self.load_inventory_with_native() {
             Ok((inventory, claude_native, codex_native, pi_native)) => {
                 self.apply_runtime_action(Action::SetStartupError(None))?;
@@ -308,6 +358,7 @@ impl DashboardRuntime {
                 }
             }
             Err(error_message) => {
+                outcome = "error";
                 self.apply_runtime_action(Action::SetStartupError(Some(error_message.clone())))?;
                 self.logger.log_tmux_error(&error_message)?;
                 self.record_alert(
@@ -319,7 +370,18 @@ impl DashboardRuntime {
         }
 
         self.refresh_system_stats()?;
-        self.maybe_refresh_selected_pull_request(false)?;
+        self.maybe_refresh_selected_pull_request(false, "inventory-refresh")?;
+        let elapsed_ms = refresh_started.elapsed().as_millis();
+        self.logger.log_timing(
+            "inventory_refresh",
+            &format!("outcome={outcome} elapsed_ms={elapsed_ms}"),
+        )?;
+        self.maybe_log_slow_operation(
+            "inventory_refresh",
+            SLOW_INVENTORY_REFRESH_MS,
+            elapsed_ms,
+            &format!("outcome={outcome} elapsed_ms={elapsed_ms}"),
+        )?;
         Ok(())
     }
 
@@ -365,27 +427,26 @@ impl DashboardRuntime {
         Ok(())
     }
 
-    fn maybe_refresh_selected_pull_request(&mut self, force: bool) -> Result<(), RuntimeError> {
+    fn maybe_refresh_selected_pull_request(
+        &mut self,
+        force: bool,
+        trigger: &'static str,
+    ) -> Result<(), RuntimeError> {
         if !self.runtime.pull_request_monitoring_enabled {
+            self.pending_pull_request_lookup = None;
             return Ok(());
         }
 
         let Some(workspace_path) = self.state.selected_workspace_path() else {
+            self.pending_pull_request_lookup = None;
             return Ok(());
         };
 
-        let poll_interval =
-            Duration::from_millis(self.runtime.pull_request_poll_interval_ms.max(1));
-        let lookup_due = force
-            || !self.state.pull_request_cache.contains_key(&workspace_path)
-            || self
-                .last_pull_request_lookup
-                .get(&workspace_path)
-                .is_none_or(|last_lookup| last_lookup.elapsed() >= poll_interval);
-        if !lookup_due {
+        if !self.pull_request_lookup_due(&workspace_path, force) {
             return Ok(());
         }
 
+        let lookup_started = Instant::now();
         let lookup = match self.pull_requests.lookup(&workspace_path) {
             Ok(lookup) => lookup,
             Err(error) => PullRequestLookup::Unavailable {
@@ -395,8 +456,34 @@ impl DashboardRuntime {
 
         self.last_pull_request_lookup
             .insert(workspace_path.clone(), Instant::now());
+        let elapsed_ms = lookup_started.elapsed().as_millis();
+        self.logger.log_timing(
+            "pull_request_lookup",
+            &format!(
+                "trigger={trigger} workspace={} outcome={} elapsed_ms={elapsed_ms}",
+                workspace_path.display(),
+                pull_request_lookup_outcome_label(&lookup),
+            ),
+        )?;
+        self.maybe_log_slow_operation(
+            "pull_request_lookup",
+            SLOW_PULL_REQUEST_LOOKUP_MS,
+            elapsed_ms,
+            &format!(
+                "trigger={trigger} workspace={} outcome={} elapsed_ms={elapsed_ms}",
+                workspace_path.display(),
+                pull_request_lookup_outcome_label(&lookup),
+            ),
+        )?;
         self.logger
             .log_pull_request_lookup(&workspace_path, &lookup)?;
+        if self
+            .pending_pull_request_lookup
+            .as_ref()
+            .is_some_and(|pending| pending.workspace_path == workspace_path)
+        {
+            self.pending_pull_request_lookup = None;
+        }
         self.apply_runtime_action(Action::SetPullRequestLookup {
             workspace_path,
             lookup,
@@ -448,6 +535,101 @@ impl DashboardRuntime {
         self.logger.log_operator_alert(&alert)?;
         self.apply_runtime_action(Action::SetOperatorAlert(Some(alert)))?;
         Ok(())
+    }
+
+    fn next_wait_timeout(&self, inventory_timeout: Duration) -> Duration {
+        let pending_timeout = self
+            .pending_pull_request_lookup
+            .as_ref()
+            .map(|pending| pending.due_at.saturating_duration_since(Instant::now()))
+            .unwrap_or(inventory_timeout);
+        inventory_timeout.min(pending_timeout)
+    }
+
+    fn schedule_selected_pull_request_refresh(&mut self, previous_workspace: Option<PathBuf>) {
+        let current_workspace = self.state.selected_workspace_path();
+        if current_workspace == previous_workspace {
+            return;
+        }
+
+        if !self.runtime.pull_request_monitoring_enabled {
+            self.pending_pull_request_lookup = None;
+            return;
+        }
+
+        let Some(workspace_path) = current_workspace else {
+            self.pending_pull_request_lookup = None;
+            return;
+        };
+
+        if !self.pull_request_lookup_due(&workspace_path, false) {
+            self.pending_pull_request_lookup = None;
+            return;
+        }
+
+        self.pending_pull_request_lookup = Some(PendingPullRequestLookup {
+            workspace_path,
+            due_at: Instant::now()
+                + Duration::from_millis(SELECTION_PULL_REQUEST_LOOKUP_DEBOUNCE_MS),
+        });
+    }
+
+    fn run_pending_pull_request_refresh(&mut self) -> Result<(), RuntimeError> {
+        let Some(pending) = self.pending_pull_request_lookup.clone() else {
+            return Ok(());
+        };
+
+        if pending.due_at > Instant::now() {
+            return Ok(());
+        }
+
+        let Some(selected_workspace) = self.state.selected_workspace_path() else {
+            self.pending_pull_request_lookup = None;
+            return Ok(());
+        };
+
+        if selected_workspace != pending.workspace_path {
+            self.pending_pull_request_lookup = None;
+            self.schedule_selected_pull_request_refresh(Some(pending.workspace_path));
+            return Ok(());
+        }
+
+        self.pending_pull_request_lookup = None;
+        self.maybe_refresh_selected_pull_request(false, "selection-idle")
+    }
+
+    fn pull_request_lookup_due(&self, workspace_path: &PathBuf, force: bool) -> bool {
+        let poll_interval =
+            Duration::from_millis(self.runtime.pull_request_poll_interval_ms.max(1));
+        force
+            || !self.state.pull_request_cache.contains_key(workspace_path)
+            || self
+                .last_pull_request_lookup
+                .get(workspace_path)
+                .is_none_or(|last_lookup| last_lookup.elapsed() >= poll_interval)
+    }
+
+    fn maybe_log_slow_operation(
+        &mut self,
+        operation: &str,
+        threshold_ms: u128,
+        elapsed_ms: u128,
+        fields: &str,
+    ) -> Result<(), RuntimeError> {
+        if elapsed_ms > threshold_ms {
+            self.logger
+                .log_slow_operation(operation, threshold_ms, fields)?;
+        }
+        Ok(())
+    }
+}
+
+fn pull_request_lookup_outcome_label(lookup: &PullRequestLookup) -> &'static str {
+    match lookup {
+        PullRequestLookup::Unknown => "unknown",
+        PullRequestLookup::Missing => "missing",
+        PullRequestLookup::Available(_) => "available",
+        PullRequestLookup::Unavailable { .. } => "unavailable",
     }
 }
 

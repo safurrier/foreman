@@ -161,7 +161,7 @@ yet expose a stable contract.
 - The dashboard includes a detailed pane preview.
 - The dashboard includes an input area for sending text to the selected agent.
 - The dashboard includes a footer with contextual actions or hints.
-- The dashboard includes a help surface.
+- The dashboard includes a help surface with a legend for compact badges and status indicators.
 - The dashboard may include summary, subagent, and pull request detail panels.
 
 **R10. Keyboard-first interaction**
@@ -176,11 +176,12 @@ yet expose a stable contract.
 **R11. Pane focus behavior**
 
 - Foreman can focus the selected pane by switching tmux context as needed.
+- Session and window selections can resolve to an actionable visible pane for focus-oriented actions.
 - In popup mode, successful focus-oriented actions close the dashboard automatically.
 
 **R12. Direct input**
 
-- The operator can compose and send text to the selected agent pane.
+- The operator can compose and send text to the actionable selected agent pane.
 - Multiline composition is supported.
 - Text editing behaves safely for non-ASCII input.
 
@@ -439,6 +440,8 @@ mise run ci
 - Activating a session header expands or collapses that session.
 - Given the dashboard is running, pressing `t` cycles the active theme without
   changing selection or mode.
+- Given a window row is selected, focus-oriented actions resolve to the top visible
+  actionable pane instead of silently no-oping.
 
 **A9. Popup auto-exit**
 
@@ -446,7 +449,9 @@ mise run ci
 
 **A10. Direct input**
 
-- Given an agent is selected, when the operator composes text, including multiple lines, and sends it, that content is delivered to the selected agent pane.
+- Given an actionable agent row is selected, when the operator composes text,
+  including multiple lines, and sends it, that content is delivered to the resolved
+  agent pane.
 
 **A11. Claude Code first-class support**
 
@@ -515,6 +520,8 @@ mise run ci
 - Given `vhs` is available locally, when `mise run verify-ux` runs, focused TUI
   smoke tests pass and fresh visual artifacts can be generated from the live
   binary.
+- Given the navigation performance smoke runs in the heavy UX lane, selection
+  bursts do not trigger pull-request lookups for every intermediate workspace.
 - When CI runs, build, test, formatting, and lint checks succeed.
 
 ### Definition of done

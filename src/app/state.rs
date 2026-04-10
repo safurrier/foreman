@@ -473,6 +473,28 @@ impl Inventory {
             .find(|pane| &pane.id == pane_id)
     }
 
+    pub fn actionable_pane_for_target<'a>(
+        &'a self,
+        target: &SelectionTarget,
+        filters: &Filters,
+        sort_mode: SortMode,
+    ) -> Option<&'a Pane> {
+        match target {
+            SelectionTarget::Pane(pane_id) => {
+                self.pane(pane_id).filter(|pane| pane.is_visible(filters))
+            }
+            SelectionTarget::Window(window_id) => self
+                .window(window_id)
+                .and_then(|window| window.visible_panes(filters, sort_mode).into_iter().next()),
+            SelectionTarget::Session(session_id) => self.session(session_id).and_then(|session| {
+                session
+                    .visible_windows(filters, sort_mode)
+                    .into_iter()
+                    .find_map(|window| window.visible_panes(filters, sort_mode).into_iter().next())
+            }),
+        }
+    }
+
     pub fn session_count(&self) -> usize {
         self.sessions.len()
     }
@@ -1033,6 +1055,16 @@ impl AppState {
             SelectionTarget::Pane(pane_id) => Some(pane_id.clone()),
             SelectionTarget::Session(_) | SelectionTarget::Window(_) => None,
         }
+    }
+
+    pub fn selected_actionable_pane(&self) -> Option<&Pane> {
+        let target = self.selection.as_ref()?;
+        self.inventory
+            .actionable_pane_for_target(target, &self.filters, self.sort_mode)
+    }
+
+    pub fn selected_actionable_pane_id(&self) -> Option<PaneId> {
+        self.selected_actionable_pane().map(|pane| pane.id.clone())
     }
 
     pub fn selected_window_id(&self) -> Option<WindowId> {
