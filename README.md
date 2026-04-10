@@ -74,8 +74,10 @@ Common dashboard keys:
 - `Enter` sends in compose mode and acts on the selected row in normal mode
 - `/` starts search
 - `s` starts flash jump
+- `h` cycles the harness view
+- `H` / `P` reveal non-agent sessions or panes
 - `t` cycles the active theme
-- `?` opens help and the legend
+- `?` opens help, the legend, and the harness mark map
 
 Theme selection:
 
@@ -115,6 +117,9 @@ Contributor docs:
 - The dashboard now supports built-in TUI palettes (`catppuccin`, `gruvbox`,
   `tokyo-night`, `nord`, `dracula`, `terminal`) plus a `no-color` fallback,
   with config-based default selection and runtime cycling via `t`.
+- The dashboard now uses compact harness marks plus an in-product legend, and
+  supports cycling a harness-only view with `h` without losing actionable
+  session/window behavior.
 
 ## Harness Support Matrix
 

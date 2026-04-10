@@ -1,4 +1,6 @@
-use crate::app::{AgentStatus, AppState, Focus, ModalState, Mode, Pane, SelectionTarget};
+use crate::app::{
+    AgentStatus, AppState, Focus, HarnessKind, ModalState, Mode, Pane, SelectionTarget,
+};
 use crate::services::pull_requests::PullRequestLookup;
 use crate::ui::theme::{Theme, ThemeName};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -87,16 +89,14 @@ fn render_header(
             }
         ),
         LayoutMode::Medium => format!(
-            "Foreman | {} | {} | {} | {} targets | {} | {} | {} | {}",
+            "Foreman | {} | {} | {} targets | {} | {} | {}",
             state.mode_label(),
-            state.focus_label(),
             state.system_stats_label(),
             visible_count,
-            state.sort_label(),
+            state.filter_label(),
             pull_request,
-            state.notifications_label(),
             if alert.is_empty() {
-                theme_label.clone()
+                state.notifications_label()
             } else {
                 alert.clone()
             }
@@ -186,12 +186,13 @@ fn render_body(
 }
 
 fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState, theme: &Theme) {
+    let title = if state.filters.harness.is_some() {
+        format!("Targets [{}]", state.harness_filter_label())
+    } else {
+        "Targets".to_string()
+    };
     let sidebar = Paragraph::new(sidebar_text(state, theme))
-        .block(focused_block(
-            "Targets",
-            state.focus == Focus::Sidebar,
-            theme,
-        ))
+        .block(focused_block(title, state.focus == Focus::Sidebar, theme))
         .wrap(Wrap { trim: false })
         .style(theme.base);
     frame.render_widget(sidebar, area);
@@ -404,12 +405,9 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, theme: &Theme, layout_m
     frame.render_widget(modal, popup);
 }
 
-fn focused_block(title: &str, focused: bool, theme: &Theme) -> Block<'static> {
-    let title = if focused {
-        format!("* {title}")
-    } else {
-        title.to_string()
-    };
+fn focused_block(title: impl Into<String>, focused: bool, theme: &Theme) -> Block<'static> {
+    let title = title.into();
+    let title = if focused { format!("* {title}") } else { title };
 
     Block::default()
         .borders(Borders::ALL)
@@ -481,7 +479,7 @@ fn sidebar_line(state: &AppState, theme: &Theme, target: &SelectionTarget) -> Li
 
     match target {
         SelectionTarget::Session(session_id) => {
-            let (name, collapsed, rank, summary) = state
+            let (name, collapsed, rank, summary, marks) = state
                 .inventory
                 .session(session_id)
                 .map(|session| {
@@ -490,11 +488,18 @@ fn sidebar_line(state: &AppState, theme: &Theme, target: &SelectionTarget) -> Li
                         .iter()
                         .map(|window| window.visible_panes(&state.filters, state.sort_mode).len())
                         .sum::<usize>();
+                    let marks = harness_marks_for_panes(
+                        theme,
+                        visible_windows.iter().flat_map(|window| {
+                            window.visible_panes(&state.filters, state.sort_mode)
+                        }),
+                    );
                     (
                         session.name.clone(),
                         state.collapsed_sessions.contains(session_id),
                         session.attention_rank(),
                         format!("{}w/{}p", visible_windows.len(), visible_panes),
+                        marks,
                     )
                 })
                 .unwrap_or_else(|| {
@@ -503,6 +508,7 @@ fn sidebar_line(state: &AppState, theme: &Theme, target: &SelectionTarget) -> Li
                         state.collapsed_sessions.contains(session_id),
                         AgentStatus::Unknown.attention_rank(),
                         "0w/0p".to_string(),
+                        String::new(),
                     )
                 });
             spans.push(Span::styled(
@@ -532,17 +538,29 @@ fn sidebar_line(state: &AppState, theme: &Theme, target: &SelectionTarget) -> Li
                     theme.muted
                 },
             ));
+            if !marks.is_empty() {
+                spans.push(Span::styled(
+                    format!("  {marks}"),
+                    if selected {
+                        theme.selected
+                    } else {
+                        theme.emphasis
+                    },
+                ));
+            }
         }
         SelectionTarget::Window(window_id) => {
-            let (name, rank, summary) = state
+            let (name, rank, summary, marks) = state
                 .inventory
                 .window(window_id)
                 .map(|window| {
                     let visible_panes = window.visible_panes(&state.filters, state.sort_mode);
+                    let marks = harness_marks_for_panes(theme, visible_panes.iter().copied());
                     (
                         window.navigation_title(),
                         window.attention_rank(),
                         format!("{}p", visible_panes.len()),
+                        marks,
                     )
                 })
                 .unwrap_or_else(|| {
@@ -550,6 +568,7 @@ fn sidebar_line(state: &AppState, theme: &Theme, target: &SelectionTarget) -> Li
                         window_id.as_str().to_string(),
                         AgentStatus::Unknown.attention_rank(),
                         "0p".to_string(),
+                        String::new(),
                     )
                 });
             spans.push(Span::styled("  ", theme.muted));
@@ -566,6 +585,16 @@ fn sidebar_line(state: &AppState, theme: &Theme, target: &SelectionTarget) -> Li
                     theme.muted
                 },
             ));
+            if !marks.is_empty() {
+                spans.push(Span::styled(
+                    format!("  {marks}"),
+                    if selected {
+                        theme.selected
+                    } else {
+                        theme.emphasis
+                    },
+                ));
+            }
         }
         SelectionTarget::Pane(pane_id) => {
             let pane = state.inventory.pane(pane_id);
@@ -579,7 +608,7 @@ fn sidebar_line(state: &AppState, theme: &Theme, target: &SelectionTarget) -> Li
                 status_style(theme, status, pane.is_some_and(|pane| pane.is_agent())),
             ));
             spans.push(Span::styled(
-                format!("{} ", pane_harness_badge(pane)),
+                format!("{} ", pane_harness_badge(theme, pane)),
                 if let Some(pane) = pane {
                     if pane.is_agent() {
                         status_style(theme, status, true)
@@ -632,11 +661,6 @@ fn preview_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Tex
         Some(SelectionTarget::Pane(pane_id)) => {
             if let Some(pane) = state.inventory.pane(pane_id) {
                 let status = pane.agent.as_ref().map(|agent| agent.status);
-                let harness = pane
-                    .agent
-                    .as_ref()
-                    .map(|agent| agent.harness.short_label())
-                    .unwrap_or("SH");
                 if let Some(breadcrumb) = state.selection_breadcrumb() {
                     lines.push(Line::from(vec![Span::styled(breadcrumb, theme.emphasis)]));
                 }
@@ -645,7 +669,10 @@ fn preview_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Tex
                         format!("{} ", status_symbol(theme, status, pane.is_agent())),
                         status_style(theme, status, pane.is_agent()),
                     ),
-                    Span::styled(format!("[{harness}] "), theme.emphasis),
+                    Span::styled(
+                        format!("{} ", pane_harness_badge(theme, Some(pane))),
+                        theme.emphasis,
+                    ),
                     Span::styled(pane.navigation_title(), theme.emphasis),
                 ]));
                 lines.push(plain_line(format!(
@@ -658,6 +685,10 @@ fn preview_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Tex
                         .unwrap_or("shell")
                 )));
                 lines.push(plain_line(format!("Pane title: {}", pane.title)));
+                lines.push(muted_line(
+                    "Act here: f tmux focus. i compose. x kill.",
+                    theme,
+                ));
             } else {
                 lines.push(plain_line("Selected pane is no longer available."));
             }
@@ -675,8 +706,11 @@ fn preview_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Tex
                     "Visible panes: {}",
                     window.visible_panes(&state.filters, state.sort_mode).len()
                 )));
+                if let Some(action_target) = actionable_target_line(state, theme) {
+                    lines.push(action_target);
+                }
                 lines.push(muted_line(
-                    "Enter or f focuses the top visible pane. i composes there.",
+                    "Enter or f focuses that pane. i composes there.",
                     theme,
                 ));
             } else {
@@ -702,8 +736,11 @@ fn preview_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Tex
                     visible_windows.len(),
                     visible_panes
                 )));
+                if let Some(action_target) = actionable_target_line(state, theme) {
+                    lines.push(action_target);
+                }
                 lines.push(muted_line(
-                    "Enter toggles collapse. f or i acts on the top visible pane.",
+                    "Enter toggles collapse. f or i acts on that pane.",
                     theme,
                 ));
             } else {
@@ -768,10 +805,7 @@ fn input_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Text<
         .map(|pane| {
             format!(
                 "{} {}",
-                pane.agent
-                    .as_ref()
-                    .map(|agent| agent.harness.short_label())
-                    .unwrap_or("SH"),
+                pane_harness_badge(theme, Some(pane)),
                 pane.navigation_title()
             )
         })
@@ -864,13 +898,13 @@ fn footer_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Text
         Mode::Help => vec![format!("Esc or ? closes help{sep}q quits")],
         Mode::Normal | Mode::PreviewScroll => match layout_mode {
             LayoutMode::Compact => {
-                vec![format!("j/k move{sep}Enter act{sep}i compose{sep}/ search{sep}? legend{sep}q quit")]
+                vec![format!("move j/k{sep}act Enter/i{sep}find /{sep}? help{sep}q quit")]
             }
             LayoutMode::Medium => vec![format!(
-                "j/k move{sep}Enter act{sep}f tmux{sep}i compose{sep}/ search{sep}s jump{sep}? legend{sep}q quit"
+                "move j/k{sep}act Enter/f/i{sep}find / s{sep}view h{sep}? help{sep}q quit"
             )],
             LayoutMode::Wide => vec![format!(
-                "j/k move{sep}Enter act{sep}f tmux{sep}i compose{sep}/ search{sep}s jump{sep}p PR{sep}o sort{sep}t theme{sep}? legend{sep}q quit"
+                "move j/k{sep}act Enter/f/i{sep}find / s{sep}view h H P o t{sep}pr p O Y{sep}? help{sep}q quit"
             )],
         },
     };
@@ -897,22 +931,31 @@ fn help_text(theme: &Theme) -> Text<'static> {
             ),
             theme,
         ),
-        muted_line("CLD Claude  CDX Codex  PI Pi", theme),
-        muted_line("GEM Gemini  OCD OpenCode  SH shell", theme),
+        muted_line(
+            format!(
+                "{} Claude  {} Codex  {} Pi",
+                theme.glyphs.claude, theme.glyphs.codex, theme.glyphs.pi
+            ),
+            theme,
+        ),
+        muted_line(
+            format!(
+                "{} Gemini  {} OpenCode  {} shell",
+                theme.glyphs.gemini, theme.glyphs.opencode, theme.glyphs.shell
+            ),
+            theme,
+        ),
         plain_line(""),
-        section_line("Work With A Pane", theme),
+        section_line("Act", theme),
         muted_line("i compose. f tmux focus. x kill confirm.", theme),
         muted_line("Enter sends. Ctrl+J newline. R rename. N spawn.", theme),
         plain_line(""),
-        section_line("Discover", theme),
+        section_line("Find", theme),
         muted_line("/ search. s jump. S jump+focus.", theme),
         muted_line("p PR detail. O open PR. Y copy URL.", theme),
         plain_line(""),
         section_line("View", theme),
-        muted_line(
-            "H toggles non-agent sessions. P toggles non-agent panes.",
-            theme,
-        ),
+        muted_line("h cycles harness view. H sessions. P panes.", theme),
         muted_line("o sort. t theme. m mute. n profile. q quit.", theme),
     ])
 }
@@ -1044,9 +1087,60 @@ fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
     }
 }
 
-fn pane_harness_badge(pane: Option<&Pane>) -> &'static str {
-    pane.and_then(|pane| pane.agent.as_ref().map(|agent| agent.harness.short_label()))
-        .unwrap_or("SH")
+fn pane_harness_badge(theme: &Theme, pane: Option<&Pane>) -> &'static str {
+    harness_badge(theme, pane.and_then(Pane::harness_kind))
+}
+
+fn harness_badge(theme: &Theme, harness: Option<HarnessKind>) -> &'static str {
+    match harness {
+        Some(HarnessKind::ClaudeCode) => theme.glyphs.claude,
+        Some(HarnessKind::CodexCli) => theme.glyphs.codex,
+        Some(HarnessKind::Pi) => theme.glyphs.pi,
+        Some(HarnessKind::GeminiCli) => theme.glyphs.gemini,
+        Some(HarnessKind::OpenCode) => theme.glyphs.opencode,
+        None => theme.glyphs.shell,
+    }
+}
+
+fn harness_marks_for_panes<'a>(theme: &Theme, panes: impl IntoIterator<Item = &'a Pane>) -> String {
+    let mut marks = Vec::new();
+    let mut saw_shell = false;
+
+    for pane in panes {
+        match pane.harness_kind() {
+            Some(harness) => {
+                let badge = harness_badge(theme, Some(harness));
+                if !marks.contains(&badge) {
+                    marks.push(badge);
+                }
+            }
+            None => saw_shell = true,
+        }
+    }
+
+    if saw_shell && marks.is_empty() {
+        marks.push(theme.glyphs.shell);
+    }
+
+    marks.concat()
+}
+
+fn actionable_target_line(state: &AppState, theme: &Theme) -> Option<Line<'static>> {
+    let pane = state.selected_actionable_pane()?;
+    let status = pane.agent.as_ref().map(|agent| agent.status);
+
+    Some(Line::from(vec![
+        Span::styled("Acts on: ", theme.muted),
+        Span::styled(
+            format!("{} ", status_symbol(theme, status, pane.is_agent())),
+            status_style(theme, status, pane.is_agent()),
+        ),
+        Span::styled(
+            format!("{} ", pane_harness_badge(theme, Some(pane))),
+            status_style(theme, status, pane.is_agent()),
+        ),
+        Span::styled(pane.navigation_title(), theme.base),
+    ]))
 }
 
 fn status_symbol(theme: &Theme, status: Option<AgentStatus>, is_agent: bool) -> &'static str {
@@ -1234,11 +1328,13 @@ mod tests {
 
         assert!(output.contains("Navigate"));
         assert!(output.contains("Legend"));
-        assert!(output.contains("CLD Claude"));
+        assert!(output.contains("✦ Claude"));
+        assert!(output.contains("◎ Codex"));
         assert!(output.contains("R rename"));
         assert!(output.contains("N spawn"));
-        assert!(output.contains("H toggles non-agent sessions"));
-        assert!(output.contains("P toggles non-agent panes"));
+        assert!(output.contains("h cycles harness view"));
+        assert!(output.contains("H sessions"));
+        assert!(output.contains("P panes"));
     }
 
     #[test]
@@ -1315,8 +1411,8 @@ mod tests {
         let state = sample_state();
         let output = render_to_string(&state);
 
-        assert!(output.contains("CLD alpha"));
-        assert!(output.contains("CDX foreman"));
+        assert!(output.contains("✦ alpha"));
+        assert!(output.contains("◎ foreman"));
         assert!(!output.contains("Pane     "));
     }
 

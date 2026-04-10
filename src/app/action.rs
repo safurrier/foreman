@@ -63,6 +63,7 @@ pub enum Action {
     ConfirmKill,
     ToggleShowNonAgentSessions,
     ToggleShowNonAgentPanes,
+    CycleHarnessFilter,
     ToggleSessionCollapsed(SessionId),
     SetSortMode(SortMode),
     CycleTheme,
@@ -101,6 +102,7 @@ impl Action {
             Self::ConfirmKill => "confirm-kill",
             Self::ToggleShowNonAgentSessions => "toggle-show-non-agent-sessions",
             Self::ToggleShowNonAgentPanes => "toggle-show-non-agent-panes",
+            Self::CycleHarnessFilter => "cycle-harness-filter",
             Self::ToggleSessionCollapsed(_) => "toggle-session-collapsed",
             Self::SetSortMode(_) => "set-sort-mode",
             Self::CycleTheme => "cycle-theme",
@@ -202,6 +204,7 @@ pub fn action_for_command(state: &AppState, command: Command) -> Action {
         },
         Command::ToggleNonAgentSessions => Action::ToggleShowNonAgentSessions,
         Command::ToggleNonAgentPanes => Action::ToggleShowNonAgentPanes,
+        Command::CycleHarnessFilter => Action::CycleHarnessFilter,
         Command::CycleSortMode => Action::SetSortMode(match state.sort_mode {
             SortMode::RecentActivity => SortMode::AttentionFirst,
             SortMode::AttentionFirst => SortMode::RecentActivity,
@@ -426,6 +429,10 @@ mod tests {
         assert_eq!(
             action_for_command(&state, Command::CycleTheme),
             Action::CycleTheme
+        );
+        assert_eq!(
+            action_for_command(&state, Command::CycleHarnessFilter),
+            Action::CycleHarnessFilter
         );
     }
 

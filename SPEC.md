@@ -170,6 +170,8 @@ yet expose a stable contract.
 - The operator can change focus between the sidebar, preview, and input regions.
 - The operator can collapse and expand session groups.
 - The operator can trigger focus on the selected pane.
+- The operator can cycle a harness/provider filter that narrows the tree to one
+  supported agent family at a time.
 - The operator can cycle the active theme at runtime.
 - Escape semantics cancel or dismiss the current mode according to context.
 
@@ -428,6 +430,9 @@ mise run ci
 
 - Given a mix of agent and non-agent panes, when the dashboard starts, non-agent-only sessions and non-agent panes are hidden by default.
 - When the operator toggles the relevant filters, those hidden items become visible.
+- Given visible supported harness families, pressing the harness-view key cycles
+  the sidebar through those harnesses plus the unfiltered view and reconciles the
+  selection to a visible target.
 
 **A7. Status stability**
 
@@ -440,6 +445,8 @@ mise run ci
 - Activating a session header expands or collapses that session.
 - Given the dashboard is running, pressing `t` cycles the active theme without
   changing selection or mode.
+- Given the dashboard is running, pressing `?` opens help with a legend for
+  status and harness marks.
 - Given a window row is selected, focus-oriented actions resolve to the top visible
   actionable pane instead of silently no-oping.
 
@@ -520,6 +527,9 @@ mise run ci
 - Given `vhs` is available locally, when `mise run verify-ux` runs, focused TUI
   smoke tests pass and fresh visual artifacts can be generated from the live
   binary.
+- Given the focused runtime smoke runs, help/legend display, harness-view
+  cycling, and acting on the filtered selection all work in the compiled binary
+  inside real tmux.
 - Given the navigation performance smoke runs in the heavy UX lane, selection
   bursts do not trigger pull-request lookups for every intermediate workspace.
 - When CI runs, build, test, formatting, and lint checks succeed.

@@ -368,6 +368,12 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             reconcile_visible_selection(state);
             reconcile_pull_request_detail(state);
         }
+        Action::CycleHarnessFilter => {
+            state.filters.cycle_harness();
+            state.reconcile_selection();
+            reconcile_visible_selection(state);
+            reconcile_pull_request_detail(state);
+        }
         Action::ToggleSessionCollapsed(session_id) => {
             if !state.inventory.contains_session(&session_id) {
                 return Vec::new();
@@ -803,6 +809,55 @@ mod tests {
             state.selection,
             Some(SelectionTarget::Window("beta:agents".into()))
         );
+    }
+
+    #[test]
+    fn harness_filter_cycles_and_reconciles_selection() {
+        let mut state = AppState::with_inventory(sample_inventory());
+        state.selection = Some(SelectionTarget::Pane("beta:codex".into()));
+
+        reduce(&mut state, Action::CycleHarnessFilter);
+        assert_eq!(state.harness_filter_label(), "claude");
+        assert_eq!(
+            state.selection,
+            Some(SelectionTarget::Session("alpha".into()))
+        );
+
+        reduce(&mut state, Action::CycleHarnessFilter);
+        assert_eq!(state.harness_filter_label(), "codex");
+        assert_eq!(
+            state.selection,
+            Some(SelectionTarget::Session("beta".into()))
+        );
+
+        for _ in 0..4 {
+            reduce(&mut state, Action::CycleHarnessFilter);
+        }
+        assert_eq!(state.harness_filter_label(), "all");
+    }
+
+    #[test]
+    fn harness_filter_hides_non_agent_rows_even_when_shell_toggles_are_enabled() {
+        let mut state = AppState::with_inventory(inventory([
+            SessionBuilder::new("notes")
+                .window(WindowBuilder::new("notes:window").pane(PaneBuilder::new("notes:pane"))),
+            SessionBuilder::new("alpha").window(
+                WindowBuilder::new("alpha:agents").pane(
+                    PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
+                        .status(AgentStatus::Working)
+                        .activity_score(3),
+                ),
+            ),
+        ]));
+
+        reduce(&mut state, Action::ToggleShowNonAgentSessions);
+        reduce(&mut state, Action::ToggleShowNonAgentPanes);
+        reduce(&mut state, Action::CycleHarnessFilter);
+
+        assert!(!state
+            .visible_targets()
+            .contains(&SelectionTarget::Pane("notes:pane".into())));
+        assert_eq!(state.harness_filter_label(), "claude");
     }
 
     #[test]

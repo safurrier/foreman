@@ -171,6 +171,14 @@ pub enum HarnessKind {
 }
 
 impl HarnessKind {
+    pub const ALL: [Self; 5] = [
+        Self::ClaudeCode,
+        Self::CodexCli,
+        Self::Pi,
+        Self::GeminiCli,
+        Self::OpenCode,
+    ];
+
     pub fn label(self) -> &'static str {
         match self {
             Self::ClaudeCode => "Claude Code",
@@ -188,6 +196,16 @@ impl HarnessKind {
             Self::Pi => "PI",
             Self::GeminiCli => "GEM",
             Self::OpenCode => "OCD",
+        }
+    }
+
+    pub fn filter_label(self) -> &'static str {
+        match self {
+            Self::ClaudeCode => "claude",
+            Self::CodexCli => "codex",
+            Self::Pi => "pi",
+            Self::GeminiCli => "gemini",
+            Self::OpenCode => "opencode",
         }
     }
 }
@@ -274,8 +292,15 @@ impl Pane {
         self.agent.is_some()
     }
 
+    pub fn harness_kind(&self) -> Option<HarnessKind> {
+        self.agent.as_ref().map(|agent| agent.harness)
+    }
+
     pub fn is_visible(&self, filters: &Filters) -> bool {
-        self.is_agent() || filters.show_non_agent_panes
+        match self.harness_kind() {
+            Some(harness) => filters.matches_harness(harness),
+            None => filters.show_non_agent_panes && filters.harness.is_none(),
+        }
     }
 
     pub fn recent_activity(&self) -> u64 {
@@ -390,12 +415,27 @@ impl Session {
         self.windows.iter().any(Window::has_agent_panes)
     }
 
+    pub fn has_matching_agent_panes(&self, filters: &Filters) -> bool {
+        self.windows
+            .iter()
+            .flat_map(|window| window.panes.iter())
+            .any(|pane| {
+                pane.harness_kind()
+                    .is_some_and(|harness| filters.matches_harness(harness))
+            })
+    }
+
     pub fn is_visible(&self, filters: &Filters) -> bool {
-        self.has_agent_panes() || filters.show_non_agent_sessions
+        self.has_matching_agent_panes(filters)
+            || (filters.show_non_agent_sessions
+                && filters.harness.is_none()
+                && !self.has_agent_panes()
+                && self.windows.iter().any(|window| !window.panes.is_empty()))
     }
 
     pub fn visible_windows(&self, filters: &Filters, sort_mode: SortMode) -> Vec<&Window> {
-        let force_windows_visible = filters.show_non_agent_sessions && !self.has_agent_panes();
+        let force_windows_visible =
+            filters.show_non_agent_sessions && filters.harness.is_none() && !self.has_agent_panes();
         let mut windows: Vec<&Window> = self
             .windows
             .iter()
@@ -644,6 +684,36 @@ pub enum SelectionTarget {
 pub struct Filters {
     pub show_non_agent_sessions: bool,
     pub show_non_agent_panes: bool,
+    pub harness: Option<HarnessKind>,
+}
+
+impl Filters {
+    pub fn matches_harness(&self, harness: HarnessKind) -> bool {
+        self.harness.is_none_or(|selected| selected == harness)
+    }
+
+    pub fn cycle_harness(&mut self) {
+        self.harness = match self.harness {
+            None => Some(HarnessKind::ALL[0]),
+            Some(current) => HarnessKind::ALL
+                .iter()
+                .position(|candidate| *candidate == current)
+                .and_then(|index| HarnessKind::ALL.get(index + 1).copied()),
+        };
+    }
+
+    pub fn harness_label(&self) -> &'static str {
+        self.harness.map(HarnessKind::filter_label).unwrap_or("all")
+    }
+
+    pub fn scope_label(&self) -> &'static str {
+        match (self.show_non_agent_sessions, self.show_non_agent_panes) {
+            (false, false) => "agents-only",
+            (true, false) => "all-sessions",
+            (false, true) => "all-panes",
+            (true, true) => "all-targets",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -1158,15 +1228,15 @@ impl AppState {
         self.sort_mode.label()
     }
 
+    pub fn harness_filter_label(&self) -> &'static str {
+        self.filters.harness_label()
+    }
+
     pub fn filter_label(&self) -> String {
-        match (
-            self.filters.show_non_agent_sessions,
-            self.filters.show_non_agent_panes,
-        ) {
-            (false, false) => "agents-only".to_string(),
-            (true, false) => "all-sessions".to_string(),
-            (false, true) => "all-panes".to_string(),
-            (true, true) => "all-targets".to_string(),
+        let scope = self.filters.scope_label();
+        match self.filters.harness {
+            Some(harness) => format!("{} {}", harness.filter_label(), scope),
+            None => scope.to_string(),
         }
     }
 

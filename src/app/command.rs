@@ -33,6 +33,7 @@ pub enum Command {
     SpawnAgent,
     ToggleNonAgentSessions,
     ToggleNonAgentPanes,
+    CycleHarnessFilter,
     CycleSortMode,
     CycleTheme,
     Quit,
@@ -103,6 +104,9 @@ pub fn map_key_event(key: KeyEvent, focus: Focus, mode: Mode) -> Option<Command>
         }
         (Mode::Normal, _, KeyCode::Char('P'), KeyModifiers::SHIFT) => {
             Some(Command::ToggleNonAgentPanes)
+        }
+        (Mode::Normal, _, KeyCode::Char('h'), KeyModifiers::NONE) => {
+            Some(Command::CycleHarnessFilter)
         }
         (Mode::Normal, _, KeyCode::Char('o'), KeyModifiers::NONE) => Some(Command::CycleSortMode),
         (Mode::Normal, _, KeyCode::Char('t'), KeyModifiers::NONE) => Some(Command::CycleTheme),
@@ -266,6 +270,10 @@ mod tests {
         assert_eq!(
             map_key_event(key(KeyCode::Char('t')), Focus::Sidebar, Mode::Normal),
             Some(Command::CycleTheme)
+        );
+        assert_eq!(
+            map_key_event(key(KeyCode::Char('h')), Focus::Sidebar, Mode::Normal),
+            Some(Command::CycleHarnessFilter)
         );
     }
 

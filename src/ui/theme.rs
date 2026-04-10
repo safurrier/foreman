@@ -180,6 +180,12 @@ pub struct Glyphs {
     pub error: &'static str,
     pub unknown: &'static str,
     pub non_agent: &'static str,
+    pub claude: &'static str,
+    pub codex: &'static str,
+    pub pi: &'static str,
+    pub gemini: &'static str,
+    pub opencode: &'static str,
+    pub shell: &'static str,
     pub separator: &'static str,
 }
 
@@ -325,6 +331,12 @@ fn unicode_glyphs() -> Glyphs {
         error: "×",
         unknown: "?",
         non_agent: "·",
+        claude: "✦",
+        codex: "◎",
+        pi: "π",
+        gemini: "◇",
+        opencode: "<>",
+        shell: "·",
         separator: "•",
     }
 }
@@ -340,6 +352,12 @@ fn ascii_glyphs() -> Glyphs {
         error: "x",
         unknown: "?",
         non_agent: "-",
+        claude: "A",
+        codex: "C",
+        pi: "P",
+        gemini: "G",
+        opencode: "O",
+        shell: "-",
         separator: "|",
     }
 }
@@ -369,5 +387,7 @@ mod tests {
         assert_eq!(glyphs.selected, ">");
         assert_eq!(glyphs.separator, "|");
         assert_eq!(glyphs.error, "x");
+        assert_eq!(glyphs.claude, "A");
+        assert_eq!(glyphs.codex, "C");
     }
 }

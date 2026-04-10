@@ -45,7 +45,7 @@ testable as the app grows.
 | CLI + config | Parse startup flags, config path/init flows, public debug logging, runtime overrides, popup mode, notification policy defaults, and per-harness integration preference |
 | Runtime loop | Own terminal setup, event polling, redraw cadence, effect execution, and runtime-level soft-failure alerting during interactive runs |
 | App state core | Own `Command`, `Action`, `Mode`, `Focus`, selection state, filters, sort mode, modal state, and reducer logic |
-| Ratatui renderer | Render header, sidebar, preview, input, footer, help, and overlays from pure state using semantic theme tokens, built-in palette themes, compact badges, and no-color-safe glyph fallbacks |
+| Ratatui renderer | Render header, sidebar, preview, input, footer, help, and overlays from pure state using semantic theme tokens, built-in palette themes, compact harness marks, and no-color-safe glyph fallbacks |
 | tmux adapter | Discover sessions/windows/panes, capture pane output, focus panes, send input, rename windows, create windows, and kill panes |
 | Harness integrations | Detect supported harness families, translate compatibility signals for Claude, Codex, Pi, Gemini CLI, and OpenCode, and overlay native signals for Claude, Codex, and Pi when available |
 | Pull request service | Resolve pull request metadata for the selected workspace, and own browser-open and clipboard-copy seams with graceful degradation |
@@ -220,7 +220,8 @@ testable as the app grows.
   surfaces.
 - **Prefer compact badges over repeated prose** - dense tree rows should expose
   status, harness, and primary identity at a glance; details belong in preview
-  or overlay surfaces, not in every sidebar row.
+  or overlay surfaces, not in every sidebar row. If a mark needs explanation,
+  the help surface should carry the legend instead of expanding every row.
 - **Prefer monochrome-safe status cues** - color may help, but labels and
   symbols must carry meaning on their own.
 - **Prefer deterministic jump labels** - flash navigation labels should be

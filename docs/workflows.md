@@ -58,6 +58,10 @@ checks pass.
 regressions caused by synchronous lookup work show up in the heavy lane instead
 of only in manual UX testing.
 
+The runtime smoke in that lane now covers the live help/legend surface plus
+harness-view cycling and acting on the filtered selection inside a real tmux
+server.
+
 Opt-in real harness commands:
 
 ```bash
