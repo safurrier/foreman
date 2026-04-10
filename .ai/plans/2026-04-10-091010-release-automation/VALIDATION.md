@@ -70,3 +70,36 @@ Notes:
 - The fix switched the shared tmux fixture and non-ignored runtime smoke tests
   to portable `sh`/`printf` command strings and corrected helper quoting so the
   keep-alive shell actually stays alive across platforms.
+
+## 2026-04-10 11:25
+
+- `cargo test --test runtime_dashboard -- --nocapture`
+  - pass
+- `cargo test --test tmux_focus -- --nocapture`
+  - pass
+- `cargo test --test tmux_inventory -- --nocapture`
+  - pass
+- `cargo test --test tmux_flash -- --nocapture`
+  - pass
+
+Notes:
+- The next GitHub Actions run failed because several tmux smoke tests assumed
+  the first window was always `:1`. On the Linux runner, that window index
+  assumption was false.
+- The fix was to split panes from the real pane id returned by the fixture and
+  to assert active panes against the session target when only one test window
+  exists.
+
+## 2026-04-10 11:45
+
+- `cargo test --test notification_runtime -- --nocapture`
+  - pass
+- `mise run check`
+  - pass
+
+Notes:
+- The earlier pre-commit failure in `notification_runtime` did not reproduce
+  when rerun directly or as part of the full fast gate after the tmux target
+  fixes were staged.
+- The release branch was kept blocked until the full `check` suite passed
+  again, so the portability fix and the validation trail stayed aligned.

@@ -60,3 +60,26 @@ The fix was to make the fixture and the non-ignored tmux E2E commands use
 portable `sh` plus `printf`, and to tighten the quoting in the helper that
 keeps dashboard sessions alive. That made the same test layer work on both
 macOS and Linux instead of only on the local machine.
+
+## 2026-04-10 11:25 - tmux window indexes were another hidden local assumption
+
+The next GitHub Actions run found a second portability issue in the same test
+layer. Several runtime and tmux smoke tests hardcoded `alpha:1` as if the first
+window index were stable. That was true locally, but not on the Linux runner.
+
+The fix was to stop targeting inferred window numbers and instead split panes
+from the real pane id returned by the fixture. Assertions that only needed the
+single test window now target the session name rather than a guessed `:1`
+window index.
+
+## 2026-04-10 11:45 - full-gate confirmation mattered more than the flaky pre-commit signal
+
+The failed pre-commit run looked like a new notification regression, but the
+test passed when rerun directly and again inside the full `mise run check`
+gate. That suggests the actionable issue was still the tmux portability fix,
+not the notification logic.
+
+The useful rule here is to treat a one-off failure in the tmux-heavy suite as a
+signal to rerun the exact test and then the full fast gate before changing
+behavioral code. That keeps the response proportional and avoids papering over
+timing noise with unnecessary product changes.

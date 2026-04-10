@@ -7,8 +7,8 @@ use support::tmux::TmuxFixture;
 #[test]
 fn system_tmux_backend_focuses_target_pane() {
     let fixture = TmuxFixture::new();
-    let _alpha_main = fixture.new_session("alpha", &fixture.shell_command("Claude Code ready"));
-    let alpha_helper = fixture.split_window("alpha:1", &fixture.shell_command("plain shell"));
+    let alpha_main = fixture.new_session("alpha", &fixture.shell_command("Claude Code ready"));
+    let alpha_helper = fixture.split_window(&alpha_main, &fixture.shell_command("plain shell"));
     fixture.wait_for_capture(&alpha_helper, "plain shell");
 
     let adapter = TmuxAdapter::new(SystemTmuxBackend::new(Some(
@@ -18,7 +18,7 @@ fn system_tmux_backend_focuses_target_pane() {
         .focus_pane(&alpha_helper.clone().into())
         .expect("focus should succeed");
 
-    assert_eq!(fixture.active_pane_in("alpha:1"), alpha_helper);
+    assert_eq!(fixture.active_pane_in("alpha"), alpha_helper);
 }
 
 #[test]

@@ -13,7 +13,7 @@ fn foreman_bin() -> &'static str {
 fn bootstrap_fixture() -> (TmuxFixture, String, String, String) {
     let fixture = TmuxFixture::new();
     let alpha_pane = fixture.new_session("alpha", &fixture.shell_command("Claude Code ready"));
-    let notes_helper = fixture.split_window("alpha:1", &fixture.shell_command("plain shell"));
+    let notes_helper = fixture.split_window(&alpha_pane, &fixture.shell_command("plain shell"));
     let beta_pane = fixture.new_session("beta", &fixture.shell_command("Codex CLI waiting"));
     let notes_pane = fixture.new_session("notes", &fixture.shell_command("plain shell"));
 

@@ -46,8 +46,9 @@ fn interactive_binary_renders_dashboard_and_sends_input_to_selected_agent() {
 #[test]
 fn interactive_binary_popup_focus_action_exits_after_success() {
     let fixture = TmuxFixture::new();
-    let _helper_pane = fixture.new_session("alpha", &fixture.shell_command("plain shell"));
-    let agent_pane = fixture.split_window("alpha:1", &fixture.shell_command("Claude Code ready"));
+    let helper_pane = fixture.new_session("alpha", &fixture.shell_command("plain shell"));
+    let agent_pane =
+        fixture.split_window(&helper_pane, &fixture.shell_command("Claude Code ready"));
     fixture.wait_for_capture(&agent_pane, "Claude Code ready");
 
     let config_dir = tempdir().expect("config dir should exist");
@@ -69,5 +70,5 @@ fn interactive_binary_popup_focus_action_exits_after_success() {
 
     fixture.send_keys(&dashboard_pane, &["j", "j", "f"]);
     fixture.wait_for_capture(&dashboard_pane, "FOREMAN_EXITED");
-    assert_eq!(fixture.active_pane_in("alpha:1"), agent_pane);
+    assert_eq!(fixture.active_pane_in("alpha"), agent_pane);
 }

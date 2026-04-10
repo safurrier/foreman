@@ -9,9 +9,9 @@ use support::tmux::TmuxFixture;
 #[test]
 fn flash_jump_and_focus_uses_live_tmux_target() {
     let fixture = TmuxFixture::new();
-    let _primary = fixture.new_session("alpha", &fixture.shell_command("Claude Code ready"));
+    let primary = fixture.new_session("alpha", &fixture.shell_command("Claude Code ready"));
     let helper = fixture.split_window(
-        "alpha:1",
+        &primary,
         &fixture.shell_command("Codex CLI waiting for your input"),
     );
     fixture.wait_for_capture(&helper, "Codex CLI waiting");
@@ -49,5 +49,5 @@ fn flash_jump_and_focus_uses_live_tmux_target() {
     adapter
         .focus_pane(&helper.clone().into())
         .expect("focus should succeed");
-    assert_eq!(fixture.active_pane_in("alpha:1"), helper);
+    assert_eq!(fixture.active_pane_in("alpha"), helper);
 }
