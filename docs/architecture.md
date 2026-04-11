@@ -218,6 +218,9 @@ testable as the app grows.
 - **Prefer progressive disclosure** - header, sidebar, preview, and input stay
   primary; search, flash, help, rename, spawn, and PR detail remain secondary
   surfaces.
+- **Keep overlays reducer-owned** - help scroll position, modal drafts, search
+  state, and flash state belong in `AppState` so overlay behavior stays
+  testable and deterministic.
 - **Prefer compact badges over repeated prose** - dense tree rows should expose
   status, harness, and primary identity at a glance; details belong in preview
   or overlay surfaces, not in every sidebar row. If a mark needs explanation,

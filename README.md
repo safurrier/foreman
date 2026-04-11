@@ -80,7 +80,7 @@ Common dashboard keys:
 - `h` cycles only the visible harness families, then returns to `all`
 - `H` / `P` reveal non-agent sessions or panes
 - `t` cycles the active theme
-- `?` opens help, the legend, and the harness mark map
+- `?` opens the scrollable help/legend surface; use `j` / `k` or `PageUp` / `PageDown` inside it
 
 Theme selection:
 

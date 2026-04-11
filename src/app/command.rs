@@ -21,6 +21,12 @@ pub enum Command {
     SubmitDraft,
     Confirm,
     ToggleHelp,
+    HelpScrollUp,
+    HelpScrollDown,
+    HelpPageUp,
+    HelpPageDown,
+    HelpTop,
+    HelpBottom,
     Search,
     FlashNavigate,
     FlashNavigateFocus,
@@ -149,7 +155,20 @@ fn map_modal_key_event(key: KeyEvent, mode: Mode) -> Option<Command> {
             KeyCode::Char('n') | KeyCode::Char('N') => Some(Command::Cancel),
             _ => None,
         },
-        Mode::Normal | Mode::PreviewScroll | Mode::Help => None,
+        Mode::Help => match (key.code, key.modifiers) {
+            (KeyCode::Up, _) | (KeyCode::Char('k'), KeyModifiers::NONE) => {
+                Some(Command::HelpScrollUp)
+            }
+            (KeyCode::Down, _) | (KeyCode::Char('j'), KeyModifiers::NONE) => {
+                Some(Command::HelpScrollDown)
+            }
+            (KeyCode::PageUp, _) => Some(Command::HelpPageUp),
+            (KeyCode::PageDown, _) => Some(Command::HelpPageDown),
+            (KeyCode::Home, _) => Some(Command::HelpTop),
+            (KeyCode::End, _) => Some(Command::HelpBottom),
+            _ => None,
+        },
+        Mode::Normal | Mode::PreviewScroll => None,
     }
 }
 
@@ -296,6 +315,34 @@ mod tests {
         assert_eq!(
             map_key_event(key(KeyCode::Enter), Focus::Sidebar, Mode::Search),
             Some(Command::Select)
+        );
+    }
+
+    #[test]
+    fn help_mode_maps_scroll_keys_without_reusing_sidebar_navigation() {
+        assert_eq!(
+            map_key_event(key(KeyCode::Char('j')), Focus::Sidebar, Mode::Help),
+            Some(Command::HelpScrollDown)
+        );
+        assert_eq!(
+            map_key_event(key(KeyCode::Char('k')), Focus::Sidebar, Mode::Help),
+            Some(Command::HelpScrollUp)
+        );
+        assert_eq!(
+            map_key_event(key(KeyCode::PageDown), Focus::Sidebar, Mode::Help),
+            Some(Command::HelpPageDown)
+        );
+        assert_eq!(
+            map_key_event(key(KeyCode::PageUp), Focus::Sidebar, Mode::Help),
+            Some(Command::HelpPageUp)
+        );
+        assert_eq!(
+            map_key_event(key(KeyCode::Home), Focus::Sidebar, Mode::Help),
+            Some(Command::HelpTop)
+        );
+        assert_eq!(
+            map_key_event(key(KeyCode::End), Focus::Sidebar, Mode::Help),
+            Some(Command::HelpBottom)
         );
     }
 
@@ -667,6 +714,42 @@ mod tests {
                 Focus::Sidebar,
                 Mode::ConfirmKill,
                 Command::Confirm,
+            ),
+            (
+                key(KeyCode::Char('j')),
+                Focus::Sidebar,
+                Mode::Help,
+                Command::HelpScrollDown,
+            ),
+            (
+                key(KeyCode::Char('k')),
+                Focus::Sidebar,
+                Mode::Help,
+                Command::HelpScrollUp,
+            ),
+            (
+                key(KeyCode::PageDown),
+                Focus::Sidebar,
+                Mode::Help,
+                Command::HelpPageDown,
+            ),
+            (
+                key(KeyCode::PageUp),
+                Focus::Sidebar,
+                Mode::Help,
+                Command::HelpPageUp,
+            ),
+            (
+                key(KeyCode::Home),
+                Focus::Sidebar,
+                Mode::Help,
+                Command::HelpTop,
+            ),
+            (
+                key(KeyCode::End),
+                Focus::Sidebar,
+                Mode::Help,
+                Command::HelpBottom,
             ),
             (
                 key(KeyCode::Char('y')),

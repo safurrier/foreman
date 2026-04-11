@@ -26,7 +26,7 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState, theme_name: ThemeName) {
     render_footer(frame, vertical[2], state, &theme, layout_mode);
 
     if state.mode == Mode::Help {
-        render_help(frame, &theme, layout_mode);
+        render_help(frame, state, &theme, layout_mode);
     } else if state.modal.is_some() {
         render_modal(frame, state, &theme, layout_mode);
     } else if state.mode == Mode::Search {
@@ -249,19 +249,50 @@ fn render_footer(
     frame.render_widget(footer, area);
 }
 
-fn render_help(frame: &mut Frame<'_>, theme: &Theme, layout_mode: LayoutMode) {
+fn render_help(frame: &mut Frame<'_>, state: &AppState, theme: &Theme, layout_mode: LayoutMode) {
     let popup = help_popup_rect(frame.area(), layout_mode);
     frame.render_widget(Clear, popup);
-    let help = Paragraph::new(help_text(theme))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Help")
-                .border_style(theme.overlay_border),
-        )
+    let help_lines = help_lines(theme);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(help_title(state, help_lines.len() as u16, popup))
+        .border_style(theme.overlay_border);
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+
+    let (content_area, hint_area) = if inner.height >= 3 {
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(1), Constraint::Length(1)])
+            .split(inner);
+        (rows[0], Some(rows[1]))
+    } else {
+        (inner, None)
+    };
+
+    let max_scroll = help_scroll_max(help_lines.len() as u16, content_area.height);
+    let scroll = state.help_scroll.min(max_scroll);
+    let help = Paragraph::new(Text::from(help_lines))
+        .scroll((scroll, 0))
         .wrap(Wrap { trim: false })
         .style(theme.base);
-    frame.render_widget(help, popup);
+    frame.render_widget(help, content_area);
+
+    if let Some(hint_area) = hint_area {
+        let hint = Paragraph::new(Text::from(vec![help_hint_line(
+            theme,
+            layout_mode,
+            scroll,
+            max_scroll,
+        )]))
+        .style(theme.muted);
+        frame.render_widget(hint, hint_area);
+    }
 }
 
 fn render_search_overlay(
@@ -889,40 +920,55 @@ fn input_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Text<
 fn footer_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Text<'static> {
     let sep = format!(" {} ", theme.glyphs.separator);
     let lines = match state.mode {
-        Mode::Input => vec![format!("Enter send{sep}Ctrl+J newline{sep}Esc cancel")],
-        Mode::Search => vec![format!("Type filter{sep}Enter confirm{sep}Esc restore")],
-        Mode::FlashNavigate => vec![format!("Type a label{sep}Esc cancel")],
-        Mode::Rename => vec![format!("Enter apply{sep}Esc cancel")],
-        Mode::Spawn => vec![format!("Enter spawn{sep}Esc cancel")],
-        Mode::ConfirmKill => vec![format!("Enter or y confirm{sep}Esc or n cancel")],
-        Mode::Help => vec![format!("Esc or ? closes help{sep}q quits")],
+        Mode::Input => vec![format!("Compose: Enter send{sep}Ctrl+J newline{sep}Esc cancel")],
+        Mode::Search => vec![format!("Search: type filter{sep}Enter use match{sep}Esc restore")],
+        Mode::FlashNavigate => vec![format!("Flash: type label{sep}Esc cancel")],
+        Mode::Rename => vec![format!("Rename: Enter apply{sep}Esc cancel")],
+        Mode::Spawn => vec![format!("Spawn: Enter create{sep}Esc cancel")],
+        Mode::ConfirmKill => vec![format!("Kill: Enter or y confirm{sep}Esc or n cancel")],
+        Mode::Help => match layout_mode {
+            LayoutMode::Compact => vec![format!("Help: j/k scroll{sep}PgUp or PgDn{sep}Esc close")],
+            LayoutMode::Medium | LayoutMode::Wide => vec![format!(
+                "Help: j/k or arrows scroll{sep}PgUp/PgDn page{sep}Home/End jump{sep}Esc close{sep}q quit"
+            )],
+        },
         Mode::Normal | Mode::PreviewScroll => match layout_mode {
-            LayoutMode::Compact => {
-                vec![format!("move j/k{sep}Enter act{sep}f tmux{sep}? help{sep}q quit")]
-            }
-            LayoutMode::Medium => vec![format!(
-                "move j/k{sep}Enter act{sep}f tmux{sep}i compose{sep}/ s find{sep}? help{sep}q quit"
+            LayoutMode::Compact => vec![format!(
+                "Move j/k{sep}Use Enter or f{sep}Compose i{sep}Help ?"
             )],
-            LayoutMode::Wide => vec![format!(
-                "move j/k{sep}Enter act{sep}f tmux{sep}i compose{sep}/ s find{sep}h H P o t view{sep}p O Y pr{sep}? help{sep}q quit"
-            )],
+            LayoutMode::Medium => vec![
+                format!(
+                    "Move j/k{sep}Use Enter or f{sep}Compose i{sep}Panels Tab"
+                ),
+                format!(
+                    "Search / or s/S{sep}Filter h{sep}Theme t{sep}Help ?"
+                ),
+            ],
+            LayoutMode::Wide => vec![
+                format!(
+                    "Move j/k{sep}Use Enter or f{sep}Compose i{sep}Panels Tab or 1/2/3"
+                ),
+                format!(
+                    "Search / or s/S{sep}Filter h{sep}Sort o{sep}Theme t{sep}Help ?"
+                ),
+            ],
         },
     };
 
     Text::from(lines.into_iter().map(plain_line).collect::<Vec<_>>())
 }
 
-fn help_text(theme: &Theme) -> Text<'static> {
-    Text::from(vec![
+fn help_lines(theme: &Theme) -> Vec<Line<'static>> {
+    vec![
         section_line("Navigate", theme),
         muted_line("j/k or arrows move.", theme),
-        muted_line("Enter acts on the selected row.", theme),
+        muted_line("Enter uses the row. f jumps tmux to Target pane.", theme),
         muted_line("Tab or 1/2/3 changes panel focus.", theme),
         plain_line(""),
         section_line("Legend", theme),
         muted_line(
             format!(
-                "{} working  {} attention  {} idle  {} error  {} unknown",
+                "Status: {} working  {} attention  {} idle  {} error  {} unknown",
                 theme.glyphs.working,
                 theme.glyphs.attention,
                 theme.glyphs.idle,
@@ -933,35 +979,95 @@ fn help_text(theme: &Theme) -> Text<'static> {
         ),
         muted_line(
             format!(
-                "{} Claude  {} Codex  {} Pi",
+                "Harness: {} Claude  {} Codex  {} Pi",
                 theme.glyphs.claude, theme.glyphs.codex, theme.glyphs.pi
             ),
             theme,
         ),
         muted_line(
             format!(
-                "{} Gemini  {} OpenCode  {} shell",
+                "Compat:  {} Gemini  {} OpenCode  {} shell",
                 theme.glyphs.gemini, theme.glyphs.opencode, theme.glyphs.shell
             ),
             theme,
         ),
         plain_line(""),
-        section_line("Act", theme),
+        section_line("Target Pane", theme),
+        muted_line("Target pane is what Enter, f, i, and x use.", theme),
         muted_line(
-            "f jumps tmux to the target pane. i compose. x kill confirm.",
+            "Session/window rows resolve to the best visible pane.",
             theme,
         ),
-        muted_line("Popup mode closes after successful focus.", theme),
-        muted_line("Enter sends. Ctrl+J newline. R rename. N spawn.", theme),
+        plain_line(""),
+        section_line("Act", theme),
+        muted_line("i starts compose. Enter sends. Ctrl+J adds newline.", theme),
+        muted_line("R renames the window. N spawns a new agent window.", theme),
+        muted_line("Popup mode closes after successful tmux focus.", theme),
         plain_line(""),
         section_line("Find", theme),
-        muted_line("/ search. s jump. S jump+focus.", theme),
-        muted_line("p PR detail. O open PR. Y copy URL.", theme),
+        muted_line("/ filters the list. s jumps. S jumps and focuses.", theme),
+        muted_line(
+            "p opens PR detail. O opens in browser. Y copies URL.",
+            theme,
+        ),
         plain_line(""),
         section_line("View", theme),
-        muted_line("h harness filter. H sessions. P panes.", theme),
-        muted_line("o sort. t theme. m mute. n profile. q quit.", theme),
-    ])
+        muted_line(
+            "h cycles visible harnesses. H shows sessions. P shows panes.",
+            theme,
+        ),
+        muted_line(
+            "o sorts. t themes. m mutes. n changes notification profile.",
+            theme,
+        ),
+    ]
+}
+
+fn help_title(state: &AppState, total_lines: u16, popup: Rect) -> String {
+    let inner_height = popup.height.saturating_sub(2);
+    let content_height = if inner_height >= 3 {
+        inner_height.saturating_sub(1)
+    } else {
+        inner_height
+    }
+    .max(1);
+    let max_scroll = help_scroll_max(total_lines, content_height);
+    let scroll = state.help_scroll.min(max_scroll);
+    let page_size = content_height.max(1);
+    let total_pages = total_lines.max(1).div_ceil(page_size);
+    let current_page = (scroll / page_size).min(total_pages.saturating_sub(1)) + 1;
+    format!("Help {current_page}/{total_pages}")
+}
+
+fn help_scroll_max(total_lines: u16, viewport_height: u16) -> u16 {
+    total_lines.saturating_sub(viewport_height)
+}
+
+fn help_hint_line(
+    theme: &Theme,
+    layout_mode: LayoutMode,
+    scroll: u16,
+    max_scroll: u16,
+) -> Line<'static> {
+    let progress = if max_scroll == 0 {
+        "all visible".to_string()
+    } else {
+        format!("line {} / {}", scroll + 1, max_scroll + 1)
+    };
+    let hint = match layout_mode {
+        LayoutMode::Compact => format!(
+            "Scroll j/k {} PgUp/PgDn {} Esc close {} {progress}",
+            theme.glyphs.separator, theme.glyphs.separator, theme.glyphs.separator
+        ),
+        LayoutMode::Medium | LayoutMode::Wide => format!(
+            "Scroll j/k or arrows {} PgUp/PgDn page {} Home/End jump {} Esc close {} {progress}",
+            theme.glyphs.separator,
+            theme.glyphs.separator,
+            theme.glyphs.separator,
+            theme.glyphs.separator
+        ),
+    };
+    muted_line(hint, theme)
 }
 
 fn pull_request_lines(state: &AppState, theme: &Theme) -> Vec<Line<'static>> {
@@ -1332,12 +1438,24 @@ mod tests {
 
         assert!(output.contains("Navigate"));
         assert!(output.contains("Legend"));
-        assert!(output.contains("✦ Claude"));
+        assert!(output.contains("Harness: ✦ Claude"));
         assert!(output.contains("◎ Codex"));
         assert!(output.contains("R rename"));
         assert!(output.contains("N spawn"));
-        assert!(output.contains("f jumps tmux to the target pane"));
-        assert!(output.contains("Popup mode closes after successful focus"));
+        assert!(output.contains("Target pane is what Enter, f, i, and x use"));
+        assert!(output.contains("Scroll j/k or arrows"));
+    }
+
+    #[test]
+    fn render_help_supports_scroll_offset_for_lower_sections() {
+        let mut state = sample_state();
+        state.mode = Mode::Help;
+        let top_output = render_to_string_at(&state, ThemeName::Catppuccin, 80, 18);
+        assert!(!top_output.contains("h cycles visible harnesses"));
+
+        state.help_scroll = 16;
+        let scrolled_output = render_to_string_at(&state, ThemeName::Catppuccin, 80, 18);
+        assert!(scrolled_output.contains("h cycles visible harnesses"));
     }
 
     #[test]
@@ -1427,6 +1545,17 @@ mod tests {
         assert!(output.contains("✦ alpha"));
         assert!(output.contains("◎ foreman"));
         assert!(!output.contains("Pane     "));
+    }
+
+    #[test]
+    fn render_footer_uses_labeled_control_groups() {
+        let state = sample_state();
+        let output = render_to_string(&state);
+
+        assert!(output.contains("Move j/k"));
+        assert!(output.contains("Use Enter or f"));
+        assert!(output.contains("Search / or s/S"));
+        assert!(output.contains("Help ?"));
     }
 
     #[test]

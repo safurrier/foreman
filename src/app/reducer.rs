@@ -54,6 +54,8 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
                 state.mode = mode;
                 if mode == Mode::Input {
                     state.focus = Focus::Input;
+                } else if mode == Mode::Help {
+                    state.help_scroll = 0;
                 }
             }
         }
@@ -162,8 +164,10 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
                 | Mode::PreviewScroll
                 | Mode::Spawn
                 | Mode::Rename
-                | Mode::Help
                 | Mode::ConfirmKill => {}
+                Mode::Help => {
+                    state.help_scroll = 0;
+                }
             }
             state.mode = Mode::Normal;
             state.focus = Focus::Sidebar;
@@ -188,6 +192,25 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
         }
         Action::SetFocus(focus) => {
             state.focus = focus;
+        }
+        Action::ScrollHelpBy(delta) => {
+            if state.mode == Mode::Help {
+                if delta.is_negative() {
+                    state.help_scroll = state.help_scroll.saturating_sub(delta.unsigned_abs());
+                } else {
+                    state.help_scroll = state.help_scroll.saturating_add(delta as u16);
+                }
+            }
+        }
+        Action::ScrollHelpToStart => {
+            if state.mode == Mode::Help {
+                state.help_scroll = 0;
+            }
+        }
+        Action::ScrollHelpToEnd => {
+            if state.mode == Mode::Help {
+                state.help_scroll = u16::MAX;
+            }
         }
         Action::SetSelection(target) => {
             if state.visible_targets().contains(&target) {
@@ -891,11 +914,39 @@ mod tests {
         let mut state = AppState::with_inventory(sample_inventory());
         state.mode = Mode::Help;
         state.focus = Focus::Preview;
+        state.help_scroll = 9;
 
         reduce(&mut state, Action::CancelMode);
 
         assert_eq!(state.mode, Mode::Normal);
         assert_eq!(state.focus, Focus::Sidebar);
+        assert_eq!(state.help_scroll, 0);
+    }
+
+    #[test]
+    fn help_scroll_actions_are_reducer_owned_and_clamp() {
+        let mut state = AppState::with_inventory(sample_inventory());
+        state.mode = Mode::Help;
+        state.selection = Some(SelectionTarget::Pane("alpha:claude".into()));
+
+        reduce(&mut state, Action::ScrollHelpBy(3));
+        assert_eq!(state.help_scroll, 3);
+        assert_eq!(
+            state.selection,
+            Some(SelectionTarget::Pane("alpha:claude".into()))
+        );
+
+        reduce(&mut state, Action::ScrollHelpBy(-2));
+        assert_eq!(state.help_scroll, 1);
+
+        reduce(&mut state, Action::ScrollHelpBy(-8));
+        assert_eq!(state.help_scroll, 0);
+
+        reduce(&mut state, Action::ScrollHelpToEnd);
+        assert_eq!(state.help_scroll, u16::MAX);
+
+        reduce(&mut state, Action::RequestMode(Mode::Help));
+        assert_eq!(state.help_scroll, 0);
     }
 
     #[test]

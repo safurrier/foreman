@@ -27,7 +27,7 @@ fn write_atomic(path: &std::path::Path, contents: &str) {
 }
 
 fn wait_for_file_contents(path: &std::path::Path, needle: &str) {
-    for _ in 0..80 {
+    for _ in 0..120 {
         if let Ok(contents) = fs::read_to_string(path) {
             if contents.contains(needle) {
                 return;
@@ -287,7 +287,9 @@ active_profile = "completion-only"
         &native_dir.join(format!("{pane_id}.json")),
         r#"{"status":"working","activity_score":99}"#,
     );
-    thread::sleep(Duration::from_millis(300));
+    // Give the runtime enough time to observe the working transition before the
+    // ready transition, even under the heavier all-features test sweep.
+    thread::sleep(Duration::from_millis(900));
     write_atomic(
         &native_dir.join(format!("{pane_id}.json")),
         r#"{"status":"idle","activity_score":44}"#,

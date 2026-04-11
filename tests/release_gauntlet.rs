@@ -167,11 +167,32 @@ fn release_startup_navigation_gauntlet_proves_discovery_filters_and_help() {
     harness.fixture().wait_for_alt_capture(&dashboard, "Legend");
     harness
         .fixture()
-        .wait_for_alt_capture(&dashboard, "f jumps tmux to the target pane");
+        .wait_for_alt_capture(&dashboard, "Target pane is what Enter, f, i, and x use");
+    harness.fixture().resize_window("dashboard", 88, 20);
+    harness
+        .fixture()
+        .wait_for_alt_capture(&dashboard, "Scroll j/k");
+    harness
+        .fixture()
+        .wait_for_alt_capture_not_contains(&dashboard, "h cycles visible harnesses");
+    for _ in 0..16 {
+        harness.fixture().send_keys(&dashboard, &["j"]);
+        thread::sleep(Duration::from_millis(40));
+    }
+    harness
+        .fixture()
+        .wait_for_alt_capture(&dashboard, "h cycles visible harnesses");
     harness.fixture().send_keys(&dashboard, &["Escape"]);
     harness
         .fixture()
         .wait_for_alt_capture_not_contains(&dashboard, "Legend");
+    harness.fixture().resize_window("dashboard", 180, 48);
+    harness
+        .fixture()
+        .wait_for_alt_capture(&dashboard, "Foreman | NORMAL");
+    harness
+        .fixture()
+        .wait_for_alt_capture(&dashboard, "theme=catppuccin");
 
     harness.fixture().send_keys(&dashboard, &["t"]);
     harness
@@ -285,7 +306,7 @@ fn release_action_gauntlet_proves_search_flash_sort_and_pane_operations() {
     harness.fixture().send_keys(&dashboard, &["Escape"]);
     harness
         .fixture()
-        .wait_for_alt_capture_not_contains(&dashboard, "Search");
+        .wait_for_alt_capture_not_contains(&dashboard, "Query: alphawork");
     harness
         .fixture()
         .wait_for_alt_capture(&dashboard, "Foreman | NORMAL");

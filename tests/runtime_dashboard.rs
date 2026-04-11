@@ -99,7 +99,10 @@ fn interactive_binary_help_and_harness_filter_walkthrough_stays_actionable() {
     fixture.send_keys(&dashboard_pane, &["?"]);
     fixture.wait_for_alt_capture(&dashboard_pane, "Legend");
     fixture.wait_for_alt_capture(&dashboard_pane, "Claude");
-    fixture.wait_for_alt_capture(&dashboard_pane, "f jumps tmux to the target pane");
+    fixture.wait_for_alt_capture(
+        &dashboard_pane,
+        "Target pane is what Enter, f, i, and x use",
+    );
     fixture.send_keys(&dashboard_pane, &["Escape"]);
     wait_for_alt_capture_not_contains(&fixture, &dashboard_pane, "Legend", 40);
 
@@ -114,6 +117,54 @@ fn interactive_binary_help_and_harness_filter_walkthrough_stays_actionable() {
     fixture.send_keys(&dashboard_pane, &["i", "o", "k", "Enter"]);
     fixture.wait_for_capture(&codex_pane, "CODEX:ok");
 
+    fixture.send_keys(&dashboard_pane, &["q"]);
+    fixture.wait_for_capture(&dashboard_pane, "FOREMAN_EXITED");
+}
+
+#[test]
+fn interactive_binary_help_scrolls_in_small_layout() {
+    let fixture = TmuxFixture::new();
+    let claude_pane = fixture.new_session(
+        "alpha",
+        r#"sh -lc 'printf "%s\n" "Claude Code ready"; while IFS= read -r line; do printf "%s\n" "CLAUDE:$line"; done'"#,
+    );
+    fixture.wait_for_capture(&claude_pane, "Claude Code ready");
+
+    let config_dir = tempdir().expect("config dir should exist");
+    let log_dir = tempdir().expect("log dir should exist");
+    let dashboard_command = format!(
+        "FOREMAN_CONFIG_HOME={} FOREMAN_LOG_DIR={} {} --tmux-socket {} --poll-interval-ms 100 --capture-lines 20 --no-notify",
+        config_dir.path().display(),
+        log_dir.path().display(),
+        foreman_bin(),
+        fixture.socket_path().display()
+    );
+    let dashboard_pane = fixture.new_session(
+        "dashboard",
+        &fixture.keep_alive_command(&dashboard_command, "FOREMAN_EXITED"),
+    );
+    fixture.resize_window("dashboard", 88, 20);
+
+    fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
+    fixture.send_keys(&dashboard_pane, &["?"]);
+    fixture.wait_for_alt_capture(&dashboard_pane, "Navigate");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Scroll j/k");
+    wait_for_alt_capture_not_contains(&fixture, &dashboard_pane, "h cycles visible harnesses", 40);
+
+    fixture.send_keys(
+        &dashboard_pane,
+        &["j", "j", "j", "j", "j", "j", "j", "j", "j", "j", "j", "j"],
+    );
+    fixture.wait_for_alt_capture(&dashboard_pane, "h cycles visible harnesses");
+
+    fixture.send_keys(
+        &dashboard_pane,
+        &["k", "k", "k", "k", "k", "k", "k", "k", "k", "k", "k", "k"],
+    );
+    fixture.wait_for_alt_capture(&dashboard_pane, "Navigate");
+
+    fixture.send_keys(&dashboard_pane, &["Escape"]);
+    wait_for_alt_capture_not_contains(&fixture, &dashboard_pane, "Scroll j/k", 40);
     fixture.send_keys(&dashboard_pane, &["q"]);
     fixture.wait_for_capture(&dashboard_pane, "FOREMAN_EXITED");
 }

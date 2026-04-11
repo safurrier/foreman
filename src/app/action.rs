@@ -43,6 +43,9 @@ pub enum Action {
     CancelMode,
     RequestQuit,
     SetFocus(Focus),
+    ScrollHelpBy(i16),
+    ScrollHelpToStart,
+    ScrollHelpToEnd,
     SetSelection(SelectionTarget),
     MoveSelection(SelectionDirection),
     ReplaceInventory(Inventory),
@@ -89,6 +92,9 @@ impl Action {
             Self::CancelMode => "cancel-mode",
             Self::RequestQuit => "request-quit",
             Self::SetFocus(_) => "set-focus",
+            Self::ScrollHelpBy(_) => "scroll-help-by",
+            Self::ScrollHelpToStart => "scroll-help-to-start",
+            Self::ScrollHelpToEnd => "scroll-help-to-end",
             Self::SetSelection(_) => "set-selection",
             Self::MoveSelection(_) => "move-selection",
             Self::ReplaceInventory(_) => "replace-inventory",
@@ -112,6 +118,20 @@ impl Action {
 }
 
 pub fn action_for_command(state: &AppState, command: Command) -> Action {
+    if state.mode == Mode::Help {
+        return match command {
+            Command::Cancel | Command::ToggleHelp => Action::CancelMode,
+            Command::Quit => Action::RequestQuit,
+            Command::HelpScrollUp => Action::ScrollHelpBy(-1),
+            Command::HelpScrollDown => Action::ScrollHelpBy(1),
+            Command::HelpPageUp => Action::ScrollHelpBy(-8),
+            Command::HelpPageDown => Action::ScrollHelpBy(8),
+            Command::HelpTop => Action::ScrollHelpToStart,
+            Command::HelpBottom => Action::ScrollHelpToEnd,
+            _ => Action::Noop,
+        };
+    }
+
     match command {
         Command::NavigateUp => Action::MoveSelection(SelectionDirection::Previous),
         Command::NavigateDown => Action::MoveSelection(SelectionDirection::Next),
@@ -210,6 +230,12 @@ pub fn action_for_command(state: &AppState, command: Command) -> Action {
             SortMode::AttentionFirst => SortMode::RecentActivity,
         }),
         Command::CycleTheme => Action::CycleTheme,
+        Command::HelpScrollUp
+        | Command::HelpScrollDown
+        | Command::HelpPageUp
+        | Command::HelpPageDown
+        | Command::HelpTop
+        | Command::HelpBottom => Action::Noop,
         Command::Quit => Action::RequestQuit,
     }
 }
@@ -273,6 +299,29 @@ mod tests {
         assert_eq!(
             action_for_command(&state, Command::Cancel),
             Action::SetFocus(Focus::Sidebar)
+        );
+    }
+
+    #[test]
+    fn help_mode_consumes_navigation_as_help_scroll() {
+        let mut state = state_with_selection(Some(SelectionTarget::Pane("alpha:main".into())));
+        state.mode = Mode::Help;
+
+        assert_eq!(
+            action_for_command(&state, Command::HelpScrollDown),
+            Action::ScrollHelpBy(1)
+        );
+        assert_eq!(
+            action_for_command(&state, Command::HelpPageUp),
+            Action::ScrollHelpBy(-8)
+        );
+        assert_eq!(
+            action_for_command(&state, Command::NavigateRight),
+            Action::Noop
+        );
+        assert_eq!(
+            action_for_command(&state, Command::FocusSelectedPane),
+            Action::Noop
         );
     }
 

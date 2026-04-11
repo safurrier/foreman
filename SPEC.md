@@ -162,6 +162,7 @@ yet expose a stable contract.
 - The dashboard includes an input area for sending text to the selected agent.
 - The dashboard includes a footer with contextual actions or hints.
 - The dashboard includes a help surface with a legend for compact badges and status indicators.
+- The help surface is keyboard-scrollable in layouts where its full contents do not fit at once.
 - The dashboard may include summary, subagent, and pull request detail panels.
 
 **R10. Keyboard-first interaction**
@@ -173,6 +174,7 @@ yet expose a stable contract.
 - The operator can cycle a harness/provider filter that narrows the tree to one
   supported agent family at a time, with empty harness views skipped by default.
 - The operator can cycle the active theme at runtime.
+- The operator can scroll the help surface with the keyboard when help is open.
 - Escape semantics cancel or dismiss the current mode according to context.
 
 **R11. Pane focus behavior**
@@ -450,6 +452,9 @@ mise run ci
   changing selection or mode.
 - Given the dashboard is running, pressing `?` opens help with a legend for
   status and harness marks.
+- Given the help surface is taller than the visible popup, `j` / `k`,
+  arrow keys, and page navigation keys scroll it without changing the
+  underlying selection.
 - Given a window row is selected, focus-oriented actions resolve to the top visible
   actionable pane instead of silently no-oping.
 - Given a session or window row is selected, the preview identifies the resolved

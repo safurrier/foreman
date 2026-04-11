@@ -80,13 +80,14 @@ report-producing release proof.
 regressions caused by synchronous lookup work show up in the heavy lane instead
 of only in manual UX testing.
 
-The runtime smoke in that lane now covers the live help/legend surface plus
-harness-view cycling and acting on the filtered selection inside a real tmux
-server.
+The runtime smoke in that lane now covers the live help/legend surface,
+small-layout help scrolling, harness-view cycling, and acting on the filtered
+selection inside a real tmux server.
 
 The release gauntlet expands that proof into three coherent compiled-binary
 journeys:
 - startup, discovery, theme, help, and harness filtering
+- startup, discovery, theme, scrollable help, and harness filtering
 - compose, focus, search, flash, sort, rename, spawn, and kill
 - PR state, notification policy, graceful degradation, and operator-alert logging
 

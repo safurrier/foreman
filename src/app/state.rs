@@ -962,6 +962,7 @@ pub struct AppState {
     pub selection: Option<SelectionTarget>,
     pub focus: Focus,
     pub mode: Mode,
+    pub help_scroll: u16,
     pub popup_mode: bool,
     pub sort_mode: SortMode,
     pub filters: Filters,
