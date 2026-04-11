@@ -240,6 +240,7 @@ CI defines "passing." Local commands mirror CI exactly:
 mise run check    # fast: fmt + lint + typecheck + unit tests  (on push)
 mise run verify   # heavy: integration + release gauntlet + docker  (on PR)
 mise run verify-release  # compiled-binary operator gauntlet + report
+mise run verify-native  # opt-in real Claude/Codex/Pi drill
 mise run verify-ux  # focused TUI/runtime smoke + perf smoke + VHS capture
 ```
 

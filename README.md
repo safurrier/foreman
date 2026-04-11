@@ -73,11 +73,11 @@ Common dashboard keys:
 - `j` / `k` move through the tree
 - `Tab` or `1` / `2` / `3` switches panel focus
 - `i` composes for the actionable agent row
-- `f` focuses the actionable pane in tmux
+- `f` jumps tmux to the actionable pane
 - `Enter` sends in compose mode and acts on the selected row in normal mode
 - `/` starts search
 - `s` starts flash jump
-- `h` cycles the harness view
+- `h` cycles only the visible harness families, then returns to `all`
 - `H` / `P` reveal non-agent sessions or panes
 - `t` cycles the active theme
 - `?` opens help, the legend, and the harness mark map
@@ -122,7 +122,7 @@ Contributor docs:
   with config-based default selection and runtime cycling via `t`.
 - The dashboard now uses compact harness marks plus an in-product legend, and
   supports cycling a harness-only view with `h` without losing actionable
-  session/window behavior.
+  session/window behavior or landing on empty harness views by default.
 
 ## Harness Support Matrix
 
@@ -290,6 +290,7 @@ mise run plan -- <slug>
 | `mise run plan -- <slug>` | Create a plan directory for a unit of work |
 | `mise run verify` | Heavy validation (integration, docker, security) |
 | `mise run verify-release` | Release-confidence compiled-binary tmux gauntlet plus checklist/report artifact |
+| `mise run verify-native` | Opt-in real Claude, Codex, and Pi E2E drill when the corresponding env flags are set |
 | `mise run verify-ux` | Focused TUI/runtime smoke, navigation perf smoke, plus VHS artifact refresh |
 
 ## GitHub Actions
@@ -305,8 +306,10 @@ mise run plan -- <slug>
 1. Bump `Cargo.toml` to the intended release version.
 2. Merge the release branch to `main`.
 3. Run `mise run verify-release` if you want the release-confidence report locally before tagging.
-4. Push a matching annotated tag such as `v1.0.0`.
-5. GitHub Actions verifies the repo and publishes release bundles.
+4. If you have local auth for the external harnesses, run `mise run verify-native`
+   with the relevant env flags set for a real-binary drill.
+5. Push a matching annotated tag such as `v1.0.0`.
+6. GitHub Actions verifies the repo and publishes release bundles.
 
 Each release archive contains:
 - `foreman`

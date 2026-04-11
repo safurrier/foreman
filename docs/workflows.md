@@ -57,6 +57,12 @@ Release-confidence lane:
 mise run verify-release
 ```
 
+Opt-in real harness lane:
+
+```bash
+mise run verify-native
+```
+
 If `vhs` is installed, `mise run verify` now refreshes the UX GIF and PNG
 artifacts through `mise run verify-ux --capture-only` after the heavier Rust
 checks pass.
@@ -65,6 +71,10 @@ checks pass.
 compiled-binary release gauntlet serially and writes a report under:
 
 `.ai/plans/2026-04-10-151735-release-validation-gauntlet/artifacts/`
+
+That rerun is intentional. `cargo test --all-features` proves the broader Rust
+suite, and `verify-release` reruns the operator gauntlet as the explicit
+report-producing release proof.
 
 `mise run verify-ux` also runs the ignored `runtime_profiling` smoke so lag
 regressions caused by synchronous lookup work show up in the heavy lane instead
@@ -83,6 +93,8 @@ journeys:
 Opt-in real harness commands:
 
 ```bash
+FOREMAN_REAL_CLAUDE_E2E=1 FOREMAN_REAL_CODEX_E2E=1 FOREMAN_REAL_PI_E2E=1 mise run verify-native
+
 FOREMAN_REAL_CLAUDE_E2E=1 cargo test --test claude_real_e2e -- --ignored --nocapture
 FOREMAN_REAL_CODEX_E2E=1 cargo test --test codex_real_e2e -- --ignored --nocapture
 FOREMAN_REAL_PI_E2E=1 cargo test --test pi_real_e2e -- --ignored --nocapture

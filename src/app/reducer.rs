@@ -369,7 +369,8 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             reconcile_pull_request_detail(state);
         }
         Action::CycleHarnessFilter => {
-            state.filters.cycle_harness();
+            let available_harnesses = state.inventory.available_harnesses();
+            state.filters.cycle_harness(&available_harnesses);
             state.reconcile_selection();
             reconcile_visible_selection(state);
             reconcile_pull_request_detail(state);
@@ -830,9 +831,21 @@ mod tests {
             Some(SelectionTarget::Session("beta".into()))
         );
 
-        for _ in 0..4 {
-            reduce(&mut state, Action::CycleHarnessFilter);
-        }
+        reduce(&mut state, Action::CycleHarnessFilter);
+        assert_eq!(state.harness_filter_label(), "all");
+    }
+
+    #[test]
+    fn harness_filter_skips_empty_supported_harnesses() {
+        let mut state = AppState::with_inventory(sample_inventory());
+
+        reduce(&mut state, Action::CycleHarnessFilter);
+        assert_eq!(state.harness_filter_label(), "claude");
+
+        reduce(&mut state, Action::CycleHarnessFilter);
+        assert_eq!(state.harness_filter_label(), "codex");
+
+        reduce(&mut state, Action::CycleHarnessFilter);
         assert_eq!(state.harness_filter_label(), "all");
     }
 

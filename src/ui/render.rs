@@ -686,7 +686,7 @@ fn preview_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Tex
                 )));
                 lines.push(plain_line(format!("Pane title: {}", pane.title)));
                 lines.push(muted_line(
-                    "Act here: f tmux focus. i compose. x kill.",
+                    "f jumps tmux here. i composes here. x kill.",
                     theme,
                 ));
             } else {
@@ -710,7 +710,7 @@ fn preview_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Tex
                     lines.push(action_target);
                 }
                 lines.push(muted_line(
-                    "Enter or f focuses that pane. i composes there.",
+                    "Enter or f jumps tmux to the target pane. i composes there.",
                     theme,
                 ));
             } else {
@@ -740,7 +740,7 @@ fn preview_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Tex
                     lines.push(action_target);
                 }
                 lines.push(muted_line(
-                    "Enter toggles collapse. f or i acts on that pane.",
+                    "Enter collapses. f jumps tmux to the target pane. i composes there.",
                     theme,
                 ));
             } else {
@@ -862,7 +862,7 @@ fn input_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Text<
         if state.focus == Focus::Input {
             lines.push(muted_line(
                 format!(
-                    "Enter starts compose {} f focuses tmux",
+                    "Enter starts compose {} f jumps to tmux",
                     theme.glyphs.separator
                 ),
                 theme,
@@ -870,7 +870,7 @@ fn input_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Text<
         } else {
             lines.push(muted_line(
                 format!(
-                    "i compose {} f tmux focus {} Tab or 3 moves focus here",
+                    "i compose {} f jumps to tmux {} Tab or 3 focuses this panel",
                     theme.glyphs.separator, theme.glyphs.separator
                 ),
                 theme,
@@ -898,13 +898,13 @@ fn footer_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Text
         Mode::Help => vec![format!("Esc or ? closes help{sep}q quits")],
         Mode::Normal | Mode::PreviewScroll => match layout_mode {
             LayoutMode::Compact => {
-                vec![format!("move j/k{sep}act Enter/i{sep}find /{sep}? help{sep}q quit")]
+                vec![format!("move j/k{sep}Enter act{sep}f tmux{sep}? help{sep}q quit")]
             }
             LayoutMode::Medium => vec![format!(
-                "move j/k{sep}act Enter/f/i{sep}find / s{sep}view h{sep}? help{sep}q quit"
+                "move j/k{sep}Enter act{sep}f tmux{sep}i compose{sep}/ s find{sep}? help{sep}q quit"
             )],
             LayoutMode::Wide => vec![format!(
-                "move j/k{sep}act Enter/f/i{sep}find / s{sep}view h H P o t{sep}pr p O Y{sep}? help{sep}q quit"
+                "move j/k{sep}Enter act{sep}f tmux{sep}i compose{sep}/ s find{sep}h H P o t view{sep}p O Y pr{sep}? help{sep}q quit"
             )],
         },
     };
@@ -947,7 +947,11 @@ fn help_text(theme: &Theme) -> Text<'static> {
         ),
         plain_line(""),
         section_line("Act", theme),
-        muted_line("i compose. f tmux focus. x kill confirm.", theme),
+        muted_line(
+            "f jumps tmux to the target pane. i compose. x kill confirm.",
+            theme,
+        ),
+        muted_line("Popup mode closes after successful focus.", theme),
         muted_line("Enter sends. Ctrl+J newline. R rename. N spawn.", theme),
         plain_line(""),
         section_line("Find", theme),
@@ -955,7 +959,7 @@ fn help_text(theme: &Theme) -> Text<'static> {
         muted_line("p PR detail. O open PR. Y copy URL.", theme),
         plain_line(""),
         section_line("View", theme),
-        muted_line("h cycles harness view. H sessions. P panes.", theme),
+        muted_line("h harness filter. H sessions. P panes.", theme),
         muted_line("o sort. t theme. m mute. n profile. q quit.", theme),
     ])
 }
@@ -1130,7 +1134,7 @@ fn actionable_target_line(state: &AppState, theme: &Theme) -> Option<Line<'stati
     let status = pane.agent.as_ref().map(|agent| agent.status);
 
     Some(Line::from(vec![
-        Span::styled("Acts on: ", theme.muted),
+        Span::styled("Target pane: ", theme.muted),
         Span::styled(
             format!("{} ", status_symbol(theme, status, pane.is_agent())),
             status_style(theme, status, pane.is_agent()),
@@ -1324,7 +1328,7 @@ mod tests {
     fn render_displays_help_overlay_with_extended_command_surface() {
         let mut state = sample_state();
         state.mode = Mode::Help;
-        let output = render_to_string_at(&state, ThemeName::Catppuccin, 80, 24);
+        let output = render_to_string(&state);
 
         assert!(output.contains("Navigate"));
         assert!(output.contains("Legend"));
@@ -1332,9 +1336,8 @@ mod tests {
         assert!(output.contains("◎ Codex"));
         assert!(output.contains("R rename"));
         assert!(output.contains("N spawn"));
-        assert!(output.contains("h cycles harness view"));
-        assert!(output.contains("H sessions"));
-        assert!(output.contains("P panes"));
+        assert!(output.contains("f jumps tmux to the target pane"));
+        assert!(output.contains("Popup mode closes after successful focus"));
     }
 
     #[test]
@@ -1350,6 +1353,16 @@ mod tests {
         assert!(output.contains("world"));
         assert!(output.contains("Enter sends"));
         assert!(output.contains("Ctrl+J newline"));
+    }
+
+    #[test]
+    fn render_preview_names_resolved_target_pane() {
+        let mut state = sample_state();
+        state.selection = Some(SelectionTarget::Session("alpha".into()));
+        let output = render_to_string(&state);
+
+        assert!(output.contains("Target pane:"));
+        assert!(output.contains("f jumps tmux to the target pane"));
     }
 
     #[test]

@@ -554,6 +554,22 @@ impl Inventory {
             .sum()
     }
 
+    pub fn available_harnesses(&self) -> Vec<HarnessKind> {
+        HarnessKind::ALL
+            .into_iter()
+            .filter(|candidate| {
+                self.sessions
+                    .iter()
+                    .flat_map(|session| session.windows.iter())
+                    .flat_map(|window| window.panes.iter())
+                    .any(|pane| {
+                        pane.harness_kind()
+                            .is_some_and(|harness| harness == *candidate)
+                    })
+            })
+            .collect()
+    }
+
     pub fn visible_targets(
         &self,
         filters: &Filters,
@@ -692,13 +708,21 @@ impl Filters {
         self.harness.is_none_or(|selected| selected == harness)
     }
 
-    pub fn cycle_harness(&mut self) {
+    pub fn cycle_harness(&mut self, available_harnesses: &[HarnessKind]) {
+        if available_harnesses.is_empty() {
+            self.harness = None;
+            return;
+        }
+
         self.harness = match self.harness {
-            None => Some(HarnessKind::ALL[0]),
-            Some(current) => HarnessKind::ALL
+            None => Some(available_harnesses[0]),
+            Some(current) => match available_harnesses
                 .iter()
                 .position(|candidate| *candidate == current)
-                .and_then(|index| HarnessKind::ALL.get(index + 1).copied()),
+            {
+                Some(index) => available_harnesses.get(index + 1).copied(),
+                None => Some(available_harnesses[0]),
+            },
         };
     }
 

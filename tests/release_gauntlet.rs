@@ -95,6 +95,23 @@ fn release_startup_navigation_gauntlet_proves_discovery_filters_and_help() {
         .fixture()
         .wait_for_alt_capture_not_contains(&dashboard, "betashell");
 
+    harness.fixture().send_keys(&dashboard, &["3"]);
+    harness
+        .fixture()
+        .wait_for_alt_capture(&dashboard, "| INPUT |");
+    harness.fixture().send_keys(&dashboard, &["2"]);
+    harness
+        .fixture()
+        .wait_for_alt_capture(&dashboard, "| PREVIEW |");
+    harness.fixture().send_keys(&dashboard, &["Tab"]);
+    harness
+        .fixture()
+        .wait_for_alt_capture(&dashboard, "| INPUT |");
+    harness.fixture().send_keys(&dashboard, &["Escape"]);
+    harness
+        .fixture()
+        .wait_for_alt_capture(&dashboard, "| SIDEBAR |");
+
     harness.fixture().send_keys(&dashboard, &["/"]);
     send_text(harness.fixture(), &dashboard, "claudesess");
     harness.fixture().send_keys(&dashboard, &["Enter"]);
@@ -105,6 +122,26 @@ fn release_startup_navigation_gauntlet_proves_discovery_filters_and_help() {
         .fixture()
         .wait_for_alt_capture(&dashboard, "› ▾ claudesess");
 
+    harness.fixture().send_keys(&dashboard, &["f"]);
+    harness
+        .fixture()
+        .wait_for_active_pane_in("claudesess", &claude.pane_id);
+
+    harness.fixture().send_keys(&dashboard, &["j"]);
+    harness
+        .fixture()
+        .wait_for_alt_capture(&dashboard, "Target pane:");
+    harness.fixture().send_keys(&dashboard, &["f"]);
+    harness
+        .fixture()
+        .wait_for_active_pane_in("claudesess", &claude.pane_id);
+
+    harness.fixture().send_keys(&dashboard, &["j", "f"]);
+    harness
+        .fixture()
+        .wait_for_active_pane_in("claudesess", &claude.pane_id);
+
+    harness.fixture().send_keys(&dashboard, &["k", "k"]);
     harness.fixture().send_keys(&dashboard, &["Enter"]);
     harness
         .fixture()
@@ -130,7 +167,7 @@ fn release_startup_navigation_gauntlet_proves_discovery_filters_and_help() {
     harness.fixture().wait_for_alt_capture(&dashboard, "Legend");
     harness
         .fixture()
-        .wait_for_alt_capture(&dashboard, "h cycles harness view");
+        .wait_for_alt_capture(&dashboard, "f jumps tmux to the target pane");
     harness.fixture().send_keys(&dashboard, &["Escape"]);
     harness
         .fixture()
@@ -181,27 +218,14 @@ fn release_startup_navigation_gauntlet_proves_discovery_filters_and_help() {
     harness.fixture().send_keys(&dashboard, &["h"]);
     harness
         .fixture()
-        .wait_for_alt_capture(&dashboard, "Targets [gemini]");
-    harness
-        .fixture()
-        .wait_for_alt_capture(&dashboard, "No panes discovered yet.");
-
-    harness.fixture().send_keys(&dashboard, &["h"]);
-    harness
-        .fixture()
-        .wait_for_alt_capture(&dashboard, "Targets [opencode]");
-    harness
-        .fixture()
-        .wait_for_alt_capture(&dashboard, "No panes discovered yet.");
-
-    harness.fixture().send_keys(&dashboard, &["h"]);
-    harness
-        .fixture()
         .wait_for_alt_capture(&dashboard, "claudesess");
     harness
         .fixture()
         .wait_for_alt_capture(&dashboard, "codexsess");
     harness.fixture().wait_for_alt_capture(&dashboard, "pisess");
+    harness
+        .fixture()
+        .wait_for_alt_capture_not_contains(&dashboard, "Targets [gemini]");
 
     harness.fixture().send_keys(&dashboard, &["H"]);
     harness
@@ -452,7 +476,7 @@ active_profile = "all"
         .wait_for_alt_capture(&dashboard, "claudesess");
     harness
         .fixture()
-        .wait_for_alt_capture(&dashboard, "Acts on: ~ ✦ alphawork");
+        .wait_for_alt_capture(&dashboard, "Target pane: ~ ✦ alphawork");
     harness.wait_for_log_contains("run_started");
     harness.wait_for_log_contains("pull_request_lookup workspace=");
     harness
@@ -511,14 +535,14 @@ active_profile = "all"
     );
     harness
         .fixture()
-        .wait_for_alt_capture(&dashboard, "Acts on: ~ ✦ alphawork");
+        .wait_for_alt_capture(&dashboard, "Target pane: ~ ✦ alphawork");
     harness.write_native_signal(
         &alpha.pane_id,
         r#"{"status":"needs_attention","activity_score":90}"#,
     );
     harness
         .fixture()
-        .wait_for_alt_capture(&dashboard, "Acts on: ! ✦ alphawork");
+        .wait_for_alt_capture(&dashboard, "Target pane: ! ✦ alphawork");
     harness.wait_for_log_contains("kind=needs_attention action=suppress reason=profile_filtered");
     assert_eq!(harness.nonempty_lines(&notification_file).len(), 1);
 
@@ -532,14 +556,14 @@ active_profile = "all"
     );
     harness
         .fixture()
-        .wait_for_alt_capture(&dashboard, "Acts on: ~ ✦ alphawork");
+        .wait_for_alt_capture(&dashboard, "Target pane: ~ ✦ alphawork");
     harness.write_native_signal(
         &alpha.pane_id,
         r#"{"status":"needs_attention","activity_score":90}"#,
     );
     harness
         .fixture()
-        .wait_for_alt_capture(&dashboard, "Acts on: ! ✦ alphawork");
+        .wait_for_alt_capture(&dashboard, "Target pane: ! ✦ alphawork");
     harness.wait_for_file_line_count(&notification_file, 2);
     let notification_lines = harness.nonempty_lines(&notification_file);
     assert!(notification_lines[1].contains("needs_attention|Needs attention:"));

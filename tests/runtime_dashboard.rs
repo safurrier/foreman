@@ -90,6 +90,7 @@ fn interactive_binary_help_and_harness_filter_walkthrough_stays_actionable() {
         "dashboard",
         &fixture.keep_alive_command(&dashboard_command, "FOREMAN_EXITED"),
     );
+    fixture.resize_window("dashboard", 180, 48);
 
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
     fixture.wait_for_alt_capture(&dashboard_pane, "alpha");
@@ -98,7 +99,7 @@ fn interactive_binary_help_and_harness_filter_walkthrough_stays_actionable() {
     fixture.send_keys(&dashboard_pane, &["?"]);
     fixture.wait_for_alt_capture(&dashboard_pane, "Legend");
     fixture.wait_for_alt_capture(&dashboard_pane, "Claude");
-    fixture.wait_for_alt_capture(&dashboard_pane, "h cycles harness view");
+    fixture.wait_for_alt_capture(&dashboard_pane, "f jumps tmux to the target pane");
     fixture.send_keys(&dashboard_pane, &["Escape"]);
     wait_for_alt_capture_not_contains(&fixture, &dashboard_pane, "Legend", 40);
 
@@ -106,6 +107,9 @@ fn interactive_binary_help_and_harness_filter_walkthrough_stays_actionable() {
     wait_for_alt_capture_not_contains(&fixture, &dashboard_pane, "beta", 40);
     fixture.send_keys(&dashboard_pane, &["h"]);
     wait_for_alt_capture_not_contains(&fixture, &dashboard_pane, "alpha", 40);
+    fixture.send_keys(&dashboard_pane, &["h"]);
+    fixture.wait_for_alt_capture(&dashboard_pane, "alpha");
+    fixture.wait_for_alt_capture(&dashboard_pane, "beta");
 
     fixture.send_keys(&dashboard_pane, &["i", "o", "k", "Enter"]);
     fixture.wait_for_capture(&codex_pane, "CODEX:ok");

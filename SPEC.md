@@ -171,7 +171,7 @@ yet expose a stable contract.
 - The operator can collapse and expand session groups.
 - The operator can trigger focus on the selected pane.
 - The operator can cycle a harness/provider filter that narrows the tree to one
-  supported agent family at a time.
+  supported agent family at a time, with empty harness views skipped by default.
 - The operator can cycle the active theme at runtime.
 - Escape semantics cancel or dismiss the current mode according to context.
 
@@ -179,6 +179,7 @@ yet expose a stable contract.
 
 - Foreman can focus the selected pane by switching tmux context as needed.
 - Session and window selections can resolve to an actionable visible pane for focus-oriented actions.
+- The UI identifies the resolved actionable pane for focus-oriented and direct-input actions.
 - In popup mode, successful focus-oriented actions close the dashboard automatically.
 
 **R12. Direct input**
@@ -433,7 +434,8 @@ mise run ci
 - When the operator toggles the relevant filters, those hidden items become visible.
 - Given visible supported harness families, pressing the harness-view key cycles
   the sidebar through those harnesses plus the unfiltered view and reconciles the
-  selection to a visible target.
+  selection to a visible target without stopping on empty harness views by
+  default.
 
 **A7. Status stability**
 
@@ -450,6 +452,8 @@ mise run ci
   status and harness marks.
 - Given a window row is selected, focus-oriented actions resolve to the top visible
   actionable pane instead of silently no-oping.
+- Given a session or window row is selected, the preview identifies the resolved
+  target pane and help explains that `f` jumps tmux there.
 
 **A9. Popup auto-exit**
 
