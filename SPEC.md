@@ -63,7 +63,7 @@ yet expose a stable contract.
 - Let an operator tell at a glance which agents are working, done, blocked, or broken.
 - Prioritize reliable completion and attention detection over deep parsing of every tool or approval detail.
 - Provide enough product and validation detail that another team could rebuild the product without the original implementation.
-- Preserve a keyboard-first workflow while still allowing optional mouse assistance.
+- Preserve a keyboard-first workflow.
 
 **Non-Goals:**
 
@@ -161,9 +161,10 @@ yet expose a stable contract.
 - The dashboard includes a detailed pane preview.
 - The dashboard includes an input area for sending text to the selected agent.
 - The dashboard includes a footer with contextual actions or hints.
-- The dashboard includes a help surface with a legend for compact badges and status indicators.
+- The dashboard includes a help surface with a legend for compact badges, status indicators, and status-source hints.
 - The help surface is keyboard-scrollable in layouts where its full contents do not fit at once.
 - The dashboard may include summary, subagent, and pull request detail panels.
+- The preview identifies whether the selected or actionable pane status comes from native mode or compatibility heuristics.
 
 **R10. Keyboard-first interaction**
 
@@ -250,7 +251,7 @@ yet expose a stable contract.
 
 ### SHOULD
 
-- Foreman should favor keyboard-first operation even when mouse support exists.
+- Foreman should keep the common path fully usable without a mouse.
 - Foreman should keep selections stable across refreshes, filtering changes, and re-sorting.
 - Foreman should avoid noisy pull request polling and unnecessary repeated notifications.
 - Foreman should make active work, waiting states, and errors visually distinct at a glance.
@@ -258,10 +259,8 @@ yet expose a stable contract.
 
 ### MAY
 
-- Foreman may support mouse-assisted navigation and clickable footer actions.
 - Foreman may show derived summary information such as TODOs, recent activity, or child-task activity.
 - Foreman may surface a remaining-context indicator when a supported harness exposes it.
-- Foreman may expose confidence hints or integration-source hints so the operator can tell whether a status came from native mode or compatibility mode.
 
 ## Interfaces & Contracts
 
@@ -455,10 +454,16 @@ mise run ci
 - Given the help surface is taller than the visible popup, `j` / `k`,
   arrow keys, and page navigation keys scroll it without changing the
   underlying selection.
+- Given focus changes between sidebar, preview, and compose, the footer updates
+  its primary hints to match the active panel instead of repeating a single
+  static control summary.
 - Given a window row is selected, focus-oriented actions resolve to the top visible
   actionable pane instead of silently no-oping.
 - Given a session or window row is selected, the preview identifies the resolved
   target pane and help explains that `f` jumps tmux there.
+- Given a selected or actionable pane is using compatibility mode, the preview
+  and help identify that status as compatibility-derived and lower confidence
+  than native hook signals.
 
 **A9. Popup auto-exit**
 
@@ -546,6 +551,8 @@ mise run ci
 - Given the navigation performance smoke runs in the heavy UX lane, selection
   bursts do not trigger pull-request lookups for every intermediate workspace.
 - When CI runs, build, test, formatting, and lint checks succeed.
+- When CI runs the heavy validation lane, the UX artifact bundle and
+  release-gauntlet report are uploaded as reviewable artifacts.
 
 ### Definition of done
 

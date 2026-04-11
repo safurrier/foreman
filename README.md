@@ -82,6 +82,10 @@ Common dashboard keys:
 - `t` cycles the active theme
 - `?` opens the scrollable help/legend surface; use `j` / `k` or `PageUp` / `PageDown` inside it
 
+Preview and help also surface where a status came from:
+- `native hook` means a structured harness signal and is treated as higher confidence
+- `compatibility heuristic` means tmux-observed behavior and is treated as lower confidence
+
 Theme selection:
 
 ```toml

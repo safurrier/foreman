@@ -90,6 +90,12 @@ fn release_startup_navigation_gauntlet_proves_discovery_filters_and_help() {
     harness.fixture().wait_for_alt_capture(&dashboard, "pisess");
     harness
         .fixture()
+        .wait_for_alt_capture(&dashboard, "Keys • Sidebar");
+    harness
+        .fixture()
+        .wait_for_alt_capture(&dashboard, "Status source: compatibility heuristic");
+    harness
+        .fixture()
         .wait_for_alt_capture_not_contains(&dashboard, "notessess");
     harness
         .fixture()
@@ -99,10 +105,16 @@ fn release_startup_navigation_gauntlet_proves_discovery_filters_and_help() {
     harness
         .fixture()
         .wait_for_alt_capture(&dashboard, "| INPUT |");
+    harness
+        .fixture()
+        .wait_for_alt_capture(&dashboard, "Keys • Compose");
     harness.fixture().send_keys(&dashboard, &["2"]);
     harness
         .fixture()
         .wait_for_alt_capture(&dashboard, "| PREVIEW |");
+    harness
+        .fixture()
+        .wait_for_alt_capture(&dashboard, "Keys • Details");
     harness.fixture().send_keys(&dashboard, &["Tab"]);
     harness
         .fixture()
@@ -111,6 +123,9 @@ fn release_startup_navigation_gauntlet_proves_discovery_filters_and_help() {
     harness
         .fixture()
         .wait_for_alt_capture(&dashboard, "| SIDEBAR |");
+    harness
+        .fixture()
+        .wait_for_alt_capture(&dashboard, "Keys • Sidebar");
 
     harness.fixture().send_keys(&dashboard, &["/"]);
     send_text(harness.fixture(), &dashboard, "claudesess");
@@ -164,10 +179,13 @@ fn release_startup_navigation_gauntlet_proves_discovery_filters_and_help() {
         .wait_for_active_pane_in("claudesess", &claude.pane_id);
 
     harness.fixture().send_keys(&dashboard, &["?"]);
-    harness.fixture().wait_for_alt_capture(&dashboard, "Legend");
     harness
         .fixture()
-        .wait_for_alt_capture(&dashboard, "Target pane is what Enter, f, i, and x use");
+        .wait_for_alt_capture(&dashboard, "Focus: Compose");
+    harness
+        .fixture()
+        .wait_for_alt_capture(&dashboard, "Target source: compatibility heuristic");
+    harness.fixture().wait_for_alt_capture(&dashboard, "Legend");
     harness.fixture().resize_window("dashboard", 88, 20);
     harness
         .fixture()
@@ -175,7 +193,7 @@ fn release_startup_navigation_gauntlet_proves_discovery_filters_and_help() {
     harness
         .fixture()
         .wait_for_alt_capture_not_contains(&dashboard, "h cycles visible harnesses");
-    for _ in 0..16 {
+    for _ in 0..22 {
         harness.fixture().send_keys(&dashboard, &["j"]);
         thread::sleep(Duration::from_millis(40));
     }

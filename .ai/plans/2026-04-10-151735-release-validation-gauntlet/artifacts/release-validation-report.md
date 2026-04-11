@@ -1,6 +1,6 @@
 # Release Validation Report
 
-- Generated: `2026-04-11T07:33:02.858347+00:00`
+- Generated: `2026-04-11T17:52:19.208216+00:00`
 - Status: `PASS`
 - Checklist: `.ai/plans/2026-04-10-151735-release-validation-gauntlet/CHECKLIST.md`
 - Raw output: `.ai/plans/2026-04-10-151735-release-validation-gauntlet/artifacts/release-gauntlet-output.txt`
@@ -14,7 +14,7 @@ cargo test --test release_gauntlet -- --test-threads=1 --nocapture
 ## Compiled-binary gauntlet coverage
 
 - `release_startup_navigation_gauntlet_proves_discovery_filters_and_help`
-  covers startup logging, multi-session discovery, harness filtering, help/legend, theme cycling, and actionable focus/compose behavior in a temporary tmux socket.
+  covers startup logging, multi-session discovery, harness filtering, focus-aware footer states, help/legend provenance hints, theme cycling, and actionable focus/compose behavior in a temporary tmux socket.
 - `release_action_gauntlet_proves_search_flash_sort_and_pane_operations`
   covers search confirm and cancel-restore, multiline compose, flash jump and jump+focus, sort cycling, rename, spawn, and kill flows through the compiled binary.
 - `release_integration_gauntlet_proves_pr_notifications_and_graceful_degradation`

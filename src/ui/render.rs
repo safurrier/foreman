@@ -241,7 +241,7 @@ fn render_footer(
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Keys")
+                .title(footer_title(state, theme))
                 .border_style(theme.border),
         )
         .wrap(Wrap { trim: false })
@@ -252,11 +252,11 @@ fn render_footer(
 fn render_help(frame: &mut Frame<'_>, state: &AppState, theme: &Theme, layout_mode: LayoutMode) {
     let popup = help_popup_rect(frame.area(), layout_mode);
     frame.render_widget(Clear, popup);
-    let help_lines = help_lines(theme);
+    let help_lines = help_lines(state, theme);
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(help_title(state, help_lines.len() as u16, popup))
+        .title(help_title(state, theme, help_lines.len() as u16, popup))
         .border_style(theme.overlay_border);
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
@@ -707,14 +707,10 @@ fn preview_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Tex
                     Span::styled(pane.navigation_title(), theme.emphasis),
                 ]));
                 lines.push(plain_line(format!(
-                    "Command: {} {} {}",
+                    "Command: {}",
                     pane.current_command.as_deref().unwrap_or("unknown"),
-                    theme.glyphs.separator,
-                    pane.agent
-                        .as_ref()
-                        .map(|agent| agent.integration_mode.label())
-                        .unwrap_or("shell")
                 )));
+                lines.push(status_source_line(theme, pane));
                 lines.push(plain_line(format!("Pane title: {}", pane.title)));
                 lines.push(muted_line(
                     "f jumps tmux here. i composes here. x kill.",
@@ -737,9 +733,7 @@ fn preview_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Tex
                     "Visible panes: {}",
                     window.visible_panes(&state.filters, state.sort_mode).len()
                 )));
-                if let Some(action_target) = actionable_target_line(state, theme) {
-                    lines.push(action_target);
-                }
+                lines.extend(actionable_target_lines(state, theme));
                 lines.push(muted_line(
                     "Enter or f jumps tmux to the target pane. i composes there.",
                     theme,
@@ -767,9 +761,7 @@ fn preview_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Tex
                     visible_windows.len(),
                     visible_panes
                 )));
-                if let Some(action_target) = actionable_target_line(state, theme) {
-                    lines.push(action_target);
-                }
+                lines.extend(actionable_target_lines(state, theme));
                 lines.push(muted_line(
                     "Enter collapses. f jumps tmux to the target pane. i composes there.",
                     theme,
@@ -932,34 +924,38 @@ fn footer_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Text
                 "Help: j/k or arrows scroll{sep}PgUp/PgDn page{sep}Home/End jump{sep}Esc close{sep}q quit"
             )],
         },
-        Mode::Normal | Mode::PreviewScroll => match layout_mode {
-            LayoutMode::Compact => vec![format!(
-                "Move j/k{sep}Use Enter or f{sep}Compose i{sep}Help ?"
-            )],
-            LayoutMode::Medium => vec![
-                format!(
-                    "Move j/k{sep}Use Enter or f{sep}Compose i{sep}Panels Tab"
-                ),
-                format!(
-                    "Search / or s/S{sep}Filter h{sep}Theme t{sep}Help ?"
-                ),
-            ],
-            LayoutMode::Wide => vec![
-                format!(
-                    "Move j/k{sep}Use Enter or f{sep}Compose i{sep}Panels Tab or 1/2/3"
-                ),
-                format!(
-                    "Search / or s/S{sep}Filter h{sep}Sort o{sep}Theme t{sep}Help ?"
-                ),
-            ],
-        },
+        Mode::Normal | Mode::PreviewScroll => normal_footer_lines(state, theme, layout_mode),
     };
 
     Text::from(lines.into_iter().map(plain_line).collect::<Vec<_>>())
 }
 
-fn help_lines(theme: &Theme) -> Vec<Line<'static>> {
-    vec![
+fn help_lines(state: &AppState, theme: &Theme) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        section_line("Right now", theme),
+        muted_line(format!("Focus: {}", state.focus_context_label()), theme),
+        muted_line(state.focus_help_summary(), theme),
+    ];
+
+    if let Some(source_summary) = state.selected_actionable_source_summary() {
+        lines.push(muted_line(
+            format!("Target source: {source_summary}."),
+            theme,
+        ));
+    }
+
+    lines.extend([
+        plain_line(""),
+        section_line("Source", theme),
+        muted_line(
+            "native hook = higher-confidence status from harness signals.",
+            theme,
+        ),
+        muted_line(
+            "compatibility heuristic = tmux-observed status that may lag or be less certain.",
+            theme,
+        ),
+        plain_line(""),
         section_line("Navigate", theme),
         muted_line("j/k or arrows move.", theme),
         muted_line("Enter uses the row. f jumps tmux to Target pane.", theme),
@@ -1020,10 +1016,12 @@ fn help_lines(theme: &Theme) -> Vec<Line<'static>> {
             "o sorts. t themes. m mutes. n changes notification profile.",
             theme,
         ),
-    ]
+    ]);
+
+    lines
 }
 
-fn help_title(state: &AppState, total_lines: u16, popup: Rect) -> String {
+fn help_title(state: &AppState, theme: &Theme, total_lines: u16, popup: Rect) -> String {
     let inner_height = popup.height.saturating_sub(2);
     let content_height = if inner_height >= 3 {
         inner_height.saturating_sub(1)
@@ -1036,7 +1034,11 @@ fn help_title(state: &AppState, total_lines: u16, popup: Rect) -> String {
     let page_size = content_height.max(1);
     let total_pages = total_lines.max(1).div_ceil(page_size);
     let current_page = (scroll / page_size).min(total_pages.saturating_sub(1)) + 1;
-    format!("Help {current_page}/{total_pages}")
+    format!(
+        "Help {} {} {current_page}/{total_pages}",
+        theme.glyphs.separator,
+        state.focus_context_label()
+    )
 }
 
 fn help_scroll_max(total_lines: u16, viewport_height: u16) -> u16 {
@@ -1235,22 +1237,124 @@ fn harness_marks_for_panes<'a>(theme: &Theme, panes: impl IntoIterator<Item = &'
     marks.concat()
 }
 
-fn actionable_target_line(state: &AppState, theme: &Theme) -> Option<Line<'static>> {
-    let pane = state.selected_actionable_pane()?;
+fn actionable_target_lines(state: &AppState, theme: &Theme) -> Vec<Line<'static>> {
+    let Some(pane) = state.selected_actionable_pane() else {
+        return Vec::new();
+    };
     let status = pane.agent.as_ref().map(|agent| agent.status);
 
-    Some(Line::from(vec![
-        Span::styled("Target pane: ", theme.muted),
-        Span::styled(
-            format!("{} ", status_symbol(theme, status, pane.is_agent())),
-            status_style(theme, status, pane.is_agent()),
-        ),
-        Span::styled(
-            format!("{} ", pane_harness_badge(theme, Some(pane))),
-            status_style(theme, status, pane.is_agent()),
-        ),
-        Span::styled(pane.navigation_title(), theme.base),
-    ]))
+    vec![
+        Line::from(vec![
+            Span::styled("Target pane: ", theme.muted),
+            Span::styled(
+                format!("{} ", status_symbol(theme, status, pane.is_agent())),
+                status_style(theme, status, pane.is_agent()),
+            ),
+            Span::styled(
+                format!("{} ", pane_harness_badge(theme, Some(pane))),
+                status_style(theme, status, pane.is_agent()),
+            ),
+            Span::styled(pane.navigation_title(), theme.base),
+        ]),
+        status_source_line(theme, pane),
+    ]
+}
+
+fn status_source_line(theme: &Theme, pane: &Pane) -> Line<'static> {
+    match pane.agent.as_ref() {
+        Some(agent) => Line::from(vec![
+            Span::styled("Status source: ", theme.muted),
+            Span::styled(agent.integration_mode.source_label(), theme.base),
+            Span::styled(
+                format!(
+                    " {} {}",
+                    theme.glyphs.separator,
+                    agent.integration_mode.confidence_label()
+                ),
+                theme.muted,
+            ),
+        ]),
+        None => muted_line("Status source: plain shell pane", theme),
+    }
+}
+
+fn footer_title(state: &AppState, theme: &Theme) -> String {
+    match state.mode {
+        Mode::Normal | Mode::PreviewScroll => {
+            format!(
+                "Keys {} {}",
+                theme.glyphs.separator,
+                state.focus_context_label()
+            )
+        }
+        Mode::Input => format!("Keys {} Compose", theme.glyphs.separator),
+        Mode::Spawn => format!("Keys {} Spawn", theme.glyphs.separator),
+        Mode::Search => format!("Keys {} Search", theme.glyphs.separator),
+        Mode::FlashNavigate => format!("Keys {} Flash", theme.glyphs.separator),
+        Mode::Rename => format!("Keys {} Rename", theme.glyphs.separator),
+        Mode::Help => format!("Keys {} Help", theme.glyphs.separator),
+        Mode::ConfirmKill => format!("Keys {} Confirm", theme.glyphs.separator),
+    }
+}
+
+fn normal_footer_lines(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Vec<String> {
+    let sep = format!(" {} ", theme.glyphs.separator);
+    let secondary = match layout_mode {
+        LayoutMode::Compact => format!("View h/o/t{sep}Help ?"),
+        LayoutMode::Medium => {
+            format!("Panels Tab or 1/2/3{sep}Find / s S{sep}View h o t{sep}Help ?")
+        }
+        LayoutMode::Wide => {
+            format!("Panels Tab or 1/2/3{sep}Find / s S{sep}View h o t{sep}Alerts m n{sep}Help ?")
+        }
+    };
+
+    match state.focus {
+        Focus::Sidebar => {
+            let primary = if state.selected_actionable_pane().is_some() {
+                format!("Sidebar: j/k move{sep}Enter use row{sep}f jump tmux{sep}i compose")
+            } else {
+                format!("Sidebar: j/k move{sep}Enter fold row{sep}Tab details{sep}Help ?")
+            };
+            match layout_mode {
+                LayoutMode::Compact => vec![primary],
+                LayoutMode::Medium | LayoutMode::Wide => vec![primary, secondary],
+            }
+        }
+        Focus::Preview => {
+            let primary = if state.selected_actionable_pane().is_some() {
+                format!("Details: inspect target pane{sep}f jump tmux{sep}i compose")
+            } else {
+                format!("Details: inspect selection{sep}Tab sidebar{sep}Help ?")
+            };
+            let pr_actions = if state.selected_pull_request().is_some() {
+                format!("PR p{sep}Open O{sep}Copy Y")
+            } else {
+                "PR p".to_string()
+            };
+            match layout_mode {
+                LayoutMode::Compact => {
+                    vec![format!(
+                        "Details: inspect target{sep}f tmux{sep}p PR{sep}Help ?"
+                    )]
+                }
+                LayoutMode::Medium | LayoutMode::Wide => {
+                    vec![primary, format!("{secondary}{sep}{pr_actions}")]
+                }
+            }
+        }
+        Focus::Input => {
+            let primary = if state.selected_actionable_pane().is_some() {
+                format!("Compose: Enter or i start{sep}f jump tmux{sep}x kill")
+            } else {
+                format!("Compose: select an agent row first{sep}Tab sidebar{sep}Help ?")
+            };
+            match layout_mode {
+                LayoutMode::Compact => vec![primary],
+                LayoutMode::Medium | LayoutMode::Wide => vec![primary, secondary],
+            }
+        }
+    }
 }
 
 fn status_symbol(theme: &Theme, status: Option<AgentStatus>, is_agent: bool) -> &'static str {
@@ -1308,8 +1412,8 @@ mod tests {
     use super::render;
     use crate::app::{
         inventory, AgentStatus, AppState, FlashNavigateKind, FlashState, Focus, HarnessKind,
-        ModalState, Mode, OperatorAlert, OperatorAlertLevel, OperatorAlertSource, PaneBuilder,
-        SearchState, SelectionTarget, SessionBuilder, WindowBuilder,
+        IntegrationMode, ModalState, Mode, OperatorAlert, OperatorAlertLevel, OperatorAlertSource,
+        PaneBuilder, SearchState, SelectionTarget, SessionBuilder, WindowBuilder,
     };
     use crate::services::pull_requests::{PullRequestData, PullRequestLookup, PullRequestStatus};
     use crate::services::system_stats::SystemStatsSnapshot;
@@ -1328,6 +1432,7 @@ mod tests {
                         .working_dir("/tmp/alpha")
                         .preview("Claude is working\nReading files\nApplying patch")
                         .status(AgentStatus::Working)
+                        .integration_mode(IntegrationMode::Native)
                         .activity_score(10),
                 ),
             ),
@@ -1436,13 +1541,12 @@ mod tests {
         state.mode = Mode::Help;
         let output = render_to_string(&state);
 
+        assert!(output.contains("Right now"));
+        assert!(output.contains("Focus: Sidebar"));
+        assert!(output.contains("Source"));
         assert!(output.contains("Navigate"));
         assert!(output.contains("Legend"));
-        assert!(output.contains("Harness: ✦ Claude"));
-        assert!(output.contains("◎ Codex"));
-        assert!(output.contains("R rename"));
-        assert!(output.contains("N spawn"));
-        assert!(output.contains("Target pane is what Enter, f, i, and x use"));
+        assert!(output.contains("native hook = higher-confidence"));
         assert!(output.contains("Scroll j/k or arrows"));
     }
 
@@ -1453,7 +1557,7 @@ mod tests {
         let top_output = render_to_string_at(&state, ThemeName::Catppuccin, 80, 18);
         assert!(!top_output.contains("h cycles visible harnesses"));
 
-        state.help_scroll = 16;
+        state.help_scroll = 24;
         let scrolled_output = render_to_string_at(&state, ThemeName::Catppuccin, 80, 18);
         assert!(scrolled_output.contains("h cycles visible harnesses"));
     }
@@ -1480,7 +1584,17 @@ mod tests {
         let output = render_to_string(&state);
 
         assert!(output.contains("Target pane:"));
+        assert!(output.contains("Status source: native hook"));
         assert!(output.contains("f jumps tmux to the target pane"));
+    }
+
+    #[test]
+    fn render_preview_surfaces_status_provenance_for_selected_pane() {
+        let state = sample_state();
+        let output = render_to_string(&state);
+
+        assert!(output.contains("Status source: native hook"));
+        assert!(output.contains("high confidence"));
     }
 
     #[test]
@@ -1552,9 +1666,10 @@ mod tests {
         let state = sample_state();
         let output = render_to_string(&state);
 
-        assert!(output.contains("Move j/k"));
-        assert!(output.contains("Use Enter or f"));
-        assert!(output.contains("Search / or s/S"));
+        assert!(output.contains("Keys • Sidebar") || output.contains("Keys | Sidebar"));
+        assert!(output.contains("Sidebar: j/k move"));
+        assert!(output.contains("Enter use row"));
+        assert!(output.contains("Find / s S"));
         assert!(output.contains("Help ?"));
     }
 

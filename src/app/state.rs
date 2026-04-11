@@ -265,6 +265,20 @@ impl IntegrationMode {
             Self::Compatibility => "compat",
         }
     }
+
+    pub fn source_label(self) -> &'static str {
+        match self {
+            Self::Native => "native hook",
+            Self::Compatibility => "compatibility heuristic",
+        }
+    }
+
+    pub fn confidence_label(self) -> &'static str {
+        match self {
+            Self::Native => "high confidence",
+            Self::Compatibility => "lower confidence",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1043,6 +1057,14 @@ impl AppState {
         }
     }
 
+    pub fn focus_context_label(&self) -> &'static str {
+        match self.focus {
+            Focus::Sidebar => "Sidebar",
+            Focus::Preview => "Details",
+            Focus::Input => "Compose",
+        }
+    }
+
     pub fn inventory_summary(&self) -> InventorySummary {
         let visible_targets = self.visible_targets();
         InventorySummary {
@@ -1156,6 +1178,18 @@ impl AppState {
         let target = self.selection.as_ref()?;
         self.inventory
             .actionable_pane_for_target(target, &self.filters, self.sort_mode)
+    }
+
+    pub fn selected_actionable_source_summary(&self) -> Option<String> {
+        let pane = self.selected_actionable_pane()?;
+        Some(match pane.agent.as_ref() {
+            Some(agent) => format!(
+                "{} ({})",
+                agent.integration_mode.source_label(),
+                agent.integration_mode.confidence_label()
+            ),
+            None => "plain shell pane".to_string(),
+        })
     }
 
     pub fn selected_actionable_pane_id(&self) -> Option<PaneId> {
@@ -1311,6 +1345,42 @@ impl AppState {
         self.operator_alert
             .as_ref()
             .map(|alert| format!("alert={}", alert.level.label()))
+    }
+
+    pub fn focus_help_summary(&self) -> String {
+        match self.focus {
+            Focus::Sidebar => match self.selection.as_ref() {
+                Some(SelectionTarget::Session(_)) => {
+                    "Sidebar focus. Enter folds the session row. f and i use the target pane."
+                        .to_string()
+                }
+                Some(SelectionTarget::Window(_)) => {
+                    "Sidebar focus. Enter and f act on the resolved target pane for this window."
+                        .to_string()
+                }
+                Some(SelectionTarget::Pane(_)) => {
+                    "Sidebar focus. Enter and f act on the selected pane. j and k stay here."
+                        .to_string()
+                }
+                None => "Sidebar focus. Use j and k to move, then Enter or i to act.".to_string(),
+            },
+            Focus::Preview => {
+                "Details focus. Read recent output, PR state, and target-pane guidance here."
+                    .to_string()
+            }
+            Focus::Input => {
+                if self.mode == Mode::Input {
+                    "Compose focus. Type your instruction here. Enter sends and Ctrl+J adds a newline."
+                        .to_string()
+                } else if self.selected_actionable_pane().is_some() {
+                    "Compose focus. Press Enter or i to start composing for the target pane."
+                        .to_string()
+                } else {
+                    "Compose focus. Select an agent row first so Foreman knows where to send input."
+                        .to_string()
+                }
+            }
+        }
     }
 
     fn filter_search_targets(&self, targets: Vec<SelectionTarget>) -> Vec<SelectionTarget> {

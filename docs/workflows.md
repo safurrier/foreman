@@ -76,6 +76,16 @@ That rerun is intentional. `cargo test --all-features` proves the broader Rust
 suite, and `verify-release` reruns the operator gauntlet as the explicit
 report-producing release proof.
 
+GitHub Actions now uploads the same evidence as review artifacts:
+
+- `validation-evidence` on pull requests from `.github/workflows/ci.yml`
+- `release-validation-evidence` on tag verification from `.github/workflows/release.yml`
+
+Those artifacts include:
+
+- `.ai/plans/2026-04-10-110931-tui-ux-diagnostic/artifacts/`
+- `.ai/plans/2026-04-10-151735-release-validation-gauntlet/artifacts/`
+
 `mise run verify-ux` also runs the ignored `runtime_profiling` smoke so lag
 regressions caused by synchronous lookup work show up in the heavy lane instead
 of only in manual UX testing.

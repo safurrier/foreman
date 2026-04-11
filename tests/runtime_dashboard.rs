@@ -95,14 +95,14 @@ fn interactive_binary_help_and_harness_filter_walkthrough_stays_actionable() {
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
     fixture.wait_for_alt_capture(&dashboard_pane, "alpha");
     fixture.wait_for_alt_capture(&dashboard_pane, "beta");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Keys • Sidebar");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Status source: compatibility heuristic");
 
     fixture.send_keys(&dashboard_pane, &["?"]);
+    fixture.wait_for_alt_capture(&dashboard_pane, "Focus: Sidebar");
     fixture.wait_for_alt_capture(&dashboard_pane, "Legend");
     fixture.wait_for_alt_capture(&dashboard_pane, "Claude");
-    fixture.wait_for_alt_capture(
-        &dashboard_pane,
-        "Target pane is what Enter, f, i, and x use",
-    );
+    fixture.wait_for_alt_capture(&dashboard_pane, "Target source: compatibility heuristic");
     fixture.send_keys(&dashboard_pane, &["Escape"]);
     wait_for_alt_capture_not_contains(&fixture, &dashboard_pane, "Legend", 40);
 
@@ -117,6 +117,56 @@ fn interactive_binary_help_and_harness_filter_walkthrough_stays_actionable() {
     fixture.send_keys(&dashboard_pane, &["i", "o", "k", "Enter"]);
     fixture.wait_for_capture(&codex_pane, "CODEX:ok");
 
+    fixture.send_keys(&dashboard_pane, &["q"]);
+    fixture.wait_for_capture(&dashboard_pane, "FOREMAN_EXITED");
+}
+
+#[test]
+fn interactive_binary_footer_tracks_focus_and_help_explains_provenance() {
+    let fixture = TmuxFixture::new();
+    let agent_pane = fixture.new_session(
+        "alpha",
+        r#"sh -lc 'printf "%s\n" "Claude Code ready"; while IFS= read -r line; do printf "%s\n" "CLAUDE:$line"; done'"#,
+    );
+    fixture.wait_for_capture(&agent_pane, "Claude Code ready");
+
+    let config_dir = tempdir().expect("config dir should exist");
+    let log_dir = tempdir().expect("log dir should exist");
+    let dashboard_command = format!(
+        "FOREMAN_CONFIG_HOME={} FOREMAN_LOG_DIR={} {} --tmux-socket {} --poll-interval-ms 100 --capture-lines 20 --no-notify",
+        config_dir.path().display(),
+        log_dir.path().display(),
+        foreman_bin(),
+        fixture.socket_path().display()
+    );
+    let dashboard_pane = fixture.new_session(
+        "dashboard",
+        &fixture.keep_alive_command(&dashboard_command, "FOREMAN_EXITED"),
+    );
+    fixture.resize_window("dashboard", 160, 40);
+
+    fixture.wait_for_alt_capture(&dashboard_pane, "Keys • Sidebar");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Sidebar: j/k move");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Status source: compatibility heuristic");
+
+    fixture.send_keys(&dashboard_pane, &["2"]);
+    fixture.wait_for_alt_capture(&dashboard_pane, "Keys • Details");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Details: inspect target pane");
+
+    fixture.send_keys(&dashboard_pane, &["3"]);
+    fixture.wait_for_alt_capture(&dashboard_pane, "Keys • Compose");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Compose: Enter or i start");
+
+    fixture.send_keys(&dashboard_pane, &["?"]);
+    fixture.wait_for_alt_capture(&dashboard_pane, "Focus: Compose");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Target source: compatibility heuristic");
+    fixture.wait_for_alt_capture(
+        &dashboard_pane,
+        "compatibility heuristic = tmux-observed status",
+    );
+
+    fixture.send_keys(&dashboard_pane, &["Escape"]);
+    wait_for_alt_capture_not_contains(&fixture, &dashboard_pane, "Focus: Compose", 40);
     fixture.send_keys(&dashboard_pane, &["q"]);
     fixture.wait_for_capture(&dashboard_pane, "FOREMAN_EXITED");
 }
@@ -153,13 +203,19 @@ fn interactive_binary_help_scrolls_in_small_layout() {
 
     fixture.send_keys(
         &dashboard_pane,
-        &["j", "j", "j", "j", "j", "j", "j", "j", "j", "j", "j", "j"],
+        &[
+            "j", "j", "j", "j", "j", "j", "j", "j", "j", "j", "j", "j", "j", "j", "j", "j", "j",
+            "j", "j", "j",
+        ],
     );
     fixture.wait_for_alt_capture(&dashboard_pane, "h cycles visible harnesses");
 
     fixture.send_keys(
         &dashboard_pane,
-        &["k", "k", "k", "k", "k", "k", "k", "k", "k", "k", "k", "k"],
+        &[
+            "k", "k", "k", "k", "k", "k", "k", "k", "k", "k", "k", "k", "k", "k", "k", "k", "k",
+            "k", "k", "k",
+        ],
     );
     fixture.wait_for_alt_capture(&dashboard_pane, "Navigate");
 

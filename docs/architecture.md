@@ -64,7 +64,7 @@ testable as the app grows.
    Poll tick triggers tmux discovery and pane capture, harness interpreters
    derive status signals, reducer updates state, and renderer redraws.
 3. **Operator action loop**
-   Key or mouse input maps to `Command`, then `Action`, then reducer state
+   Key input maps to `Command`, then `Action`, then reducer state
    transition, then optional Effects through adapters, then redraw. Draft text
    and modal targets stay in reducer-owned state rather than widget-local state.
 4. **Attention loop**
@@ -250,6 +250,9 @@ mise run verify-ux  # focused TUI/runtime smoke + perf smoke + VHS capture
 GitHub Actions currently maps those workflows like this:
 - `.github/workflows/ci.yml` runs `mise run ci` on pushes to `main` and pull
   requests to `main`, and runs `mise run verify` for pull requests.
+- The pull-request verify job uploads the UX artifact directory and the
+  release-gauntlet report directory so reviewers can inspect visual/operator
+  evidence from CI, not just logs.
 - `.github/workflows/release.yml` runs on version tags, re-verifies the repo,
   builds release archives for the supported target runners, and publishes the
   GitHub release bundles.

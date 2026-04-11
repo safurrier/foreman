@@ -43,6 +43,16 @@ jobs:
       - name: Verify
         run: mise run verify
 
+      - name: Upload release validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-validation-evidence
+          path: |
+            .ai/plans/2026-04-10-110931-tui-ux-diagnostic/artifacts/
+            .ai/plans/2026-04-10-151735-release-validation-gauntlet/artifacts/
+          if-no-files-found: ignore
+
   build:
     name: Build ${{ matrix.archive_name }}
     runs-on: ${{ matrix.os }}
