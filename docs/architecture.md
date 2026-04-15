@@ -42,7 +42,7 @@ testable as the app grows.
 
 | Component | Purpose |
 |---|---|
-| CLI + config | Parse startup flags, config path/init flows, public debug logging, runtime overrides, popup mode, notification policy defaults, and per-harness integration preference |
+| CLI + config | Parse startup flags, config path/init flows, setup and doctor flows, public debug logging, runtime overrides, popup mode, notification policy defaults, and per-harness integration preference |
 | Runtime loop | Own terminal setup, event polling, redraw cadence, effect execution, and runtime-level soft-failure alerting during interactive runs |
 | App state core | Own `Command`, `Action`, `Mode`, `Focus`, selection state, filters, sort mode, modal state, and reducer logic |
 | Ratatui renderer | Render header, sidebar, preview, input, footer, help, and overlays from pure state using semantic theme tokens, built-in palette themes, compact harness marks, and no-color-safe glyph fallbacks |
@@ -173,6 +173,8 @@ testable as the app grows.
 
 - Config is user-scoped, typed, safe to load with defaults, and additive so
   older config files continue to parse when new fields land.
+- Setup and doctor flows may write user-level and repo-level integration files,
+  but those writes must stay scoped, additive, and safe to rerun.
 - Logs are user-scoped, keep a latest-run pointer, and clean up old runs
   automatically.
 - No reliance on absolute paths, mutable global state, or undeclared local
@@ -310,7 +312,8 @@ boundaries unless an ADR changes them.
 
 | Module | Purpose | Docs |
 |---|---|---|
-| src/cli.rs | CLI flags, config path/init flows, debug logging flag, runtime override parsing, and bootstrap wiring | `SPEC.md` |
+| src/cli.rs | CLI flags, config path/init flows, doctor flows, debug logging flag, runtime override parsing, and bootstrap wiring | `SPEC.md` |
+| src/doctor.rs | Shared diagnosis model for config, machine, repo wiring, live runtime fallback, and safe fix scaffolds used by both CLI and runtime/UI surfaces | `SPEC.md` |
 | src/bin/foreman-claude-hook.rs | Claude Code hook bridge CLI that resolves the signal directory and writes native per-pane status files | This document |
 | src/bin/foreman-codex-hook.rs | Codex hook bridge CLI that resolves the signal directory and writes native per-pane status files | This document |
 | src/bin/foreman-pi-hook.rs | Pi lifecycle bridge CLI that resolves the signal directory and writes native per-pane status files | This document |

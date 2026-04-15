@@ -1,6 +1,7 @@
 use clap::Parser;
 use foreman::app::NotificationProfile;
 use foreman::cli::{run, Cli, RunOutcome};
+use foreman::doctor::DoctorReport;
 use std::process::Command;
 use tempfile::tempdir;
 
@@ -127,4 +128,228 @@ active_profile = "attention-only"
         NotificationProfile::AttentionOnly
     );
     assert_eq!(summary.state.notifications.cooldown_ticks, 7);
+}
+
+#[test]
+fn doctor_json_reports_repo_findings() {
+    let temp_dir = tempdir().expect("temp dir should exist");
+    let home_dir = tempdir().expect("home dir should exist");
+    std::fs::create_dir_all(temp_dir.path().join(".git")).expect("git dir should exist");
+
+    let output = Command::new(foreman_bin())
+        .args([
+            "--doctor",
+            "--doctor-json",
+            "--config-file",
+            temp_dir
+                .path()
+                .join("config.toml")
+                .to_str()
+                .expect("utf-8 path"),
+            "--log-dir",
+            temp_dir.path().join("logs").to_str().expect("utf-8 path"),
+        ])
+        .current_dir(temp_dir.path())
+        .env("HOME", home_dir.path())
+        .output()
+        .expect("command should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    let report: DoctorReport = serde_json::from_str(&stdout).expect("report should parse");
+    let reported_repo = report
+        .repo_path
+        .as_deref()
+        .expect("report should include inferred repo path")
+        .canonicalize()
+        .expect("reported repo path should canonicalize");
+    let expected_repo = temp_dir
+        .path()
+        .canonicalize()
+        .expect("temp repo path should canonicalize");
+    assert_eq!(reported_repo, expected_repo);
+    assert!(report
+        .findings
+        .iter()
+        .any(|finding| finding.id == "codex-hook-file-missing"));
+}
+
+#[test]
+fn doctor_strict_fails_when_repo_has_blocking_findings() {
+    let temp_dir = tempdir().expect("temp dir should exist");
+    let home_dir = tempdir().expect("home dir should exist");
+    std::fs::create_dir_all(temp_dir.path().join(".git")).expect("git dir should exist");
+    std::fs::create_dir_all(temp_dir.path().join(".codex")).expect("codex dir should exist");
+    std::fs::write(temp_dir.path().join(".codex/hooks.json"), "{not-json")
+        .expect("hooks file should be written");
+
+    let output = Command::new(foreman_bin())
+        .args([
+            "--doctor",
+            "--doctor-strict",
+            "--repo",
+            temp_dir.path().to_str().expect("utf-8 path"),
+            "--config-file",
+            temp_dir
+                .path()
+                .join("config.toml")
+                .to_str()
+                .expect("utf-8 path"),
+            "--log-dir",
+            temp_dir.path().join("logs").to_str().expect("utf-8 path"),
+        ])
+        .env("HOME", home_dir.path())
+        .output()
+        .expect("command should run");
+
+    assert!(!output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
+    assert!(stdout.contains("Codex hook config could not be parsed"));
+    assert!(stderr.contains("doctor found"));
+}
+
+#[test]
+fn help_surfaces_setup_first_run_flow() {
+    let output = Command::new(foreman_bin())
+        .arg("--help")
+        .output()
+        .expect("command should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("First-time setup:"));
+    assert!(stdout.contains("foreman --setup --user --project"));
+    assert!(stdout.contains("foreman --doctor"));
+    assert!(stdout.contains("foreman --setup --project --codex --repo /path/to/repo"));
+    assert!(stdout.contains("--repo <REPO>"));
+    assert!(!stdout.contains("--doctor-fix"));
+}
+
+#[test]
+fn setup_dry_run_previews_safe_changes_without_writing() {
+    let temp_dir = tempdir().expect("temp dir should exist");
+    std::fs::create_dir_all(temp_dir.path().join(".git")).expect("git dir should exist");
+    let config_file = temp_dir.path().join("config.toml");
+
+    let output = Command::new(foreman_bin())
+        .args([
+            "--setup",
+            "--dry-run",
+            "--repo",
+            temp_dir.path().to_str().expect("utf-8 path"),
+            "--config-file",
+            config_file.to_str().expect("utf-8 path"),
+            "--log-dir",
+            temp_dir.path().join("logs").to_str().expect("utf-8 path"),
+        ])
+        .output()
+        .expect("command should run");
+
+    assert!(output.status.success());
+    assert!(!config_file.exists());
+    assert!(!temp_dir.path().join(".codex/hooks.json").exists());
+    assert!(!temp_dir.path().join(".pi/extensions/foreman.ts").exists());
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("Foreman setup preview"));
+    assert!(stdout.contains("Targets: project"));
+    assert!(stdout.contains("Providers: Claude Code, Codex CLI, Pi"));
+    assert!(stdout.contains("Planned changes"));
+    assert!(stdout.contains("foreman --setup --project --repo"));
+    assert!(stdout.contains("foreman --doctor --repo"));
+}
+
+#[test]
+fn setup_writes_safe_repo_files() {
+    let temp_dir = tempdir().expect("temp dir should exist");
+    std::fs::create_dir_all(temp_dir.path().join(".git")).expect("git dir should exist");
+    let config_file = temp_dir.path().join("config.toml");
+
+    let output = Command::new(foreman_bin())
+        .args([
+            "--setup",
+            "--repo",
+            temp_dir.path().to_str().expect("utf-8 path"),
+            "--config-file",
+            config_file.to_str().expect("utf-8 path"),
+            "--log-dir",
+            temp_dir.path().join("logs").to_str().expect("utf-8 path"),
+        ])
+        .output()
+        .expect("command should run");
+
+    assert!(output.status.success());
+    assert!(config_file.exists());
+    assert!(temp_dir.path().join(".codex/hooks.json").exists());
+    assert!(temp_dir.path().join(".pi/extensions/foreman.ts").exists());
+    assert!(temp_dir.path().join(".claude/settings.local.json").exists());
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("Foreman setup"));
+    assert!(stdout.contains("Applied changes"));
+}
+
+#[test]
+fn setup_user_writes_global_provider_files() {
+    let temp_dir = tempdir().expect("temp dir should exist");
+    std::fs::create_dir_all(temp_dir.path().join(".git")).expect("git dir should exist");
+    let home_dir = tempdir().expect("home dir should exist");
+    let config_file = temp_dir.path().join("config.toml");
+
+    let output = Command::new(foreman_bin())
+        .args([
+            "--setup",
+            "--user",
+            "--repo",
+            temp_dir.path().to_str().expect("utf-8 path"),
+            "--config-file",
+            config_file.to_str().expect("utf-8 path"),
+            "--log-dir",
+            temp_dir.path().join("logs").to_str().expect("utf-8 path"),
+        ])
+        .env("HOME", home_dir.path())
+        .output()
+        .expect("command should run");
+
+    assert!(output.status.success());
+    assert!(home_dir.path().join(".claude/settings.local.json").exists());
+    assert!(home_dir.path().join(".codex/hooks.json").exists());
+    assert!(home_dir.path().join(".pi/extensions/foreman.ts").exists());
+    assert!(!temp_dir.path().join(".codex/hooks.json").exists());
+    assert!(!temp_dir.path().join(".pi/extensions/foreman.ts").exists());
+}
+
+#[test]
+fn setup_can_limit_writes_to_one_project_provider() {
+    let temp_dir = tempdir().expect("temp dir should exist");
+    std::fs::create_dir_all(temp_dir.path().join(".git")).expect("git dir should exist");
+    let config_file = temp_dir.path().join("config.toml");
+
+    let output = Command::new(foreman_bin())
+        .args([
+            "--setup",
+            "--project",
+            "--codex",
+            "--repo",
+            temp_dir.path().to_str().expect("utf-8 path"),
+            "--config-file",
+            config_file.to_str().expect("utf-8 path"),
+            "--log-dir",
+            temp_dir.path().join("logs").to_str().expect("utf-8 path"),
+        ])
+        .output()
+        .expect("command should run");
+
+    assert!(output.status.success());
+    assert!(temp_dir.path().join(".codex/hooks.json").exists());
+    assert!(!temp_dir.path().join(".claude/settings.local.json").exists());
+    assert!(!temp_dir.path().join(".pi/extensions/foreman.ts").exists());
+    assert!(temp_dir.path().join("codex-native").exists());
+    assert!(!temp_dir.path().join("claude-native").exists());
+    assert!(!temp_dir.path().join("pi-native").exists());
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("Targets: project"));
+    assert!(stdout.contains("Providers: Codex CLI"));
 }

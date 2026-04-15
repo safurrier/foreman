@@ -38,6 +38,7 @@ mise run setup      # install tools and dependencies
 mise run check      # fast gate: fmt + lint + typecheck + test
 mise run verify     # heavy gate: integration + release gauntlet + docker
 mise run verify-release  # compiled-binary release-confidence walkthroughs
+mise run native-preflight  # local readiness check for real Claude/Codex/Pi E2Es
 mise run dev        # run the app locally
 ```
 
@@ -48,7 +49,9 @@ Normal workflow:
 4. Run `mise run check`
 5. Before pushing: `/plan-sync`, `/spec-sync`, `/context-engineering update`, `/docs-workflow update`
 6. Run `mise run verify` before merge
-7. Use `mise run verify-release` when you want the standalone release report artifact
+7. If the slice changes native hooks or real harness flows, run `mise run native-preflight`
+   and then strict native verification before calling it done
+8. Use `mise run verify-release` when you want the standalone release report artifact
 
 CI mirrors `mise run ci` for the fast gate. Pull requests also run
 `mise run verify`.
@@ -73,6 +76,10 @@ CI mirrors `mise run ci` for the fast gate. Pull requests also run
 - **DO** check the active Docker context when `mise run verify` fails in the
   Docker phase. **NOT** assume the Rust app regressed first. **BECAUSE** the
   common failure mode here has been local Colima or Docker runtime state.
+- **DO** treat strict native verification as part of done when you touch real
+  harness or hook behavior. **NOT** count skip-only `mise run verify-native`
+  runs as done. **BECAUSE** the real-provider E2Es are the only proof that
+  native Claude/Codex/Pi wiring still works end to end.
 
 ## Further Reading
 

@@ -89,6 +89,12 @@ yet expose a stable contract.
 - The `foreman` command starts the interactive dashboard.
 - The CLI can print the expected config file location and exit.
 - The CLI can initialize a default config file and exit.
+- The CLI can diagnose local install, hook wiring, and runtime fallback state and exit.
+- The CLI can emit machine-readable diagnosis output.
+- The CLI can perform safe, additive setup fixes or scaffolds for supported integrations.
+- The CLI can target setup and diagnosis at the current repo or an explicit repo path.
+- The CLI supports user-scoped and project-scoped setup for supported integrations.
+- The CLI can limit setup writes to selected supported integrations.
 - The CLI can load a user config file.
 - The CLI can override runtime polling and capture settings from the command line.
 - The CLI can enable popup behavior.
@@ -165,6 +171,7 @@ yet expose a stable contract.
 - The help surface is keyboard-scrollable in layouts where its full contents do not fit at once.
 - The dashboard may include summary, subagent, and pull request detail panels.
 - The preview identifies whether the selected or actionable pane status comes from native mode or compatibility heuristics.
+- The preview can surface setup or diagnosis hints when compatibility fallback is likely caused by missing hook wiring or failing hook commands.
 
 **R10. Keyboard-first interaction**
 

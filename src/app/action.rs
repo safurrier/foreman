@@ -3,6 +3,7 @@ use crate::app::state::{
     AppState, FlashNavigateKind, Focus, Inventory, Mode, OperatorAlert, PaneId, SelectionTarget,
     SessionId, SortMode, WindowId,
 };
+use crate::doctor::DoctorFinding;
 use crate::services::pull_requests::PullRequestLookup;
 use crate::services::system_stats::SystemStatsSnapshot;
 use std::path::PathBuf;
@@ -32,6 +33,7 @@ pub enum Action {
         workspace_path: PathBuf,
         lookup: PullRequestLookup,
     },
+    SetRuntimeDiagnostics(Vec<DoctorFinding>),
     SetSystemStats(SystemStatsSnapshot),
     SetStartupError(Option<String>),
     SetOperatorAlert(Option<OperatorAlert>),
@@ -81,6 +83,7 @@ impl Action {
             Self::BeginSearch => "begin-search",
             Self::BeginFlash { .. } => "begin-flash",
             Self::SetPullRequestLookup { .. } => "set-pull-request-lookup",
+            Self::SetRuntimeDiagnostics(_) => "set-runtime-diagnostics",
             Self::SetSystemStats(_) => "set-system-stats",
             Self::SetStartupError(_) => "set-startup-error",
             Self::SetOperatorAlert(_) => "set-operator-alert",

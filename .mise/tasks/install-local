@@ -12,3 +12,8 @@ cmd = ["cargo", "install", "--path", ".", "--locked", "--force"]
 cmd.extend(sys.argv[1:])
 run(cmd, cwd=PROJECT_ROOT)
 log_ok("foreman installed")
+print()
+print("Next steps:")
+print("  foreman --setup --user --project")
+print("  foreman --doctor")
+print("  foreman")

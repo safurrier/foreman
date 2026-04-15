@@ -3,3 +3,6 @@
 **/__pycache__/
 *.py[cod]
 /test-results/
+/.claude/settings.local.json
+/.codex/hooks.json
+/.pi/extensions/foreman.ts

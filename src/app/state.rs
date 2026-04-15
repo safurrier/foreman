@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
+use crate::doctor::DoctorFinding;
 use crate::services::pull_requests::{PullRequestData, PullRequestLookup};
 use crate::services::system_stats::SystemStatsSnapshot;
 
@@ -161,7 +162,7 @@ impl NotificationProfile {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum HarnessKind {
     ClaudeCode,
     CodexCli,
@@ -886,6 +887,7 @@ pub enum OperatorAlertSource {
     Notifications,
     Browser,
     Clipboard,
+    Diagnostics,
 }
 
 impl OperatorAlertSource {
@@ -896,6 +898,7 @@ impl OperatorAlertSource {
             Self::Notifications => "notifications",
             Self::Browser => "browser",
             Self::Clipboard => "clipboard",
+            Self::Diagnostics => "diagnostics",
         }
     }
 }
@@ -993,6 +996,7 @@ pub struct AppState {
     pub system_stats: SystemStatsSnapshot,
     pub operator_alert: Option<OperatorAlert>,
     pub startup_error: Option<String>,
+    pub runtime_diagnostics: Vec<DoctorFinding>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -1194,6 +1198,36 @@ impl AppState {
 
     pub fn selected_actionable_pane_id(&self) -> Option<PaneId> {
         self.selected_actionable_pane().map(|pane| pane.id.clone())
+    }
+
+    pub fn selected_runtime_diagnostics(&self) -> Vec<&DoctorFinding> {
+        let provider = self
+            .selected_actionable_pane()
+            .and_then(|pane| pane.agent.as_ref().map(|agent| agent.harness));
+        let pane_id = self
+            .selected_actionable_pane()
+            .map(|pane| pane.id.as_str().to_string())
+            .or_else(|| {
+                self.selected_pane_id()
+                    .map(|pane_id| pane_id.as_str().to_string())
+            });
+        let workspace_path = self.selected_workspace_path();
+        self.runtime_diagnostics
+            .iter()
+            .filter(|finding| {
+                finding.matches_context(provider, pane_id.as_deref(), workspace_path.as_deref())
+            })
+            .collect()
+    }
+
+    pub fn diagnostics_summary_label(&self) -> Option<String> {
+        let diagnostics = self.selected_runtime_diagnostics();
+        let finding = diagnostics
+            .iter()
+            .find(|finding| finding.severity == crate::doctor::DoctorSeverity::Error)
+            .or_else(|| diagnostics.first())
+            .copied()?;
+        Some(finding.summary.clone())
     }
 
     pub fn selected_window_id(&self) -> Option<WindowId> {

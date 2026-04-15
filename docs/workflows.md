@@ -57,11 +57,54 @@ Release-confidence lane:
 mise run verify-release
 ```
 
+Native readiness preflight:
+
+```bash
+mise run native-preflight
+```
+
 Opt-in real harness lane:
 
 ```bash
 mise run verify-native
 ```
+
+Local install or compatibility fallback diagnosis:
+
+```bash
+foreman --doctor
+foreman --setup --user --project --dry-run
+foreman --setup --user --project
+```
+
+Setup workflow notes:
+- Treat `foreman --setup` as the supported install and repair command, not a one-off bootstrap.
+- `--user` wires the home-level Claude, Codex, and Pi integration files.
+- `--project` wires one repo at a time, either the current checkout or the repo passed with `--repo`.
+- If you need another checkout, rerun setup for that repo:
+  `foreman --setup --project --repo /path/to/repo`
+- If you only want one provider, use `--claude`, `--codex`, or `--pi`.
+- Setup is safe to rerun. It should converge files instead of creating drift.
+- Setup does not fix already-running panes. Restart the affected agent panes after changing hook wiring.
+
+Use `--repo /path/to/repo` when you need to diagnose or set up a different
+checkout. `--setup` is intentionally conservative. It can initialize Foreman
+config, merge Claude and Codex hook wiring, scaffold the Pi extension, and you
+can scope it with `--user`, `--project`, `--claude`, `--codex`, and `--pi`.
+
+Strict closeout for native harness work:
+
+```bash
+mise run native-preflight
+FOREMAN_REQUIRE_REAL_E2E=1 \
+FOREMAN_REAL_CLAUDE_E2E=1 \
+FOREMAN_REAL_CODEX_E2E=1 \
+FOREMAN_REAL_PI_E2E=1 \
+mise run verify-native
+```
+
+Skip-only `mise run verify-native` runs do not satisfy done for slices that
+change real harness behavior.
 
 If `vhs` is installed, `mise run verify` now refreshes the UX GIF and PNG
 artifacts through `mise run verify-ux --capture-only` after the heavier Rust
@@ -129,6 +172,10 @@ FOREMAN_REAL_PI_E2E=1 cargo test --test pi_real_e2e -- --ignored --nocapture
 
 - Native bridges stay outside the reducer. Claude and Codex use hook bridges;
   Pi uses a thin extension that calls `foreman-pi-hook`.
+- The real Codex hook lane now requires a Codex CLI on PATH that exposes the
+  `codex_hooks` feature and supports `UserPromptSubmit`. Old shadow installs can
+  fail even when a newer Codex exists elsewhere on disk, so `mise run
+  native-preflight` checks the PATH-resolved binary before the real suite runs.
 - Native-over-compatibility precedence belongs in one overlay layer, not inside
   the tmux adapter.
 - Codex has one special validation wrinkle: local testing showed reliable hook

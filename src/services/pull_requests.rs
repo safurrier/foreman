@@ -281,6 +281,7 @@ fn run_command(
     if let Some(current_dir) = current_dir {
         command.current_dir(current_dir);
     }
+    scrub_repo_context(&mut command);
 
     let output = command.output()?;
     if output.status.success() {
@@ -291,6 +292,21 @@ fn run_command(
         command: render_command(program, args),
         stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
     })
+}
+
+fn scrub_repo_context(command: &mut Command) {
+    for key in [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_COMMON_DIR",
+        "GIT_INDEX_FILE",
+        "GIT_PREFIX",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GH_REPO",
+    ] {
+        command.env_remove(key);
+    }
 }
 
 fn run_fallback_commands(
@@ -407,7 +423,7 @@ mod tests {
     use std::cell::RefCell;
     use std::path::{Path, PathBuf};
     use std::rc::Rc;
-    use tempfile::tempdir;
+    use tempfile::Builder;
 
     #[derive(Debug, Clone)]
     struct FakePullRequestBackend {
@@ -510,7 +526,10 @@ mod tests {
 
     #[test]
     fn system_backend_treats_non_repository_directory_as_missing() {
-        let workspace = tempdir().expect("temp dir should exist");
+        let workspace = Builder::new()
+            .prefix("foreman-pr-missing-")
+            .tempdir_in("/tmp")
+            .expect("temp dir should exist");
         let backend = SystemPullRequestBackend::new();
 
         let lookup = backend

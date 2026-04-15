@@ -5,6 +5,8 @@ use std::thread;
 use std::time::Duration;
 use tempfile::tempdir;
 
+const MIN_CODEX_HOOK_VERSION: (u64, u64, u64) = (0, 116, 0);
+
 fn hook_bin() -> &'static str {
     env!("CARGO_BIN_EXE_foreman-codex-hook")
 }
@@ -47,6 +49,65 @@ fn codex_is_available() -> bool {
         .unwrap_or(false)
 }
 
+fn parse_semver(text: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = text
+        .split(|ch: char| !(ch.is_ascii_digit() || ch == '.'))
+        .find(|part| part.matches('.').count() >= 2)?
+        .split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next()?.parse().ok()?;
+    Some((major, minor, patch))
+}
+
+fn codex_hook_support_error() -> Option<String> {
+    let version_output = match Command::new("codex").arg("--version").output() {
+        Ok(output) => output,
+        Err(error) => return Some(format!("failed to execute codex --version: {error}")),
+    };
+    if !version_output.status.success() {
+        return Some("codex --version failed".to_string());
+    }
+
+    let version_text = String::from_utf8_lossy(&version_output.stdout);
+    let Some(parsed_version) = parse_semver(&version_text) else {
+        return Some(format!(
+            "could not parse codex version from: {}",
+            version_text.trim()
+        ));
+    };
+
+    if parsed_version < MIN_CODEX_HOOK_VERSION {
+        return Some(format!(
+            "codex on PATH is too old for UserPromptSubmit hooks: found {}.{}.{} but need >= {}.{}.{}",
+            parsed_version.0,
+            parsed_version.1,
+            parsed_version.2,
+            MIN_CODEX_HOOK_VERSION.0,
+            MIN_CODEX_HOOK_VERSION.1,
+            MIN_CODEX_HOOK_VERSION.2
+        ));
+    }
+
+    let features_output = match Command::new("codex").args(["features", "list"]).output() {
+        Ok(output) => output,
+        Err(error) => return Some(format!("failed to execute codex features list: {error}")),
+    };
+    if !features_output.status.success() {
+        return Some("codex features list failed".to_string());
+    }
+
+    let features = String::from_utf8_lossy(&features_output.stdout);
+    if !features.contains("codex_hooks") {
+        return Some(
+            "codex on PATH does not expose the codex_hooks feature required by the real E2E"
+                .to_string(),
+        );
+    }
+
+    None
+}
+
 #[test]
 #[ignore = "requires Codex auth, network, and explicit opt-in"]
 fn real_codex_exec_emits_native_hook_signals() {
@@ -58,6 +119,10 @@ fn real_codex_exec_emits_native_hook_signals() {
     if !codex_is_available() {
         eprintln!("codex CLI is not available in PATH");
         return;
+    }
+
+    if let Some(message) = codex_hook_support_error() {
+        panic!("{message}");
     }
 
     let temp_dir = tempdir().expect("temp dir should exist");
@@ -117,8 +182,8 @@ fn real_codex_exec_emits_native_hook_signals() {
     .expect("hooks config should be written");
 
     let output = Command::new("codex")
+        .args(["--enable", "codex_hooks"])
         .args(["-a", "never", "exec"])
-        .args(["-c", "features.codex_hooks=true"])
         .args(["-C"])
         .arg(&work_dir)
         .args(["--json", "--skip-git-repo-check"])

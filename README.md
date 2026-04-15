@@ -44,9 +44,51 @@ That installs:
 First-run setup:
 
 ```bash
-foreman --init-config
-foreman --config-path
-foreman --help
+foreman --setup --user --project
+foreman --doctor
+foreman
+```
+
+Setup model:
+- `foreman --setup` is meant to be safe to rerun.
+- `--user` writes home-directory wiring under `~/.claude`, `~/.codex`, and `~/.pi`.
+- `--project` writes repo-local wiring for the current checkout, or the repo passed with `--repo`.
+- Without explicit scope flags, `foreman --setup` defaults to `project` when the current directory looks like a repo, and `user` otherwise.
+- Setup only targets one repo at a time. Run it again for other checkouts:
+  `foreman --setup --project --repo /path/to/repo`
+- Provider flags let you limit writes to one integration:
+  `foreman --setup --project --codex --repo /path/to/repo`
+- Setup fixes files and directories. It does not retroactively repair already-running panes; restart those agents after wiring changes.
+
+If the dashboard is falling back to `compatibility heuristic` more than you
+expect, run doctor before debugging tmux by hand:
+
+```bash
+foreman --doctor
+foreman --setup --user --project --dry-run
+foreman --setup --user --project
+```
+
+Doctor checks:
+- local config and log paths
+- hook binaries and provider CLIs on `PATH`
+- user-level and project-level hook wiring for Claude, Codex, and Pi
+- live tmux/runtime fallback signals when a tmux server is available
+
+Safe fixes today:
+- initialize default `config.toml`
+- create the default native signal directories under `~/.local/state/foreman/`
+- merge Claude hook wiring into `.claude/settings.local.json` or `~/.claude/settings.local.json`
+- scaffold or merge `.codex/hooks.json` or `~/.codex/hooks.json`
+- scaffold `.pi/extensions/foreman.ts` or `~/.pi/extensions/foreman.ts`
+
+Use `--repo` when you want to target another checkout:
+
+```bash
+foreman --setup --project --repo /path/to/repo
+foreman --setup --project --codex --repo /path/to/repo
+foreman --setup --user --claude
+foreman --doctor --repo /path/to/repo
 ```
 
 If you want to try it without installing into `~/.cargo/bin`:
@@ -85,6 +127,8 @@ Common dashboard keys:
 Preview and help also surface where a status came from:
 - `native hook` means a structured harness signal and is treated as higher confidence
 - `compatibility heuristic` means tmux-observed behavior and is treated as lower confidence
+- selected panes can now surface compact setup hints and point back to
+  `foreman --setup --user --project` or `foreman --doctor` when compatibility fallback looks suspicious
 
 Theme selection:
 
@@ -290,11 +334,14 @@ mise run plan -- <slug>
 | `mise run install-local` | Install `foreman` and the hook binaries locally |
 | `mise run check` | Fast quality gate (fmt + lint + typecheck + test) |
 | `mise run dev` | Run `foreman` from source |
+| `foreman --setup --user --project` | Initialize config and wire user-level plus project-level Claude, Codex, and Pi integration |
+| `foreman --doctor` | Diagnose local install, hook wiring, and live runtime fallback from the current repo |
 | `mise run ci` | CI entrypoint (= check) |
 | `mise run plan -- <slug>` | Create a plan directory for a unit of work |
 | `mise run verify` | Heavy validation (integration, docker, security) |
 | `mise run verify-release` | Release-confidence compiled-binary tmux gauntlet plus checklist/report artifact |
-| `mise run verify-native` | Opt-in real Claude, Codex, and Pi E2E drill when the corresponding env flags are set |
+| `mise run native-preflight` | Check tmux plus local Claude/Codex/Pi readiness before the real native E2E lane |
+| `mise run verify-native` | Real Claude, Codex, and Pi E2E drill; strict mode requires all env flags and actual execution |
 | `mise run verify-ux` | Focused TUI/runtime smoke, navigation perf smoke, plus VHS artifact refresh |
 
 ## GitHub Actions
@@ -310,10 +357,25 @@ mise run plan -- <slug>
 1. Bump `Cargo.toml` to the intended release version.
 2. Merge the release branch to `main`.
 3. Run `mise run verify-release` if you want the release-confidence report locally before tagging.
-4. If you have local auth for the external harnesses, run `mise run verify-native`
-   with the relevant env flags set for a real-binary drill.
+4. If the release touches native harness behavior, run `mise run native-preflight`
+   first, then strict `mise run verify-native`.
 5. Push a matching annotated tag such as `v1.0.0`.
 6. GitHub Actions verifies the repo and publishes release bundles.
+
+Strict native verification:
+
+```bash
+mise run native-preflight
+FOREMAN_REQUIRE_REAL_E2E=1 \
+FOREMAN_REAL_CLAUDE_E2E=1 \
+FOREMAN_REAL_CODEX_E2E=1 \
+FOREMAN_REAL_PI_E2E=1 \
+mise run verify-native
+```
+
+If `codex --version` and `npm list -g @openai/codex --depth=0` disagree, fix the
+PATH-resolved install first. Foreman's real Codex E2E depends on Codex hook
+support, which requires a current Codex CLI on PATH.
 
 Each release archive contains:
 - `foreman`

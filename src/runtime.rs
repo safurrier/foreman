@@ -4,6 +4,9 @@ use crate::app::{
     OperatorAlertLevel, OperatorAlertSource,
 };
 use crate::cli::PreparedBootstrap;
+use crate::doctor::{
+    primary_runtime_alert_finding, runtime_findings, DoctorSeverity, RuntimeDoctorContext,
+};
 use crate::integrations::{
     apply_configured_claude_signals, apply_configured_codex_signals, apply_configured_pi_signals,
     ClaudeNativeOverlaySummary, CodexNativeOverlaySummary, PiNativeOverlaySummary,
@@ -356,6 +359,7 @@ impl DashboardRuntime {
                 for warning in &pi_native.warnings {
                     self.logger.log_pi_native_warning(warning)?;
                 }
+                self.refresh_runtime_diagnostics(&claude_native, &codex_native, &pi_native)?;
             }
             Err(error_message) => {
                 outcome = "error";
@@ -382,6 +386,49 @@ impl DashboardRuntime {
             elapsed_ms,
             &format!("outcome={outcome} elapsed_ms={elapsed_ms}"),
         )?;
+        Ok(())
+    }
+
+    fn refresh_runtime_diagnostics(
+        &mut self,
+        claude_native: &ClaudeNativeOverlaySummary,
+        codex_native: &CodexNativeOverlaySummary,
+        pi_native: &PiNativeOverlaySummary,
+    ) -> Result<(), RuntimeError> {
+        let diagnostics = runtime_findings(&RuntimeDoctorContext {
+            runtime: &self.runtime,
+            config_exists: self.runtime.config_file.exists(),
+            inventory: &self.state.inventory,
+            claude_native,
+            codex_native,
+            pi_native,
+        });
+        self.apply_runtime_action(Action::SetRuntimeDiagnostics(diagnostics.clone()))?;
+
+        let existing_non_diagnostic_alert = self
+            .state
+            .operator_alert
+            .as_ref()
+            .is_some_and(|alert| alert.source != OperatorAlertSource::Diagnostics);
+        if existing_non_diagnostic_alert {
+            return Ok(());
+        }
+
+        if let Some(finding) = primary_runtime_alert_finding(&diagnostics) {
+            let level = match finding.severity {
+                DoctorSeverity::Error => OperatorAlertLevel::Error,
+                DoctorSeverity::Warn => OperatorAlertLevel::Warn,
+                DoctorSeverity::Ok | DoctorSeverity::Info => OperatorAlertLevel::Info,
+            };
+            self.record_alert(
+                OperatorAlertSource::Diagnostics,
+                level,
+                finding.summary.clone(),
+            )?;
+        } else {
+            self.clear_alert_source(OperatorAlertSource::Diagnostics)?;
+        }
+
         Ok(())
     }
 

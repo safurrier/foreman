@@ -784,6 +784,12 @@ fn preview_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Tex
         )));
     }
 
+    let setup_lines = diagnostic_lines(state, theme);
+    if !setup_lines.is_empty() {
+        lines.push(plain_line(""));
+        lines.extend(setup_lines);
+    }
+
     lines.push(plain_line(format!(
         "View: {} {} {}",
         state.sort_label(),
@@ -1111,6 +1117,37 @@ fn pull_request_lines(state: &AppState, theme: &Theme) -> Vec<Line<'static>> {
     lines
 }
 
+fn diagnostic_lines(state: &AppState, theme: &Theme) -> Vec<Line<'static>> {
+    let diagnostics = state
+        .selected_runtime_diagnostics()
+        .into_iter()
+        .filter(|finding| finding.severity != crate::doctor::DoctorSeverity::Ok)
+        .take(2)
+        .collect::<Vec<_>>();
+    if diagnostics.is_empty() {
+        return Vec::new();
+    }
+
+    let mut lines = vec![section_line("Setup", theme)];
+    for finding in diagnostics {
+        let severity_style = match finding.severity {
+            crate::doctor::DoctorSeverity::Error => theme.error,
+            crate::doctor::DoctorSeverity::Warn => theme.attention,
+            crate::doctor::DoctorSeverity::Info => theme.muted,
+            crate::doctor::DoctorSeverity::Ok => theme.base,
+        };
+        lines.push(Line::from(vec![
+            Span::styled(format!("{} ", finding.severity.label()), severity_style),
+            Span::styled(finding.summary.clone(), theme.base),
+        ]));
+        if let Some(next_step) = &finding.next_step {
+            lines.push(muted_line(next_step.clone(), theme));
+        }
+    }
+
+    lines
+}
+
 fn preview_excerpt(preview: &str, max_lines: usize) -> Vec<String> {
     let mut lines = preview
         .lines()
@@ -1415,6 +1452,7 @@ mod tests {
         IntegrationMode, ModalState, Mode, OperatorAlert, OperatorAlertLevel, OperatorAlertSource,
         PaneBuilder, SearchState, SelectionTarget, SessionBuilder, WindowBuilder,
     };
+    use crate::doctor::{DoctorArea, DoctorFinding, DoctorSeverity};
     use crate::services::pull_requests::{PullRequestData, PullRequestLookup, PullRequestStatus};
     use crate::services::system_stats::SystemStatsSnapshot;
     use crate::ui::theme::ThemeName;
@@ -1595,6 +1633,25 @@ mod tests {
 
         assert!(output.contains("Status source: native hook"));
         assert!(output.contains("high confidence"));
+    }
+
+    #[test]
+    fn render_surfaces_runtime_setup_diagnostics_for_selected_pane() {
+        let mut state = sample_state();
+        state.runtime_diagnostics = vec![DoctorFinding::new(
+            "claude-no-native-signals",
+            DoctorSeverity::Warn,
+            DoctorArea::Runtime,
+            "No native signals were observed for 1 visible Claude Code pane(s).",
+        )
+        .with_provider(HarnessKind::ClaudeCode)
+        .with_next_step("Run foreman --setup --repo /tmp/alpha")];
+
+        let output = render_to_string(&state);
+
+        assert!(output.contains("Setup"));
+        assert!(output.contains("No native signals were observed"));
+        assert!(output.contains("Run foreman --setup"));
     }
 
     #[test]

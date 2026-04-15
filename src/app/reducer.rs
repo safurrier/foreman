@@ -92,6 +92,9 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             state.pull_request_cache.insert(workspace_path, lookup);
             reconcile_pull_request_detail(state);
         }
+        Action::SetRuntimeDiagnostics(diagnostics) => {
+            state.runtime_diagnostics = diagnostics;
+        }
         Action::SetSystemStats(snapshot) => {
             state.system_stats = snapshot;
         }

@@ -46,6 +46,45 @@ fn wait_for_file_contents(path: &Path, needle: &str) {
     );
 }
 
+fn wait_for_notification_or_diagnose(
+    notification_path: &Path,
+    hook_trace_path: &Path,
+    payload_trace_path: &Path,
+    log_path: &Path,
+    signal_path: &Path,
+    needle: &str,
+) {
+    for _ in 0..400 {
+        if let Ok(contents) = fs::read_to_string(notification_path) {
+            if contents.contains(needle) {
+                return;
+            }
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+
+    let notification_contents =
+        fs::read_to_string(notification_path).unwrap_or_else(|_| "<missing>".to_string());
+    let hook_trace =
+        fs::read_to_string(hook_trace_path).unwrap_or_else(|_| "<missing>".to_string());
+    let payload_trace =
+        fs::read_to_string(payload_trace_path).unwrap_or_else(|_| "<missing>".to_string());
+    let log_contents = fs::read_to_string(log_path).unwrap_or_else(|_| "<missing>".to_string());
+    let signal_contents =
+        fs::read_to_string(signal_path).unwrap_or_else(|_| "<missing>".to_string());
+
+    panic!(
+        "file {} never contained expected text: {}\nnotification={}\nhook_trace={}\npayloads=\n{}\nsignal={}\nlogs=\n{}",
+        notification_path.display(),
+        needle,
+        notification_contents,
+        hook_trace,
+        payload_trace,
+        signal_contents,
+        log_contents
+    );
+}
+
 fn claude_is_available() -> bool {
     Command::new("claude")
         .arg("--version")
@@ -79,11 +118,12 @@ fn real_claude_prompt_sent_through_dashboard_emits_completion_notification() {
     fs::create_dir_all(&bin_dir).expect("bin dir should exist");
 
     let hook_trace = temp_dir.path().join("hook-trace.log");
+    let payload_trace = temp_dir.path().join("hook-payloads.log");
     let notification_file = temp_dir.path().join("notification.log");
     let hook_wrapper = bin_dir.join("claude-hook-wrapper.sh");
     write_executable(
         &hook_wrapper,
-        "#!/bin/sh\nset -eu\nEVENT=\"$1\"\nHOOK_BIN=\"$2\"\nNATIVE_DIR=\"$3\"\nTRACE_FILE=\"$4\"\nTMP_INPUT=$(mktemp)\ncat > \"$TMP_INPUT\"\nprintf '%s\\n' \"$EVENT\" >> \"$TRACE_FILE\"\nif [ \"$EVENT\" = \"stop\" ]; then\n  sleep 1\nfi\n\"$HOOK_BIN\" --native-dir \"$NATIVE_DIR\" < \"$TMP_INPUT\"\nSTATUS=$?\nrm -f \"$TMP_INPUT\"\nexit \"$STATUS\"\n",
+        "#!/bin/sh\nset -eu\nEVENT=\"$1\"\nHOOK_BIN=\"$2\"\nNATIVE_DIR=\"$3\"\nTRACE_FILE=\"$4\"\nPAYLOAD_TRACE=\"$5\"\nTMP_INPUT=$(mktemp)\ncat > \"$TMP_INPUT\"\nprintf '%s\\n' \"$EVENT\" >> \"$TRACE_FILE\"\nprintf '=== %s ===\\n' \"$EVENT\" >> \"$PAYLOAD_TRACE\"\ncat \"$TMP_INPUT\" >> \"$PAYLOAD_TRACE\"\nprintf '\\n' >> \"$PAYLOAD_TRACE\"\nif [ \"$EVENT\" = \"stop\" ]; then\n  sleep 2\nfi\n\"$HOOK_BIN\" --native-dir \"$NATIVE_DIR\" < \"$TMP_INPUT\"\nSTATUS=$?\nrm -f \"$TMP_INPUT\"\nexit \"$STATUS\"\n",
     );
     write_executable(
         &bin_dir.join("notify-send"),
@@ -104,7 +144,7 @@ fn real_claude_prompt_sent_through_dashboard_emits_completion_notification() {
         "hooks": [
           {{
             "type": "command",
-            "command": "{hook_wrapper} submit {hook_bin} {native_dir} {hook_trace}"
+            "command": "{hook_wrapper} submit {hook_bin} {native_dir} {hook_trace} {payload_trace}"
           }}
         ]
       }}
@@ -114,7 +154,7 @@ fn real_claude_prompt_sent_through_dashboard_emits_completion_notification() {
         "hooks": [
           {{
             "type": "command",
-            "command": "{hook_wrapper} stop {hook_bin} {native_dir} {hook_trace}"
+            "command": "{hook_wrapper} stop {hook_bin} {native_dir} {hook_trace} {payload_trace}"
           }}
         ]
       }}
@@ -124,7 +164,7 @@ fn real_claude_prompt_sent_through_dashboard_emits_completion_notification() {
         "hooks": [
           {{
             "type": "command",
-            "command": "{hook_wrapper} stop_failure {hook_bin} {native_dir} {hook_trace}"
+            "command": "{hook_wrapper} stop_failure {hook_bin} {native_dir} {hook_trace} {payload_trace}"
           }}
         ]
       }}
@@ -135,7 +175,7 @@ fn real_claude_prompt_sent_through_dashboard_emits_completion_notification() {
         "hooks": [
           {{
             "type": "command",
-            "command": "{hook_wrapper} notification {hook_bin} {native_dir} {hook_trace}"
+            "command": "{hook_wrapper} notification {hook_bin} {native_dir} {hook_trace} {payload_trace}"
           }}
         ]
       }}
@@ -146,6 +186,7 @@ fn real_claude_prompt_sent_through_dashboard_emits_completion_notification() {
             hook_bin = hook_bin(),
             native_dir = native_dir.display(),
             hook_trace = hook_trace.display(),
+            payload_trace = payload_trace.display(),
         ),
     )
     .expect("settings should be written");
@@ -177,8 +218,8 @@ native_dir = "{native_dir}"
     let agent_pane = fixture.new_session("alpha", &agent_command);
     fixture.wait_for_capture(&agent_pane, "Claude hook loop ready");
 
-    let helper_pane = fixture.new_session("beta", &fixture.shell_command("helper ready"));
-    fixture.wait_for_capture(&helper_pane, "helper ready");
+    let helper_pane = fixture.new_session("beta", &fixture.shell_command("Claude Code ready"));
+    fixture.wait_for_capture(&helper_pane, "Claude Code ready");
 
     let dashboard_command = format!(
         "PATH={}:$PATH FOREMAN_CONFIG_HOME={} FOREMAN_LOG_DIR={} {} --tmux-socket {} --poll-interval-ms 100 --capture-lines 40",
@@ -203,17 +244,22 @@ native_dir = "{native_dir}"
         &dashboard_pane,
         &[
             "i", "O", "n", "l", "y", "Space", "o", "u", "t", "p", "u", "t", "Space", "O", "K",
-            "C-s",
+            "C-s", "j",
         ],
     );
     fixture.wait_for_capture_attempts(&agent_pane, "PROMPT:Only output OK", 120);
 
-    fixture.send_keys(&dashboard_pane, &["j"]);
-
     fixture.wait_for_capture_attempts(&agent_pane, "__CLAUDE_DONE__", 400);
     wait_for_file_contents(&hook_trace, "submit");
     wait_for_file_contents(&hook_trace, "stop");
-    wait_for_file_contents(&notification_file, "completion|Agent ready:");
+    wait_for_notification_or_diagnose(
+        &notification_file,
+        &hook_trace,
+        &payload_trace,
+        &log_dir.join("latest.log"),
+        &native_dir.join(format!("{agent_pane}.json")),
+        "completion|Agent ready:",
+    );
 
     let signal_contents = fs::read_to_string(native_dir.join(format!("{agent_pane}.json")))
         .expect("native signal should exist");
