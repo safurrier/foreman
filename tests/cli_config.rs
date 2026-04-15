@@ -131,6 +131,18 @@ active_profile = "attention-only"
 }
 
 #[test]
+fn repo_flag_requires_setup_or_doctor() {
+    let cli = Cli::parse_from(["foreman", "--repo", "/tmp/elsewhere"]);
+
+    let error = run(cli).expect_err("repo should be rejected outside setup/doctor");
+
+    assert_eq!(
+        error.to_string(),
+        "--repo is only supported with --setup or --doctor"
+    );
+}
+
+#[test]
 fn doctor_json_reports_repo_findings() {
     let temp_dir = tempdir().expect("temp dir should exist");
     let home_dir = tempdir().expect("home dir should exist");
@@ -172,6 +184,73 @@ fn doctor_json_reports_repo_findings() {
         .findings
         .iter()
         .any(|finding| finding.id == "codex-hook-file-missing"));
+}
+
+#[test]
+fn doctor_handles_invalid_config_without_exiting_early() {
+    let temp_dir = tempdir().expect("temp dir should exist");
+    let home_dir = tempdir().expect("home dir should exist");
+    std::fs::create_dir_all(temp_dir.path().join(".git")).expect("git dir should exist");
+    let config_file = temp_dir.path().join("config.toml");
+    std::fs::write(&config_file, "[notifications\nenabled = true\n")
+        .expect("config should be written");
+
+    let output = Command::new(foreman_bin())
+        .args([
+            "--doctor",
+            "--doctor-json",
+            "--repo",
+            temp_dir.path().to_str().expect("utf-8 path"),
+            "--config-file",
+            config_file.to_str().expect("utf-8 path"),
+            "--log-dir",
+            temp_dir.path().join("logs").to_str().expect("utf-8 path"),
+        ])
+        .env("HOME", home_dir.path())
+        .output()
+        .expect("command should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    let report: DoctorReport = serde_json::from_str(&stdout).expect("report should parse");
+    assert!(report
+        .findings
+        .iter()
+        .any(|finding| finding.summary.contains("could not be parsed")));
+}
+
+#[test]
+fn setup_handles_invalid_config_without_exiting_early() {
+    let temp_dir = tempdir().expect("temp dir should exist");
+    std::fs::create_dir_all(temp_dir.path().join(".git")).expect("git dir should exist");
+    let config_file = temp_dir.path().join("config.toml");
+    let invalid_config = "[notifications\nenabled = true\n";
+    std::fs::write(&config_file, invalid_config).expect("config should be written");
+
+    let output = Command::new(foreman_bin())
+        .args([
+            "--setup",
+            "--project",
+            "--codex",
+            "--repo",
+            temp_dir.path().to_str().expect("utf-8 path"),
+            "--config-file",
+            config_file.to_str().expect("utf-8 path"),
+            "--log-dir",
+            temp_dir.path().join("logs").to_str().expect("utf-8 path"),
+        ])
+        .output()
+        .expect("command should run");
+
+    assert!(output.status.success());
+    assert!(temp_dir.path().join(".codex/hooks.json").exists());
+    assert_eq!(
+        std::fs::read_to_string(&config_file).expect("config should still exist"),
+        invalid_config
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("could not be parsed"));
 }
 
 #[test]
@@ -352,4 +431,33 @@ fn setup_can_limit_writes_to_one_project_provider() {
     let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
     assert!(stdout.contains("Targets: project"));
     assert!(stdout.contains("Providers: Codex CLI"));
+}
+
+#[test]
+fn setup_user_outside_repo_reports_user_scope() {
+    let temp_dir = tempdir().expect("temp dir should exist");
+    let home_dir = tempdir().expect("home dir should exist");
+
+    let output = Command::new(foreman_bin())
+        .args([
+            "--setup",
+            "--user",
+            "--config-file",
+            temp_dir
+                .path()
+                .join("config.toml")
+                .to_str()
+                .expect("utf-8 path"),
+            "--log-dir",
+            temp_dir.path().join("logs").to_str().expect("utf-8 path"),
+        ])
+        .current_dir(temp_dir.path())
+        .env("HOME", home_dir.path())
+        .output()
+        .expect("command should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout
+        .contains("Repo: none detected from the current directory; applying user-scoped setup."));
 }

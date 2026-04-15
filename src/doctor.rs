@@ -212,7 +212,7 @@ impl DoctorReport {
         &self,
         dry_run: bool,
         setup_command: &str,
-        scope_summary: &str,
+        scopes: SetupScopeSelection,
         provider_summary: &str,
     ) -> String {
         let mut output = String::new();
@@ -221,17 +221,22 @@ impl DoctorReport {
         } else {
             "Foreman setup\n"
         });
-        output.push_str(
-            self.repo_path
-                .as_deref()
-                .map(|path| format!("Repo: {}\n", path.display()))
-                .unwrap_or_else(|| {
-                    "Repo: none detected from the current directory; only config setup can be applied.\n"
-                        .to_string()
-                })
-                .as_str(),
-        );
-        output.push_str(&format!("Targets: {scope_summary}\n"));
+        let repo_line = match self.repo_path.as_deref() {
+            Some(path) => format!("Repo: {}\n", path.display()),
+            None if scopes.user && scopes.project => {
+                "Repo: none detected from the current directory; user-scoped setup can be applied and project-scoped changes will be skipped.\n".to_string()
+            }
+            None if scopes.user => {
+                "Repo: none detected from the current directory; applying user-scoped setup.\n"
+                    .to_string()
+            }
+            None => {
+                "Repo: none detected from the current directory; project-scoped changes will be skipped.\n"
+                    .to_string()
+            }
+        };
+        output.push_str(&repo_line);
+        output.push_str(&format!("Targets: {}\n", scopes.summary()));
         output.push_str(&format!("Providers: {provider_summary}\n"));
         output.push('\n');
 
@@ -504,6 +509,7 @@ pub struct DoctorOptions {
     pub fix_mode: DoctorFixMode,
     pub setup_scopes: SetupScopeSelection,
     pub setup_providers: SetupProviderSelection,
+    pub config_parse_error: Option<String>,
 }
 
 impl Default for DoctorOptions {
@@ -513,6 +519,7 @@ impl Default for DoctorOptions {
             fix_mode: DoctorFixMode::ReportOnly,
             setup_scopes: SetupScopeSelection::default(),
             setup_providers: SetupProviderSelection::default(),
+            config_parse_error: None,
         }
     }
 }
@@ -578,12 +585,22 @@ pub fn collect_report(
 ) -> Result<DoctorReport, DoctorError> {
     let repo_path = resolve_requested_repo_root(options.repo_path.as_deref());
     let mut findings = Vec::new();
+    let provider_scope = options.setup_providers;
 
-    findings.extend(machine_findings(runtime));
-    findings.extend(config_findings(runtime));
+    findings.extend(filter_provider_findings(
+        machine_findings(runtime),
+        provider_scope,
+    ));
+    findings.extend(filter_provider_findings(
+        config_findings(runtime, options.config_parse_error.as_deref()),
+        provider_scope,
+    ));
 
     if let Some(repo_path) = repo_path.as_deref() {
-        findings.extend(repo_findings(repo_path));
+        findings.extend(filter_provider_findings(
+            repo_findings(repo_path),
+            provider_scope,
+        ));
     }
 
     let live_runtime = match live_runtime_context(runtime) {
@@ -596,7 +613,11 @@ pub fn collect_report(
                 codex_native: &snapshot.codex_native,
                 pi_native: &snapshot.pi_native,
             };
-            findings.extend(runtime_findings(&context));
+            findings.extend(runtime_findings_scoped(
+                &context,
+                repo_path.as_deref(),
+                provider_scope,
+            ));
             true
         }
         Ok(None) => false,
@@ -614,7 +635,7 @@ pub fn collect_report(
         }
     };
 
-    if !live_runtime {
+    if !live_runtime && repo_path.is_none() {
         findings.extend(latest_log_runtime_findings(runtime));
     }
 
@@ -628,10 +649,19 @@ pub fn collect_report(
             options.setup_providers,
         )?);
         findings = Vec::new();
-        findings.extend(machine_findings(runtime));
-        findings.extend(config_findings(runtime));
+        findings.extend(filter_provider_findings(
+            machine_findings(runtime),
+            provider_scope,
+        ));
+        findings.extend(filter_provider_findings(
+            config_findings(runtime, options.config_parse_error.as_deref()),
+            provider_scope,
+        ));
         if let Some(repo_path) = repo_path.as_deref() {
-            findings.extend(repo_findings(repo_path));
+            findings.extend(filter_provider_findings(
+                repo_findings(repo_path),
+                provider_scope,
+            ));
         }
         if let Ok(Some(snapshot)) = live_runtime_context(runtime) {
             let context = RuntimeDoctorContext {
@@ -642,8 +672,12 @@ pub fn collect_report(
                 codex_native: &snapshot.codex_native,
                 pi_native: &snapshot.pi_native,
             };
-            findings.extend(runtime_findings(&context));
-        } else {
+            findings.extend(runtime_findings_scoped(
+                &context,
+                repo_path.as_deref(),
+                provider_scope,
+            ));
+        } else if repo_path.is_none() {
             findings.extend(latest_log_runtime_findings(runtime));
         }
     }
@@ -658,6 +692,14 @@ pub fn collect_report(
 }
 
 pub fn runtime_findings(context: &RuntimeDoctorContext<'_>) -> Vec<DoctorFinding> {
+    runtime_findings_scoped(context, None, SetupProviderSelection::default())
+}
+
+fn runtime_findings_scoped(
+    context: &RuntimeDoctorContext<'_>,
+    repo_scope: Option<&Path>,
+    provider_scope: SetupProviderSelection,
+) -> Vec<DoctorFinding> {
     let mut findings = Vec::new();
 
     if !context.config_exists {
@@ -671,34 +713,31 @@ pub fn runtime_findings(context: &RuntimeDoctorContext<'_>) -> Vec<DoctorFinding
                     context.runtime.config_file.display()
                 ),
             )
-            .with_next_step(format!("Run {}", setup_command(None))),
+            .with_next_step(format!("Run {}", setup_command(repo_scope))),
         );
     }
 
-    findings.extend(provider_runtime_findings(
-        context.runtime,
-        context.inventory,
-        HarnessKind::ClaudeCode,
-        context.claude_native.applied,
-        context.claude_native.fallback_to_compatibility,
-        &context.claude_native.warnings,
-    ));
-    findings.extend(provider_runtime_findings(
-        context.runtime,
-        context.inventory,
-        HarnessKind::CodexCli,
-        context.codex_native.applied,
-        context.codex_native.fallback_to_compatibility,
-        &context.codex_native.warnings,
-    ));
-    findings.extend(provider_runtime_findings(
-        context.runtime,
-        context.inventory,
-        HarnessKind::Pi,
-        context.pi_native.applied,
-        context.pi_native.fallback_to_compatibility,
-        &context.pi_native.warnings,
-    ));
+    for (provider, warnings) in [
+        (
+            HarnessKind::ClaudeCode,
+            context.claude_native.warnings.as_slice(),
+        ),
+        (
+            HarnessKind::CodexCli,
+            context.codex_native.warnings.as_slice(),
+        ),
+        (HarnessKind::Pi, context.pi_native.warnings.as_slice()),
+    ] {
+        if provider_scope.includes(provider) {
+            findings.extend(provider_runtime_findings(
+                context.runtime,
+                context.inventory,
+                provider,
+                warnings,
+                repo_scope,
+            ));
+        }
+    }
 
     sort_findings(&mut findings);
     findings
@@ -779,18 +818,42 @@ fn machine_findings(runtime: &RuntimeConfig) -> Vec<DoctorFinding> {
     findings
 }
 
-fn config_findings(runtime: &RuntimeConfig) -> Vec<DoctorFinding> {
+fn filter_provider_findings(
+    findings: Vec<DoctorFinding>,
+    provider_scope: SetupProviderSelection,
+) -> Vec<DoctorFinding> {
+    findings
+        .into_iter()
+        .filter(|finding| {
+            finding
+                .provider
+                .is_none_or(|provider| provider_scope.includes(provider))
+        })
+        .collect()
+}
+
+fn config_findings(
+    runtime: &RuntimeConfig,
+    config_parse_error: Option<&str>,
+) -> Vec<DoctorFinding> {
     let mut findings = Vec::new();
     findings.push(
         DoctorFinding::new(
             "config-file",
-            if runtime.config_file.exists() {
+            if config_parse_error.is_some() {
+                DoctorSeverity::Error
+            } else if runtime.config_file.exists() {
                 DoctorSeverity::Ok
             } else {
                 DoctorSeverity::Warn
             },
             DoctorArea::Config,
-            if runtime.config_file.exists() {
+            if let Some(_parse_error) = config_parse_error {
+                format!(
+                    "Foreman config exists at {} but could not be parsed",
+                    runtime.config_file.display()
+                )
+            } else if runtime.config_file.exists() {
                 format!(
                     "Foreman config is initialized at {}",
                     runtime.config_file.display()
@@ -804,6 +867,15 @@ fn config_findings(runtime: &RuntimeConfig) -> Vec<DoctorFinding> {
         )
         .with_next_step(format!("Run {}", setup_command(None))),
     );
+    if let Some(parse_error) = config_parse_error {
+        if let Some(finding) = findings.last_mut() {
+            finding.detail = Some(parse_error.to_string());
+        }
+    }
+
+    if config_parse_error.is_some() {
+        return findings;
+    }
 
     for (provider, preference, native_dir) in [
         (
@@ -941,15 +1013,30 @@ fn provider_runtime_findings(
     runtime: &RuntimeConfig,
     inventory: &Inventory,
     provider: HarnessKind,
-    applied: usize,
-    fallback_to_compatibility: usize,
     warnings: &[String],
+    repo_scope: Option<&Path>,
 ) -> Vec<DoctorFinding> {
     let mut findings = Vec::new();
-    let affected_panes = provider_panes(inventory, provider);
+    let affected_panes = provider_panes(inventory, provider, repo_scope);
     if affected_panes.is_empty() {
         return findings;
     }
+    let applied = affected_panes
+        .iter()
+        .filter(|pane| {
+            pane.agent
+                .as_ref()
+                .is_some_and(|agent| agent.integration_mode == IntegrationMode::Native)
+        })
+        .count();
+    let fallback_to_compatibility = affected_panes
+        .iter()
+        .filter(|pane| {
+            pane.agent
+                .as_ref()
+                .is_some_and(|agent| agent.integration_mode == IntegrationMode::Compatibility)
+        })
+        .count();
 
     let preference = provider_preference(runtime, provider);
     if matches!(
@@ -980,7 +1067,7 @@ fn provider_runtime_findings(
             ),
         )
         .with_provider(provider)
-        .with_next_step(format!("Run {}", doctor_command(None)));
+        .with_next_step(format!("Run {}", doctor_command(repo_scope)));
         if let Some(native_dir) = provider_native_dir(runtime, provider) {
             if !native_dir.exists() {
                 finding.push_evidence(format!("native_dir_missing={}", native_dir.display()));
@@ -1007,17 +1094,19 @@ fn provider_runtime_findings(
         );
     }
 
-    for warning in warnings {
-        findings.push(
-            DoctorFinding::new(
-                format!("{}-native-warning", provider.filter_label()),
-                DoctorSeverity::Warn,
-                DoctorArea::Runtime,
-                format!("{} reported a native signal warning.", provider.label()),
-            )
-            .with_provider(provider)
-            .with_detail(warning.clone()),
-        );
+    if repo_scope.is_none() {
+        for warning in warnings {
+            findings.push(
+                DoctorFinding::new(
+                    format!("{}-native-warning", provider.filter_label()),
+                    DoctorSeverity::Warn,
+                    DoctorArea::Runtime,
+                    format!("{} reported a native signal warning.", provider.label()),
+                )
+                .with_provider(provider)
+                .with_detail(warning.clone()),
+            );
+        }
     }
 
     let mut repo_roots = BTreeMap::<PathBuf, usize>::new();
@@ -1046,7 +1135,7 @@ fn provider_runtime_findings(
                     .with_detail(signature.to_string())
                     .with_next_step(format!(
                         "Run {}",
-                        setup_command(pane_repo_root(pane).as_deref())
+                        setup_command(pane_repo_root(pane).as_deref().or(repo_scope))
                     )),
                 );
             }
@@ -1084,6 +1173,8 @@ fn runtime_repo_degradation_findings(
 fn claude_repo_findings(repo_path: &Path) -> Vec<DoctorFinding> {
     let searched = claude_candidate_paths(repo_path);
     let mut parse_errors = Vec::new();
+    let mut wired_paths = Vec::new();
+    let mut non_hook_paths = Vec::new();
 
     for path in &searched {
         if !path.exists() {
@@ -1091,17 +1182,10 @@ fn claude_repo_findings(repo_path: &Path) -> Vec<DoctorFinding> {
         }
         match json_file_contains_hook(path, "foreman-claude-hook") {
             Ok(true) => {
-                return vec![DoctorFinding::new(
-                    "claude-hook-wired",
-                    DoctorSeverity::Ok,
-                    DoctorArea::Repo,
-                    format!("Claude hook wiring is present in {}.", path.display()),
-                )
-                .with_provider(HarnessKind::ClaudeCode)
-                .with_repo_path(repo_path)]
+                wired_paths.push(path.display().to_string());
             }
             Ok(false) => {
-                parse_errors.push(format!(
+                non_hook_paths.push(format!(
                     "{} exists but does not reference foreman-claude-hook",
                     path.display()
                 ));
@@ -1110,6 +1194,48 @@ fn claude_repo_findings(repo_path: &Path) -> Vec<DoctorFinding> {
                 parse_errors.push(format!("{} could not be parsed: {}", path.display(), error));
             }
         }
+    }
+
+    if !parse_errors.is_empty() {
+        let mut finding = DoctorFinding::new(
+            "claude-hook-invalid-json",
+            DoctorSeverity::Error,
+            DoctorArea::Repo,
+            "Claude hook config could not be parsed in repo-local or global settings.",
+        )
+        .with_provider(HarnessKind::ClaudeCode)
+        .with_repo_path(repo_path)
+        .with_next_step(format!(
+            "Repair invalid JSON, then run {}",
+            setup_command(Some(repo_path))
+        ));
+        for path in searched {
+            finding.push_evidence(format!("searched={}", path.display()));
+        }
+        for path in wired_paths {
+            finding.push_evidence(format!(
+                "{} also references foreman-claude-hook but invalid Claude settings remain",
+                path
+            ));
+        }
+        for path in non_hook_paths {
+            finding.push_evidence(path);
+        }
+        for parse_error in parse_errors {
+            finding.push_evidence(parse_error);
+        }
+        return vec![finding];
+    }
+
+    if let Some(path) = wired_paths.first() {
+        return vec![DoctorFinding::new(
+            "claude-hook-wired",
+            DoctorSeverity::Ok,
+            DoctorArea::Repo,
+            format!("Claude hook wiring is present in {}.", path),
+        )
+        .with_provider(HarnessKind::ClaudeCode)
+        .with_repo_path(repo_path)];
     }
 
     let mut finding = DoctorFinding::new(
@@ -1132,8 +1258,8 @@ fn claude_repo_findings(repo_path: &Path) -> Vec<DoctorFinding> {
     for path in searched {
         finding.push_evidence(format!("searched={}", path.display()));
     }
-    for parse_error in parse_errors {
-        finding.push_evidence(parse_error);
+    for path in non_hook_paths {
+        finding.push_evidence(path);
     }
 
     vec![finding]
@@ -1142,6 +1268,7 @@ fn claude_repo_findings(repo_path: &Path) -> Vec<DoctorFinding> {
 fn codex_repo_findings(repo_path: &Path) -> Vec<DoctorFinding> {
     let searched = codex_candidate_paths(repo_path);
     let mut parse_errors = Vec::new();
+    let mut wired_paths = Vec::new();
     let mut non_hook_paths = Vec::new();
 
     for path in &searched {
@@ -1150,14 +1277,7 @@ fn codex_repo_findings(repo_path: &Path) -> Vec<DoctorFinding> {
         }
         match json_file_contains_hook(path, "foreman-codex-hook") {
             Ok(true) => {
-                return vec![DoctorFinding::new(
-                    "codex-hook-wired",
-                    DoctorSeverity::Ok,
-                    DoctorArea::Repo,
-                    format!("Codex hook wiring is present in {}.", path.display()),
-                )
-                .with_provider(HarnessKind::CodexCli)
-                .with_repo_path(repo_path)];
+                wired_paths.push(path.display().to_string());
             }
             Ok(false) => {
                 non_hook_paths.push(path.display().to_string());
@@ -1192,14 +1312,33 @@ fn codex_repo_findings(repo_path: &Path) -> Vec<DoctorFinding> {
     for path in searched {
         finding.push_evidence(format!("searched={}", path.display()));
     }
-    for path in non_hook_paths {
+    for path in &wired_paths {
+        finding.push_evidence(format!(
+            "{} also references foreman-codex-hook but invalid Codex config remains",
+            path
+        ));
+    }
+    for path in &non_hook_paths {
         finding.push_evidence(format!(
             "{} exists but does not reference foreman-codex-hook",
             path
         ));
     }
-    for parse_error in parse_errors {
+    for parse_error in &parse_errors {
         finding.push_evidence(parse_error);
+    }
+
+    if parse_errors.is_empty() {
+        if let Some(path) = wired_paths.first() {
+            return vec![DoctorFinding::new(
+                "codex-hook-wired",
+                DoctorSeverity::Ok,
+                DoctorArea::Repo,
+                format!("Codex hook wiring is present in {}.", path),
+            )
+            .with_provider(HarnessKind::CodexCli)
+            .with_repo_path(repo_path)];
+        }
     }
 
     vec![finding]
@@ -1208,6 +1347,7 @@ fn codex_repo_findings(repo_path: &Path) -> Vec<DoctorFinding> {
 fn pi_repo_findings(repo_path: &Path) -> Vec<DoctorFinding> {
     let searched = pi_candidate_paths(repo_path);
     let mut read_errors = Vec::new();
+    let mut wired_paths = Vec::new();
     let mut non_hook_paths = Vec::new();
 
     for path in &searched {
@@ -1217,20 +1357,27 @@ fn pi_repo_findings(repo_path: &Path) -> Vec<DoctorFinding> {
         match fs::read_to_string(path) {
             Ok(contents) => {
                 if contents.contains("foreman-pi-hook") {
-                    return vec![DoctorFinding::new(
-                        "pi-extension-wired",
-                        DoctorSeverity::Ok,
-                        DoctorArea::Repo,
-                        format!("Pi Foreman extension is present in {}.", path.display()),
-                    )
-                    .with_provider(HarnessKind::Pi)
-                    .with_repo_path(repo_path)];
+                    wired_paths.push(path.display().to_string());
+                } else {
+                    non_hook_paths.push(path.display().to_string());
                 }
-                non_hook_paths.push(path.display().to_string());
             }
             Err(error) => {
                 read_errors.push(format!("{} could not be read: {}", path.display(), error));
             }
+        }
+    }
+
+    if read_errors.is_empty() {
+        if let Some(path) = wired_paths.first() {
+            return vec![DoctorFinding::new(
+                "pi-extension-wired",
+                DoctorSeverity::Ok,
+                DoctorArea::Repo,
+                format!("Pi Foreman extension is present in {}.", path),
+            )
+            .with_provider(HarnessKind::Pi)
+            .with_repo_path(repo_path)];
         }
     }
 
@@ -1258,6 +1405,12 @@ fn pi_repo_findings(repo_path: &Path) -> Vec<DoctorFinding> {
     for path in searched {
         finding.push_evidence(format!("searched={}", path.display()));
     }
+    for path in wired_paths {
+        finding.push_evidence(format!(
+            "{} also references foreman-pi-hook but unreadable Pi config remains",
+            path
+        ));
+    }
     for path in non_hook_paths {
         finding.push_evidence(format!(
             "{} exists but does not reference foreman-pi-hook",
@@ -1279,6 +1432,17 @@ fn apply_safe_fixes(
     setup_providers: SetupProviderSelection,
 ) -> Result<Vec<DoctorFixResult>, DoctorError> {
     let mut fixes = Vec::new();
+    let resolved_scopes = setup_scopes.resolved(repo_path.is_some());
+    let home = home_dir();
+    let provider_targets = provider_fix_targets(repo_path, home.as_deref(), resolved_scopes);
+
+    if fix_mode.writes() {
+        for target in &provider_targets {
+            if setup_providers.includes(target.provider) {
+                let _ = apply_provider_fix(target, DoctorFixMode::DryRun)?;
+            }
+        }
+    }
 
     if !runtime.config_file.exists() {
         let preview = crate::config::default_config_toml();
@@ -1307,79 +1471,116 @@ fn apply_safe_fixes(
         (HarnessKind::Pi, runtime.pi_native_dir.as_deref()),
     ] {
         if let Some(native_dir) = native_dir {
-            if setup_providers.includes(provider) {
+            let should_prepare_native_dir = resolved_scopes.user
+                || repo_path.is_some_and(|repo_path| native_dir.starts_with(repo_path));
+            if should_prepare_native_dir && setup_providers.includes(provider) {
                 fixes.push(apply_native_dir_fix(provider, native_dir, fix_mode)?);
             }
         }
     }
 
-    let resolved_scopes = setup_scopes.resolved(repo_path.is_some());
-    let home = home_dir();
+    for target in &provider_targets {
+        if setup_providers.includes(target.provider) {
+            fixes.push(apply_provider_fix(target, fix_mode)?);
+        }
+    }
+
+    if resolved_scopes.project && repo_path.is_none() {
+        fixes.push(DoctorFixResult {
+            provider: None,
+            path: env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            status: DoctorFixStatus::Skipped,
+            message: "project-level setup requested but no repo was detected".to_string(),
+            preview: None,
+        });
+    }
+
+    if resolved_scopes.user && home.is_none() {
+        fixes.push(DoctorFixResult {
+            provider: None,
+            path: env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            status: DoctorFixStatus::Skipped,
+            message: "user-level setup requested but no home directory was resolved".to_string(),
+            preview: None,
+        });
+    }
+
+    Ok(fixes)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProviderFixKind {
+    Claude,
+    Codex,
+    Pi,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProviderFixTarget {
+    provider: HarnessKind,
+    kind: ProviderFixKind,
+    path: PathBuf,
+}
+
+fn provider_fix_targets(
+    repo_path: Option<&Path>,
+    home: Option<&Path>,
+    resolved_scopes: SetupScopeSelection,
+) -> Vec<ProviderFixTarget> {
+    let mut targets = Vec::new();
 
     if resolved_scopes.project {
         if let Some(repo_path) = repo_path {
-            if setup_providers.includes(HarnessKind::ClaudeCode) {
-                fixes.push(apply_claude_fix(
-                    &repo_path.join(".claude").join("settings.local.json"),
-                    fix_mode,
-                )?);
-            }
-            if setup_providers.includes(HarnessKind::CodexCli) {
-                fixes.push(apply_codex_fix(
-                    &repo_path.join(".codex").join("hooks.json"),
-                    fix_mode,
-                )?);
-            }
-            if setup_providers.includes(HarnessKind::Pi) {
-                fixes.push(apply_pi_fix(
-                    &repo_path.join(".pi").join("extensions").join("foreman.ts"),
-                    fix_mode,
-                )?);
-            }
-        } else {
-            fixes.push(DoctorFixResult {
-                provider: None,
-                path: env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-                status: DoctorFixStatus::Skipped,
-                message: "project-level setup requested but no repo was detected".to_string(),
-                preview: None,
+            targets.push(ProviderFixTarget {
+                provider: HarnessKind::ClaudeCode,
+                kind: ProviderFixKind::Claude,
+                path: repo_path.join(".claude").join("settings.local.json"),
+            });
+            targets.push(ProviderFixTarget {
+                provider: HarnessKind::CodexCli,
+                kind: ProviderFixKind::Codex,
+                path: repo_path.join(".codex").join("hooks.json"),
+            });
+            targets.push(ProviderFixTarget {
+                provider: HarnessKind::Pi,
+                kind: ProviderFixKind::Pi,
+                path: repo_path.join(".pi").join("extensions").join("foreman.ts"),
             });
         }
     }
 
     if resolved_scopes.user {
-        if let Some(home) = home.as_deref() {
-            if setup_providers.includes(HarnessKind::ClaudeCode) {
-                fixes.push(apply_claude_fix(
-                    &home.join(".claude").join("settings.local.json"),
-                    fix_mode,
-                )?);
-            }
-            if setup_providers.includes(HarnessKind::CodexCli) {
-                fixes.push(apply_codex_fix(
-                    &home.join(".codex").join("hooks.json"),
-                    fix_mode,
-                )?);
-            }
-            if setup_providers.includes(HarnessKind::Pi) {
-                fixes.push(apply_pi_fix(
-                    &home.join(".pi").join("extensions").join("foreman.ts"),
-                    fix_mode,
-                )?);
-            }
-        } else {
-            fixes.push(DoctorFixResult {
-                provider: None,
-                path: env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-                status: DoctorFixStatus::Skipped,
-                message: "user-level setup requested but no home directory was resolved"
-                    .to_string(),
-                preview: None,
+        if let Some(home) = home {
+            targets.push(ProviderFixTarget {
+                provider: HarnessKind::ClaudeCode,
+                kind: ProviderFixKind::Claude,
+                path: home.join(".claude").join("settings.local.json"),
+            });
+            targets.push(ProviderFixTarget {
+                provider: HarnessKind::CodexCli,
+                kind: ProviderFixKind::Codex,
+                path: home.join(".codex").join("hooks.json"),
+            });
+            targets.push(ProviderFixTarget {
+                provider: HarnessKind::Pi,
+                kind: ProviderFixKind::Pi,
+                path: home.join(".pi").join("extensions").join("foreman.ts"),
             });
         }
     }
 
-    Ok(fixes)
+    targets
+}
+
+fn apply_provider_fix(
+    target: &ProviderFixTarget,
+    fix_mode: DoctorFixMode,
+) -> Result<DoctorFixResult, DoctorError> {
+    match target.kind {
+        ProviderFixKind::Claude => apply_claude_fix(&target.path, fix_mode),
+        ProviderFixKind::Codex => apply_codex_fix(&target.path, fix_mode),
+        ProviderFixKind::Pi => apply_pi_fix(&target.path, fix_mode),
+    }
 }
 
 fn apply_native_dir_fix(
@@ -1657,7 +1858,11 @@ fn merge_codex_hooks(existing: Option<&str>) -> Result<(Value, bool), DoctorErro
     Ok((root, changed))
 }
 
-fn provider_panes(inventory: &Inventory, provider: HarnessKind) -> Vec<&Pane> {
+fn provider_panes<'a>(
+    inventory: &'a Inventory,
+    provider: HarnessKind,
+    repo_scope: Option<&Path>,
+) -> Vec<&'a Pane> {
     inventory
         .sessions
         .iter()
@@ -1667,6 +1872,10 @@ fn provider_panes(inventory: &Inventory, provider: HarnessKind) -> Vec<&Pane> {
             pane.agent
                 .as_ref()
                 .is_some_and(|agent| agent.harness == provider)
+        })
+        .filter(|pane| match repo_scope {
+            Some(repo_scope) => pane_repo_root(pane).as_deref() == Some(repo_scope),
+            None => true,
         })
         .collect()
 }
@@ -1878,9 +2087,6 @@ fn resolve_repo_root(start: &Path) -> PathBuf {
 
 fn looks_like_repo_root(path: &Path) -> bool {
     path.join(".git").exists()
-        || path.join(".claude").exists()
-        || path.join(".codex").exists()
-        || path.join(".pi").exists()
 }
 
 fn pane_repo_root(pane: &Pane) -> Option<PathBuf> {
@@ -2078,10 +2284,11 @@ impl LoggedNativeSummary {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_claude_fix, apply_codex_fix, apply_pi_fix, claude_repo_findings, codex_repo_findings,
-        merge_claude_hooks, merge_codex_hooks, parse_latest_log_summaries, pi_repo_findings,
-        runtime_findings, DoctorFixMode, DoctorFixStatus, LoggedNativeSummary,
-        RuntimeDoctorContext,
+        apply_claude_fix, apply_codex_fix, apply_pi_fix, apply_safe_fixes, claude_repo_findings,
+        codex_repo_findings, merge_claude_hooks, merge_codex_hooks, parse_latest_log_summaries,
+        pi_repo_findings, resolve_requested_repo_root, runtime_findings, runtime_findings_scoped,
+        DoctorFixMode, DoctorFixStatus, LoggedNativeSummary, RuntimeDoctorContext,
+        SetupProviderSelection, SetupScopeSelection,
     };
     use crate::app::{
         inventory, AgentStatus, HarnessKind, IntegrationMode, PaneBuilder, SessionBuilder,
@@ -2108,7 +2315,7 @@ mod tests {
     fn with_temp_home<T>(f: impl FnOnce(&std::path::Path) -> T) -> T {
         let _guard = HOME_ENV_LOCK
             .lock()
-            .expect("home env lock should not poison");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let original_home = std::env::var_os("HOME");
         let temp_home = tempdir().expect("temp home should exist");
         std::env::set_var("HOME", temp_home.path());
@@ -2325,6 +2532,171 @@ mod tests {
         let findings = claude_repo_findings(temp_dir.path());
 
         assert_eq!(findings[0].id, "claude-hook-wired");
+    }
+
+    #[test]
+    fn claude_repo_findings_report_invalid_json_even_when_local_override_is_wired() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        std::fs::create_dir_all(temp_dir.path().join(".claude")).expect("dir should exist");
+        std::fs::write(
+            temp_dir.path().join(".claude/settings.json"),
+            "{invalid-json",
+        )
+        .expect("settings should be written");
+        std::fs::write(
+            temp_dir.path().join(".claude/settings.local.json"),
+            r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"foreman-claude-hook"}]}]}}"#,
+        )
+        .expect("settings local should be written");
+
+        let findings = claude_repo_findings(temp_dir.path());
+
+        assert_eq!(findings[0].id, "claude-hook-invalid-json");
+    }
+
+    #[test]
+    fn resolve_requested_repo_root_requires_git() {
+        with_temp_home(|home| {
+            std::fs::create_dir_all(home.join(".codex")).expect("codex dir should exist");
+            std::fs::create_dir_all(home.join(".claude")).expect("claude dir should exist");
+
+            let repo_root = resolve_requested_repo_root(Some(home));
+
+            assert!(repo_root.is_none());
+        });
+    }
+
+    #[test]
+    fn runtime_findings_scope_to_selected_repo() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let repo_alpha = temp_dir.path().join("alpha");
+        let repo_beta = temp_dir.path().join("beta");
+        std::fs::create_dir_all(repo_alpha.join(".git")).expect("alpha git dir should exist");
+        std::fs::create_dir_all(repo_beta.join(".git")).expect("beta git dir should exist");
+
+        let runtime = sample_runtime(
+            &temp_dir.path().join("config.toml"),
+            &temp_dir.path().join("logs"),
+        );
+        let inventory = inventory([
+            SessionBuilder::new("alpha").window(
+                WindowBuilder::new("alpha:agents").pane(
+                    PaneBuilder::agent("%1", HarnessKind::CodexCli)
+                        .status(AgentStatus::Error)
+                        .integration_mode(IntegrationMode::Compatibility)
+                        .working_dir(&repo_alpha)
+                        .preview("PreToolUse:Bash hook error"),
+                ),
+            ),
+            SessionBuilder::new("beta").window(
+                WindowBuilder::new("beta:agents").pane(
+                    PaneBuilder::agent("%2", HarnessKind::CodexCli)
+                        .status(AgentStatus::Working)
+                        .integration_mode(IntegrationMode::Native)
+                        .working_dir(&repo_beta)
+                        .preview("working"),
+                ),
+            ),
+        ]);
+        let context = RuntimeDoctorContext {
+            runtime: &runtime,
+            config_exists: true,
+            inventory: &inventory,
+            claude_native: &crate::integrations::ClaudeNativeOverlaySummary::default(),
+            codex_native: &crate::integrations::CodexNativeOverlaySummary::default(),
+            pi_native: &crate::integrations::PiNativeOverlaySummary::default(),
+        };
+
+        let findings = runtime_findings_scoped(
+            &context,
+            Some(&repo_alpha),
+            SetupProviderSelection {
+                codex: true,
+                ..SetupProviderSelection::default()
+            },
+        );
+
+        assert!(findings
+            .iter()
+            .any(|finding| finding.id == "codex-no-native-signals"));
+        assert!(findings
+            .iter()
+            .any(|finding| finding.id == "codex-hook-command-error"));
+        assert!(!findings
+            .iter()
+            .any(|finding| finding.id == "codex-native-signals-live"));
+    }
+
+    #[test]
+    fn project_scope_does_not_create_home_native_dirs() {
+        with_temp_home(|home| {
+            let repo_dir = tempdir().expect("repo dir should exist");
+            std::fs::create_dir_all(repo_dir.path().join(".git")).expect("git dir should exist");
+            let runtime = sample_runtime(
+                &home.join(".config/foreman/config.toml"),
+                &home.join(".local/state/foreman/logs"),
+            );
+
+            let fixes = apply_safe_fixes(
+                &runtime,
+                Some(repo_dir.path()),
+                DoctorFixMode::Apply,
+                SetupScopeSelection {
+                    project: true,
+                    user: false,
+                },
+                SetupProviderSelection {
+                    codex: true,
+                    ..SetupProviderSelection::default()
+                },
+            )
+            .expect("project-only setup should succeed");
+
+            assert!(fixes.iter().all(|fix| !fix.path.ends_with("codex-native")));
+            assert!(repo_dir.path().join(".codex/hooks.json").exists());
+            assert!(!home.join(".local/state/foreman/codex-native").exists());
+        });
+    }
+
+    #[test]
+    fn apply_safe_fixes_preflights_selected_provider_errors_before_writing() {
+        with_temp_home(|home| {
+            let repo_dir = tempdir().expect("repo dir should exist");
+            std::fs::create_dir_all(repo_dir.path().join(".git")).expect("git dir should exist");
+            let codex_hooks = repo_dir.path().join(".codex/hooks.json");
+            std::fs::create_dir_all(codex_hooks.parent().expect("parent should exist"))
+                .expect("codex dir should exist");
+            std::fs::write(&codex_hooks, "{invalid-json").expect("hooks file should be written");
+
+            let runtime = sample_runtime(
+                &home.join(".config/foreman/config.toml"),
+                &home.join(".local/state/foreman/logs"),
+            );
+
+            let error = apply_safe_fixes(
+                &runtime,
+                Some(repo_dir.path()),
+                DoctorFixMode::Apply,
+                SetupScopeSelection {
+                    project: true,
+                    user: false,
+                },
+                SetupProviderSelection {
+                    codex: true,
+                    pi: true,
+                    ..SetupProviderSelection::default()
+                },
+            )
+            .expect_err("invalid codex config should abort setup");
+
+            assert!(!error.to_string().is_empty());
+            assert!(!runtime.config_file.exists());
+            assert!(!repo_dir.path().join(".pi/extensions/foreman.ts").exists());
+            assert_eq!(
+                std::fs::read_to_string(&codex_hooks).expect("codex hooks should remain untouched"),
+                "{invalid-json"
+            );
+        });
     }
 
     #[test]

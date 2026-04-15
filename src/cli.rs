@@ -2,7 +2,9 @@ use crate::adapters::tmux::{SystemTmuxBackend, TmuxAdapter};
 use crate::app::{
     AppState, InventorySummary, OperatorAlert, OperatorAlertLevel, OperatorAlertSource,
 };
-use crate::config::{load_config, resolve_paths, write_default_config, ConfigError, RuntimeConfig};
+use crate::config::{
+    load_config, resolve_paths, write_default_config, AppConfig, ConfigError, RuntimeConfig,
+};
 use crate::doctor::{
     collect_report, primary_runtime_alert_finding, runtime_findings, DoctorFixMode, DoctorOptions,
     DoctorReport, DoctorSeverity, RuntimeDoctorContext, SetupProviderSelection,
@@ -249,7 +251,6 @@ impl PreparedBootstrap {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SetupDisplay {
     command: String,
-    scopes: String,
     providers: String,
 }
 
@@ -258,6 +259,7 @@ pub enum RunError {
     Config(ConfigError),
     Doctor(crate::doctor::DoctorError),
     Runtime(crate::runtime::RuntimeError),
+    Usage(String),
 }
 
 impl fmt::Display for RunError {
@@ -266,6 +268,7 @@ impl fmt::Display for RunError {
             Self::Config(error) => write!(f, "{error}"),
             Self::Doctor(error) => write!(f, "{error}"),
             Self::Runtime(error) => write!(f, "{error}"),
+            Self::Usage(message) => write!(f, "{message}"),
         }
     }
 }
@@ -291,6 +294,12 @@ impl From<crate::doctor::DoctorError> for RunError {
 }
 
 pub fn run(cli: Cli) -> Result<RunOutcome, RunError> {
+    if cli.repo.is_some() && !cli.setup && !cli.doctor {
+        return Err(RunError::Usage(
+            "--repo is only supported with --setup or --doctor".to_string(),
+        ));
+    }
+
     let paths = resolve_paths(cli.config_file.as_deref(), cli.log_dir.as_deref())?;
     if let Some(outcome) = maybe_handle_utility_command(&cli, &paths)? {
         return Ok(outcome);
@@ -341,7 +350,7 @@ fn maybe_handle_utility_command(
     }
 
     if cli.setup {
-        let file_config = load_config(&paths.config_file)?;
+        let (file_config, config_parse_error) = load_repair_config(&paths.config_file)?;
         let runtime = RuntimeConfig::from_sources(paths.clone(), file_config, cli);
         let setup_scopes = SetupScopeSelection {
             user: cli.user,
@@ -363,6 +372,7 @@ fn maybe_handle_utility_command(
                 },
                 setup_scopes,
                 setup_providers,
+                config_parse_error,
             },
         )?;
         let setup_display = render_setup_display(
@@ -376,7 +386,7 @@ fn maybe_handle_utility_command(
             report.to_setup_text(
                 cli.dry_run,
                 &setup_display.command,
-                &setup_display.scopes,
+                setup_scopes.resolved(report.repo_path.is_some()),
                 &setup_display.providers,
             )
         );
@@ -384,7 +394,7 @@ fn maybe_handle_utility_command(
     }
 
     if cli.doctor {
-        let file_config = load_config(&paths.config_file)?;
+        let (file_config, config_parse_error) = load_repair_config(&paths.config_file)?;
         let runtime = RuntimeConfig::from_sources(paths.clone(), file_config, cli);
         let fix_mode = if cli.doctor_fix {
             if cli.doctor_dry_run {
@@ -402,6 +412,7 @@ fn maybe_handle_utility_command(
                 fix_mode,
                 setup_scopes: SetupScopeSelection::default(),
                 setup_providers: SetupProviderSelection::default(),
+                config_parse_error,
             },
         )?;
 
@@ -427,6 +438,14 @@ fn maybe_handle_utility_command(
     }
 
     Ok(None)
+}
+
+fn load_repair_config(path: &Path) -> Result<(AppConfig, Option<String>), ConfigError> {
+    match load_config(path) {
+        Ok(config) => Ok((config, None)),
+        Err(ConfigError::ParseToml(error)) => Ok((AppConfig::default(), Some(error.to_string()))),
+        Err(error) => Err(error),
+    }
 }
 
 fn render_setup_display(
@@ -456,7 +475,6 @@ fn render_setup_display(
 
     SetupDisplay {
         command,
-        scopes: resolved_scopes.summary(),
         providers: providers.selected_labels().join(", "),
     }
 }
