@@ -1,0 +1,3 @@
+root=/tmp/foreman-ux-visual
+socket=/tmp/foreman-ux-visual/tmux.sock
+log_dir=/tmp/foreman-ux-visual/logs

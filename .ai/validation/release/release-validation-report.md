@@ -1,9 +1,9 @@
 # Release Validation Report
 
-- Generated: `2026-04-21T20:37:38.214613+00:00`
+- Generated: `2026-04-21T21:43:24.655334+00:00`
 - Status: `PASS`
 - Checklist: `.ai/plans/2026-04-10-151735-release-validation-gauntlet/CHECKLIST.md`
-- Raw output: `.ai/plans/2026-04-10-151735-release-validation-gauntlet/artifacts/release-gauntlet-output.txt`
+- Raw output: `.ai/validation/release/release-gauntlet-output.txt`
 
 ## Command
 
