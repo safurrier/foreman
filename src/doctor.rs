@@ -1661,16 +1661,14 @@ fn apply_pi_fix(path: &Path, fix_mode: DoctorFixMode) -> Result<DoctorFixResult,
         } else {
             DoctorFixStatus::Skipped
         }
-    } else {
-        if fix_mode.writes() {
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            fs::write(path, format!("{preview}\n"))?;
-            DoctorFixStatus::Written
-        } else {
-            DoctorFixStatus::Planned
+    } else if fix_mode.writes() {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
         }
+        fs::write(path, format!("{preview}\n"))?;
+        DoctorFixStatus::Written
+    } else {
+        DoctorFixStatus::Planned
     };
 
     Ok(DoctorFixResult {
