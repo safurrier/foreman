@@ -12,7 +12,7 @@ TASKS = PROJECT_ROOT / ".mise" / "tasks"
 
 
 def run_task(name: str, *args: str) -> None:
-    r = subprocess.run(["mise", "run", name, *args], cwd=PROJECT_ROOT)
+    r = subprocess.run([str(TASKS / name), *args], cwd=PROJECT_ROOT)
     if r.returncode != 0:
         sys.exit(r.returncode)
 
