@@ -1,5 +1,14 @@
-#!/usr/bin/env sh
+#!/usr/bin/env -S uv run python
 # MISE description="CI entrypoint (runs check)"
-set -eu
+# MISE depends=["setup"]
+import os
+import subprocess
+import sys
 
-exec mise run check
+sys.path.insert(0, os.path.join(os.environ["MISE_PROJECT_ROOT"], "scripts"))
+from lib import PROJECT_ROOT  # noqa: E402
+
+task = PROJECT_ROOT / ".mise" / "tasks" / "check"
+result = subprocess.run([sys.executable, str(task)], cwd=PROJECT_ROOT)
+if result.returncode != 0:
+    sys.exit(result.returncode)
