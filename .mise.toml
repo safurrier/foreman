@@ -7,7 +7,7 @@
 [tools]
 python = "3.12"
 uv = "latest"
-rust = "1.93"
+rust = { version = "1.93", profile = "default" }
 
 [env]
 MISE_PROJECT_ROOT = "{{config_root}}"
