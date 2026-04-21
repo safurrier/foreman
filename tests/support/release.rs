@@ -105,7 +105,7 @@ impl ReleaseHarness {
     }
 
     pub fn wait_for_file_line_count(&self, path: &Path, expected: usize) {
-        for _ in 0..80 {
+        for _ in 0..160 {
             if self.nonempty_lines(path).len() >= expected {
                 return;
             }

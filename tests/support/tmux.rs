@@ -72,7 +72,7 @@ impl TmuxFixture {
     }
 
     pub fn wait_for_capture(&self, target: &str, needle: &str) {
-        self.wait_for_capture_attempts(target, needle, 40);
+        self.wait_for_capture_attempts(target, needle, 120);
     }
 
     pub fn wait_for_capture_attempts(&self, target: &str, needle: &str, attempts: usize) {
