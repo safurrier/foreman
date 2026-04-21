@@ -384,12 +384,11 @@ fn sleeping_shell_command(workdir: &Path, banner: &str) -> String {
 
 fn agent_loop_command(workdir: &Path, banner: &str, prefix: &str) -> String {
     let script = format!(
-        "cd {} && printf '%s\\n' {} && while IFS= read -r line; do printf '%s\\n' \"{}:$line\"; done",
-        shell_quote(&workdir.display().to_string()),
-        shell_quote(banner),
-        prefix
+        "import os\nos.chdir({:?})\nimport sys\nprint({banner:?}, flush=True)\nfor line in sys.stdin:\n    print({prefix_with_colon:?} + line.rstrip('\\n'), flush=True)\n",
+        workdir.display().to_string(),
+        prefix_with_colon = format!("{prefix}:"),
     );
-    format!("sh -lc {}", shell_quote(&script))
+    format!("python3 -u -c {}", shell_quote(&script))
 }
 
 fn foreman_bin() -> &'static str {

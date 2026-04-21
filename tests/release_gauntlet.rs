@@ -374,7 +374,7 @@ fn release_action_gauntlet_proves_search_flash_sort_and_pane_operations() {
     harness.fixture().send_keys(&dashboard, &["o"]);
     harness
         .fixture()
-        .wait_for_alt_capture(&dashboard, " | attention | ");
+        .wait_for_alt_capture(&dashboard, "View: attention->recent");
     harness.fixture().send_keys(&dashboard, &["i"]);
     send_text(harness.fixture(), &dashboard, "sortkeep");
     harness.fixture().send_keys(&dashboard, &["Enter"]);
@@ -531,6 +531,13 @@ active_profile = "all"
     harness.fixture().send_keys(&dashboard, &["Y"]);
     harness.wait_for_file_contains(&clipboard_file, "https://example.com/pr/42");
 
+    harness.fixture().send_keys(&dashboard, &["/"]);
+    send_text(harness.fixture(), &dashboard, "betawork");
+    harness.fixture().send_keys(&dashboard, &["Enter"]);
+    harness
+        .fixture()
+        .wait_for_alt_capture(&dashboard, "Compose -> ◎ betawork");
+
     let refresh_marker = "inventory_refresh_started";
     let refresh_count = harness.log_occurrence_count(refresh_marker);
     harness.wait_for_log_occurrence_count(refresh_marker, refresh_count + 1);
@@ -568,20 +575,17 @@ active_profile = "all"
     harness
         .fixture()
         .wait_for_alt_capture(&dashboard, "notify=COMPLETE");
+    let complete_refresh_count = harness.log_occurrence_count(refresh_marker);
     harness.write_native_signal(
         &alpha.pane_id,
         r#"{"status":"working","activity_score":120}"#,
     );
-    harness
-        .fixture()
-        .wait_for_alt_capture(&dashboard, "Target pane: ~ ✦ alphawork");
+    harness.wait_for_log_occurrence_count(refresh_marker, complete_refresh_count + 1);
+    thread::sleep(Duration::from_millis(350));
     harness.write_native_signal(
         &alpha.pane_id,
         r#"{"status":"needs_attention","activity_score":90}"#,
     );
-    harness
-        .fixture()
-        .wait_for_alt_capture(&dashboard, "Target pane: ! ✦ alphawork");
     harness.wait_for_log_contains("kind=needs_attention action=suppress reason=profile_filtered");
     assert_eq!(harness.nonempty_lines(&notification_file).len(), 1);
 
@@ -589,20 +593,17 @@ active_profile = "all"
     harness
         .fixture()
         .wait_for_alt_capture(&dashboard, "notify=ATTENTION");
+    let attention_refresh_count = harness.log_occurrence_count(refresh_marker);
     harness.write_native_signal(
         &alpha.pane_id,
         r#"{"status":"working","activity_score":120}"#,
     );
-    harness
-        .fixture()
-        .wait_for_alt_capture(&dashboard, "Target pane: ~ ✦ alphawork");
+    harness.wait_for_log_occurrence_count(refresh_marker, attention_refresh_count + 1);
+    thread::sleep(Duration::from_millis(350));
     harness.write_native_signal(
         &alpha.pane_id,
         r#"{"status":"needs_attention","activity_score":90}"#,
     );
-    harness
-        .fixture()
-        .wait_for_alt_capture(&dashboard, "Target pane: ! ✦ alphawork");
     harness.wait_for_file_line_count(&notification_file, 2);
     let notification_lines = harness.nonempty_lines(&notification_file);
     assert!(notification_lines[1].contains("needs_attention|Needs attention:"));

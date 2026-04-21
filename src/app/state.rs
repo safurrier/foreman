@@ -106,8 +106,15 @@ pub enum SortMode {
 impl SortMode {
     pub fn label(self) -> &'static str {
         match self {
-            Self::RecentActivity => "recent",
-            Self::AttentionFirst => "attention",
+            Self::RecentActivity => "recent->status",
+            Self::AttentionFirst => "attention->recent",
+        }
+    }
+
+    pub fn help_label(self) -> &'static str {
+        match self {
+            Self::RecentActivity => "recent first, then status",
+            Self::AttentionFirst => "attention first, then recent",
         }
     }
 }
@@ -299,6 +306,7 @@ pub struct Pane {
     pub current_command: Option<String>,
     pub working_dir: Option<PathBuf>,
     pub preview: String,
+    pub preview_provenance: PreviewProvenance,
     pub agent: Option<AgentSnapshot>,
 }
 
@@ -348,6 +356,35 @@ impl Pane {
             })
             .or_else(|| self.current_command.clone())
             .unwrap_or_else(|| self.id.as_str().to_string())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreviewProvenance {
+    Captured,
+    ReusedCached,
+    CaptureFailed,
+}
+
+impl PreviewProvenance {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Captured => "captured",
+            Self::ReusedCached => "reused cached preview",
+            Self::CaptureFailed => "capture failed",
+        }
+    }
+
+    pub fn detail(self) -> &'static str {
+        match self {
+            Self::Captured => "Preview source: captured from tmux on the latest refresh.",
+            Self::ReusedCached => {
+                "Preview source: reused cached preview while tmux refresh prioritized other panes."
+            }
+            Self::CaptureFailed => {
+                "Preview source: tmux capture failed on the latest refresh; pane metadata is still live."
+            }
+        }
     }
 }
 
@@ -569,6 +606,15 @@ impl Inventory {
             .sum()
     }
 
+    pub fn pane_ids(&self) -> Vec<PaneId> {
+        self.sessions
+            .iter()
+            .flat_map(|session| session.windows.iter())
+            .flat_map(|window| window.panes.iter())
+            .map(|pane| pane.id.clone())
+            .collect()
+    }
+
     pub fn available_harnesses(&self) -> Vec<HarnessKind> {
         HarnessKind::ALL
             .into_iter()
@@ -709,6 +755,55 @@ pub enum SelectionTarget {
     Session(SessionId),
     Window(WindowId),
     Pane(PaneId),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SidebarHarnessSummary {
+    pub harnesses: Vec<HarnessKind>,
+    pub saw_shell: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SidebarRowKind {
+    Session {
+        name: String,
+        collapsed: bool,
+        rank: u8,
+        visible_windows: usize,
+        visible_panes: usize,
+        harnesses: SidebarHarnessSummary,
+    },
+    Window {
+        name: String,
+        rank: u8,
+        visible_panes: usize,
+        harnesses: SidebarHarnessSummary,
+    },
+    Pane {
+        navigation_title: String,
+        status: Option<AgentStatus>,
+        harness: Option<HarnessKind>,
+        is_agent: bool,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VisibleTargetEntry {
+    pub target: SelectionTarget,
+    pub actionable_pane_id: Option<PaneId>,
+    pub actionable_workspace_path: Option<PathBuf>,
+    pub aggregate_workspace_path: Option<PathBuf>,
+    pub sidebar: SidebarRowKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct VisibleStateCache {
+    pub base_targets: Vec<SelectionTarget>,
+    pub flash_targets: Vec<FlashTarget>,
+    pub entries: Vec<VisibleTargetEntry>,
+    pub visible_sessions: usize,
+    pub visible_windows: usize,
+    pub visible_panes: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -973,13 +1068,15 @@ impl ModalState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppState {
     pub inventory: Inventory,
     pub selection: Option<SelectionTarget>,
     pub focus: Focus,
     pub mode: Mode,
     pub help_scroll: u16,
+    pub sidebar_scroll: usize,
+    pub sidebar_viewport_rows: usize,
     pub popup_mode: bool,
     pub sort_mode: SortMode,
     pub filters: Filters,
@@ -997,6 +1094,7 @@ pub struct AppState {
     pub operator_alert: Option<OperatorAlert>,
     pub startup_error: Option<String>,
     pub runtime_diagnostics: Vec<DoctorFinding>,
+    pub visible_state: VisibleStateCache,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -1010,24 +1108,130 @@ pub struct InventorySummary {
     pub startup_error: Option<String>,
 }
 
+impl Default for AppState {
+    fn default() -> Self {
+        let mut state = Self {
+            inventory: Inventory::default(),
+            selection: None,
+            focus: Focus::default(),
+            mode: Mode::default(),
+            help_scroll: 0,
+            sidebar_scroll: 0,
+            sidebar_viewport_rows: 0,
+            popup_mode: false,
+            sort_mode: SortMode::default(),
+            filters: Filters::default(),
+            collapsed_sessions: BTreeSet::new(),
+            search: None,
+            flash: None,
+            pull_request_cache: BTreeMap::new(),
+            pull_request_detail_workspace: None,
+            pull_request_detail_manual: false,
+            pull_request_auto_open_dismissed: BTreeSet::new(),
+            notifications: NotificationState::default(),
+            input_draft: TextDraft::default(),
+            modal: None,
+            system_stats: SystemStatsSnapshot::default(),
+            operator_alert: None,
+            startup_error: None,
+            runtime_diagnostics: Vec::new(),
+            visible_state: VisibleStateCache::default(),
+        };
+        state.rebuild_visible_state();
+        state
+    }
+}
+
 impl AppState {
     pub fn with_inventory(inventory: Inventory) -> Self {
         let mut state = Self {
             inventory,
             ..Self::default()
         };
+        state.rebuild_visible_state();
         state.reconcile_selection();
         state
     }
 
     pub fn visible_targets(&self) -> Vec<SelectionTarget> {
-        let targets = self.base_visible_targets();
-        self.filter_search_targets(targets)
+        self.visible_state
+            .entries
+            .iter()
+            .map(|entry| entry.target.clone())
+            .collect()
     }
 
     pub fn base_visible_targets(&self) -> Vec<SelectionTarget> {
-        self.inventory
-            .visible_targets(&self.filters, &self.collapsed_sessions, self.sort_mode)
+        self.visible_state.base_targets.clone()
+    }
+
+    pub fn visible_target_entries(&self) -> &[VisibleTargetEntry] {
+        &self.visible_state.entries
+    }
+
+    pub fn selected_visible_entry(&self) -> Option<&VisibleTargetEntry> {
+        let target = self.selection.as_ref()?;
+        self.visible_state
+            .entries
+            .iter()
+            .find(|entry| &entry.target == target)
+    }
+
+    pub fn selected_visible_index(&self) -> Option<usize> {
+        let target = self.selection.as_ref()?;
+        self.visible_state
+            .entries
+            .iter()
+            .position(|entry| &entry.target == target)
+    }
+
+    pub fn base_visible_targets_slice(&self) -> &[SelectionTarget] {
+        &self.visible_state.base_targets
+    }
+
+    pub fn visible_target_count(&self) -> usize {
+        self.visible_state.entries.len()
+    }
+
+    pub fn sidebar_scroll(&self) -> usize {
+        self.sidebar_scroll
+    }
+
+    pub fn set_sidebar_viewport_rows(&mut self, rows: usize) {
+        self.sidebar_viewport_rows = rows;
+        self.reconcile_sidebar_scroll();
+    }
+
+    pub fn rebuild_visible_state(&mut self) {
+        let base_entries = self.build_base_visible_entries();
+        let base_targets = base_entries
+            .iter()
+            .map(|entry| entry.target.clone())
+            .collect::<Vec<_>>();
+        let flash_targets = build_flash_targets(&base_targets);
+        let entries = self.filter_search_entries(base_entries);
+        let visible_sessions = entries
+            .iter()
+            .filter(|entry| matches!(entry.target, SelectionTarget::Session(_)))
+            .count();
+        let visible_windows = entries
+            .iter()
+            .filter(|entry| matches!(entry.target, SelectionTarget::Window(_)))
+            .count();
+        let visible_panes = entries
+            .iter()
+            .filter(|entry| matches!(entry.target, SelectionTarget::Pane(_)))
+            .count();
+
+        self.visible_state = VisibleStateCache {
+            base_targets,
+            flash_targets,
+            entries,
+            visible_sessions,
+            visible_windows,
+            visible_panes,
+        };
+        self.reconcile_sidebar_scroll();
     }
 
     pub fn reconcile_selection(&mut self) {
@@ -1037,6 +1241,7 @@ impl AppState {
             &self.collapsed_sessions,
             self.sort_mode,
         );
+        self.reconcile_sidebar_scroll();
     }
 
     pub fn mode_label(&self) -> &'static str {
@@ -1070,23 +1275,13 @@ impl AppState {
     }
 
     pub fn inventory_summary(&self) -> InventorySummary {
-        let visible_targets = self.visible_targets();
         InventorySummary {
             total_sessions: self.inventory.session_count(),
             total_windows: self.inventory.window_count(),
             total_panes: self.inventory.pane_count(),
-            visible_sessions: visible_targets
-                .iter()
-                .filter(|target| matches!(target, SelectionTarget::Session(_)))
-                .count(),
-            visible_windows: visible_targets
-                .iter()
-                .filter(|target| matches!(target, SelectionTarget::Window(_)))
-                .count(),
-            visible_panes: visible_targets
-                .iter()
-                .filter(|target| matches!(target, SelectionTarget::Pane(_)))
-                .count(),
+            visible_sessions: self.visible_state.visible_sessions,
+            visible_windows: self.visible_state.visible_windows,
+            visible_panes: self.visible_state.visible_panes,
             startup_error: self.startup_error.clone(),
         }
     }
@@ -1136,22 +1331,15 @@ impl AppState {
     }
 
     pub fn flash_targets(&self) -> Vec<FlashTarget> {
-        let targets = self.base_visible_targets();
-        let width = flash_label_width(targets.len());
-        targets
-            .into_iter()
-            .enumerate()
-            .map(|(index, target)| FlashTarget {
-                label: flash_label_for_index(index, width),
-                target,
-            })
-            .collect()
+        self.visible_state.flash_targets.clone()
     }
 
     pub fn flash_label_for_target(&self, target: &SelectionTarget) -> Option<String> {
-        self.flash_targets()
-            .into_iter()
+        self.visible_state
+            .flash_targets
+            .iter()
             .find(|candidate| &candidate.target == target)
+            .cloned()
             .map(|candidate| candidate.label)
     }
 
@@ -1162,12 +1350,14 @@ impl AppState {
 
         let input = flash.draft.text.to_ascii_lowercase();
         if input.is_empty() {
-            return self.flash_targets();
+            return self.visible_state.flash_targets.clone();
         }
 
-        self.flash_targets()
-            .into_iter()
+        self.visible_state
+            .flash_targets
+            .iter()
             .filter(|candidate| candidate.label.starts_with(&input))
+            .cloned()
             .collect()
     }
 
@@ -1180,6 +1370,13 @@ impl AppState {
 
     pub fn selected_actionable_pane(&self) -> Option<&Pane> {
         let target = self.selection.as_ref()?;
+        if let Some(entry) = self.selected_visible_entry() {
+            return entry
+                .actionable_pane_id
+                .as_ref()
+                .and_then(|pane_id| self.inventory.pane(pane_id));
+        }
+
         self.inventory
             .actionable_pane_for_target(target, &self.filters, self.sort_mode)
     }
@@ -1196,8 +1393,88 @@ impl AppState {
         })
     }
 
+    pub fn reconcile_sidebar_scroll(&mut self) {
+        let total_rows = self.visible_state.entries.len();
+        if total_rows == 0 {
+            self.sidebar_scroll = 0;
+            return;
+        }
+
+        let viewport_rows = self.sidebar_viewport_rows.max(1);
+        let max_scroll = total_rows.saturating_sub(viewport_rows);
+        self.sidebar_scroll = self.sidebar_scroll.min(max_scroll);
+
+        let Some(selected_index) = self.selected_visible_index() else {
+            return;
+        };
+
+        if selected_index < self.sidebar_scroll {
+            self.sidebar_scroll = selected_index;
+        } else if selected_index >= self.sidebar_scroll + viewport_rows {
+            self.sidebar_scroll = selected_index + 1 - viewport_rows;
+        }
+
+        self.sidebar_scroll = self.sidebar_scroll.min(max_scroll);
+    }
+
     pub fn selected_actionable_pane_id(&self) -> Option<PaneId> {
         self.selected_actionable_pane().map(|pane| pane.id.clone())
+    }
+
+    pub fn selected_actionable_workspace_path(&self) -> Option<PathBuf> {
+        let target = self.selection.as_ref()?;
+        if let Some(entry) = self.selected_visible_entry() {
+            return entry.actionable_workspace_path.clone();
+        }
+
+        match target {
+            SelectionTarget::Pane(pane_id) => self
+                .inventory
+                .pane(pane_id)
+                .and_then(|pane| pane.working_dir.clone()),
+            SelectionTarget::Session(_) | SelectionTarget::Window(_) => self
+                .inventory
+                .actionable_pane_for_target(target, &self.filters, self.sort_mode)
+                .and_then(|pane| pane.working_dir.clone()),
+        }
+    }
+
+    pub fn viewport_actionable_pane_ids(&self) -> BTreeSet<PaneId> {
+        let total_rows = self.visible_state.entries.len();
+        if total_rows == 0 {
+            return BTreeSet::new();
+        }
+
+        let start = self.sidebar_scroll.min(total_rows);
+        let end = (start + self.sidebar_viewport_rows.max(1)).min(total_rows);
+        self.visible_state.entries[start..end]
+            .iter()
+            .filter_map(|entry| entry.actionable_pane_id.clone())
+            .collect()
+    }
+
+    pub fn refresh_priority_pane_ids(&self) -> BTreeSet<PaneId> {
+        let mut pane_ids = self.viewport_actionable_pane_ids();
+        if let Some(pane_id) = self.selected_actionable_pane_id() {
+            pane_ids.insert(pane_id);
+        }
+
+        for pane in self
+            .inventory
+            .sessions
+            .iter()
+            .flat_map(|session| session.windows.iter())
+            .flat_map(|window| window.panes.iter())
+        {
+            if matches!(
+                pane.agent.as_ref().map(|agent| agent.status),
+                Some(AgentStatus::NeedsAttention | AgentStatus::Error)
+            ) {
+                pane_ids.insert(pane.id.clone());
+            }
+        }
+
+        pane_ids
     }
 
     pub fn selected_runtime_diagnostics(&self) -> Vec<&DoctorFinding> {
@@ -1206,12 +1483,8 @@ impl AppState {
             .and_then(|pane| pane.agent.as_ref().map(|agent| agent.harness));
         let pane_id = self
             .selected_actionable_pane()
-            .map(|pane| pane.id.as_str().to_string())
-            .or_else(|| {
-                self.selected_pane_id()
-                    .map(|pane_id| pane_id.as_str().to_string())
-            });
-        let workspace_path = self.selected_workspace_path();
+            .map(|pane| pane.id.as_str().to_string());
+        let workspace_path = self.selected_actionable_workspace_path();
         self.runtime_diagnostics
             .iter()
             .filter(|finding| {
@@ -1264,12 +1537,19 @@ impl AppState {
 
     pub fn selected_workspace_path(&self) -> Option<PathBuf> {
         let target = self.selection.as_ref()?;
-        let mut paths = self.workspace_paths_for_target(target).into_iter();
-        let first = paths.next()?;
-        if paths.next().is_some() {
-            return None;
+        if let Some(entry) = self.selected_visible_entry() {
+            return entry.actionable_workspace_path.clone();
         }
-        Some(first)
+        match target {
+            SelectionTarget::Pane(pane_id) => self
+                .inventory
+                .pane(pane_id)
+                .and_then(|pane| pane.working_dir.clone()),
+            SelectionTarget::Session(_) | SelectionTarget::Window(_) => self
+                .inventory
+                .actionable_pane_for_target(target, &self.filters, self.sort_mode)
+                .and_then(|pane| pane.working_dir.clone()),
+        }
     }
 
     pub fn selected_pull_request_lookup(&self) -> Option<&PullRequestLookup> {
@@ -1417,49 +1697,106 @@ impl AppState {
         }
     }
 
-    fn filter_search_targets(&self, targets: Vec<SelectionTarget>) -> Vec<SelectionTarget> {
+    fn filter_search_entries(&self, entries: Vec<VisibleTargetEntry>) -> Vec<VisibleTargetEntry> {
         let Some(query) = self.search_query().map(str::trim) else {
-            return targets;
+            return entries;
         };
         if query.is_empty() {
-            return targets;
+            return entries;
         }
 
         let needle = query.to_ascii_lowercase();
-        targets
+        entries
             .into_iter()
-            .filter(|target| {
-                self.target_label(target)
+            .filter(|entry| {
+                self.target_label(&entry.target)
                     .to_ascii_lowercase()
                     .contains(&needle)
             })
             .collect()
     }
 
-    fn workspace_paths_for_target(&self, target: &SelectionTarget) -> BTreeSet<PathBuf> {
-        match target {
-            SelectionTarget::Session(session_id) => self
-                .inventory
-                .session(session_id)
-                .into_iter()
-                .flat_map(|session| session.windows.iter())
-                .flat_map(|window| window.panes.iter())
-                .filter_map(|pane| pane.working_dir.clone())
-                .collect(),
-            SelectionTarget::Window(window_id) => self
-                .inventory
-                .window(window_id)
-                .into_iter()
-                .flat_map(|window| window.panes.iter())
-                .filter_map(|pane| pane.working_dir.clone())
-                .collect(),
-            SelectionTarget::Pane(pane_id) => self
-                .inventory
-                .pane(pane_id)
-                .and_then(|pane| pane.working_dir.clone())
-                .into_iter()
-                .collect(),
+    fn build_base_visible_entries(&self) -> Vec<VisibleTargetEntry> {
+        let mut entries = Vec::new();
+
+        for session in self.inventory.sorted_sessions(self.sort_mode) {
+            if !session.is_visible(&self.filters) {
+                continue;
+            }
+
+            let visible_windows = session.visible_windows(&self.filters, self.sort_mode);
+            let session_visible_panes = visible_windows
+                .iter()
+                .flat_map(|window| window.visible_panes(&self.filters, self.sort_mode))
+                .collect::<Vec<_>>();
+
+            entries.push(VisibleTargetEntry {
+                target: SelectionTarget::Session(session.id.clone()),
+                actionable_pane_id: session_visible_panes.first().map(|pane| pane.id.clone()),
+                actionable_workspace_path: session_visible_panes
+                    .first()
+                    .and_then(|pane| pane.working_dir.clone()),
+                aggregate_workspace_path: unique_workspace_path(
+                    session
+                        .windows
+                        .iter()
+                        .flat_map(|window| window.panes.iter())
+                        .filter_map(|pane| pane.working_dir.clone()),
+                ),
+                sidebar: SidebarRowKind::Session {
+                    name: session.name.clone(),
+                    collapsed: self.collapsed_sessions.contains(&session.id),
+                    rank: session.attention_rank(),
+                    visible_windows: visible_windows.len(),
+                    visible_panes: session_visible_panes.len(),
+                    harnesses: harness_summary_for_panes(session_visible_panes.iter().copied()),
+                },
+            });
+
+            if self.collapsed_sessions.contains(&session.id) {
+                continue;
+            }
+
+            for window in visible_windows {
+                let visible_panes = window.visible_panes(&self.filters, self.sort_mode);
+                entries.push(VisibleTargetEntry {
+                    target: SelectionTarget::Window(window.id.clone()),
+                    actionable_pane_id: visible_panes.first().map(|pane| pane.id.clone()),
+                    actionable_workspace_path: visible_panes
+                        .first()
+                        .and_then(|pane| pane.working_dir.clone()),
+                    aggregate_workspace_path: unique_workspace_path(
+                        window
+                            .panes
+                            .iter()
+                            .filter_map(|pane| pane.working_dir.clone()),
+                    ),
+                    sidebar: SidebarRowKind::Window {
+                        name: window.navigation_title(),
+                        rank: window.attention_rank(),
+                        visible_panes: visible_panes.len(),
+                        harnesses: harness_summary_for_panes(visible_panes.iter().copied()),
+                    },
+                });
+
+                for pane in visible_panes {
+                    entries.push(VisibleTargetEntry {
+                        target: SelectionTarget::Pane(pane.id.clone()),
+                        actionable_pane_id: Some(pane.id.clone()),
+                        actionable_workspace_path: pane.working_dir.clone(),
+                        aggregate_workspace_path: pane.working_dir.clone(),
+                        sidebar: SidebarRowKind::Pane {
+                            navigation_title: pane.navigation_title(),
+                            status: pane.agent.as_ref().map(|agent| agent.status),
+                            harness: pane.harness_kind(),
+                            is_agent: pane.is_agent(),
+                        },
+                    });
+                }
+            }
         }
+
+        entries
     }
 }
 
@@ -1468,6 +1805,7 @@ fn session_cmp(left: &Session, right: &Session, sort_mode: SortMode) -> Ordering
         SortMode::RecentActivity => right
             .recent_activity()
             .cmp(&left.recent_activity())
+            .then_with(|| left.attention_rank().cmp(&right.attention_rank()))
             .then_with(|| left.name.cmp(&right.name))
             .then_with(|| left.id.as_str().cmp(right.id.as_str())),
         SortMode::AttentionFirst => left
@@ -1484,6 +1822,7 @@ fn window_cmp(left: &Window, right: &Window, sort_mode: SortMode) -> Ordering {
         SortMode::RecentActivity => right
             .recent_activity()
             .cmp(&left.recent_activity())
+            .then_with(|| left.attention_rank().cmp(&right.attention_rank()))
             .then_with(|| left.name.cmp(&right.name))
             .then_with(|| left.id.as_str().cmp(right.id.as_str())),
         SortMode::AttentionFirst => left
@@ -1500,6 +1839,7 @@ fn pane_cmp(left: &Pane, right: &Pane, sort_mode: SortMode) -> Ordering {
         SortMode::RecentActivity => right
             .recent_activity()
             .cmp(&left.recent_activity())
+            .then_with(|| left.attention_rank().cmp(&right.attention_rank()))
             .then_with(|| left.title.cmp(&right.title))
             .then_with(|| left.id.as_str().cmp(right.id.as_str())),
         SortMode::AttentionFirst => left
@@ -1516,6 +1856,49 @@ fn is_generic_window_name(name: &str) -> bool {
         name.trim().to_ascii_lowercase().as_str(),
         "" | "sh" | "zsh" | "bash" | "fish" | "nu" | "shell"
     )
+}
+
+fn build_flash_targets(targets: &[SelectionTarget]) -> Vec<FlashTarget> {
+    let width = flash_label_width(targets.len());
+    targets
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(index, target)| FlashTarget {
+            label: flash_label_for_index(index, width),
+            target,
+        })
+        .collect()
+}
+
+fn harness_summary_for_panes<'a>(
+    panes: impl IntoIterator<Item = &'a Pane>,
+) -> SidebarHarnessSummary {
+    let mut harnesses = BTreeSet::new();
+    let mut saw_shell = false;
+
+    for pane in panes {
+        match pane.harness_kind() {
+            Some(harness) => {
+                harnesses.insert(harness);
+            }
+            None => saw_shell = true,
+        }
+    }
+
+    SidebarHarnessSummary {
+        harnesses: harnesses.into_iter().collect(),
+        saw_shell,
+    }
+}
+
+fn unique_workspace_path(paths: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
+    let mut paths = paths.into_iter();
+    let first = paths.next()?;
+    if paths.any(|path| path != first) {
+        return None;
+    }
+    Some(first)
 }
 
 fn flash_label_width(count: usize) -> usize {
@@ -1539,8 +1922,11 @@ fn flash_label_for_index(mut index: usize, width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{AppState, SelectionTarget};
-    use crate::app::{inventory, HarnessKind, PaneBuilder, SessionBuilder, WindowBuilder};
+    use super::{AppState, SearchState, SelectionTarget, SortMode};
+    use crate::app::{
+        inventory, AgentStatus, HarnessKind, PaneBuilder, SessionBuilder, WindowBuilder,
+    };
+    use std::path::PathBuf;
 
     #[test]
     fn window_navigation_title_falls_back_from_generic_shell_name() {
@@ -1573,5 +1959,216 @@ mod tests {
             state.selection_breadcrumb().as_deref(),
             Some("alpha / agents / foreman")
         );
+    }
+
+    #[test]
+    fn recent_sort_uses_attention_rank_as_tiebreaker() {
+        let inventory = inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:0")
+                .name("agents")
+                .pane(
+                    PaneBuilder::agent("alpha:error", HarnessKind::ClaudeCode)
+                        .title("error")
+                        .status(AgentStatus::Error)
+                        .activity_score(10),
+                )
+                .pane(
+                    PaneBuilder::agent("alpha:idle", HarnessKind::ClaudeCode)
+                        .title("idle")
+                        .status(AgentStatus::Idle)
+                        .activity_score(10),
+                ),
+        )]);
+
+        let window = inventory
+            .window(&"alpha:0".into())
+            .expect("window should exist");
+        let panes = window.visible_panes(&Default::default(), SortMode::RecentActivity);
+
+        assert_eq!(panes[0].id.as_str(), "alpha:error");
+        assert_eq!(panes[1].id.as_str(), "alpha:idle");
+    }
+
+    #[test]
+    fn attention_sort_uses_recent_activity_as_tiebreaker() {
+        let inventory = inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:0")
+                .name("agents")
+                .pane(
+                    PaneBuilder::agent("alpha:quiet", HarnessKind::ClaudeCode)
+                        .title("quiet")
+                        .status(AgentStatus::Working)
+                        .activity_score(4),
+                )
+                .pane(
+                    PaneBuilder::agent("alpha:busy", HarnessKind::ClaudeCode)
+                        .title("busy")
+                        .status(AgentStatus::Working)
+                        .activity_score(9),
+                ),
+        )]);
+
+        let window = inventory
+            .window(&"alpha:0".into())
+            .expect("window should exist");
+        let panes = window.visible_panes(&Default::default(), SortMode::AttentionFirst);
+
+        assert_eq!(panes[0].id.as_str(), "alpha:busy");
+        assert_eq!(panes[1].id.as_str(), "alpha:quiet");
+    }
+
+    #[test]
+    fn rebuild_visible_state_applies_search_filter_to_cached_entries() {
+        let inventory = inventory([
+            SessionBuilder::new("alpha").window(
+                WindowBuilder::new("alpha:0")
+                    .name("agents")
+                    .pane(PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)),
+            ),
+            SessionBuilder::new("beta").window(
+                WindowBuilder::new("beta:0")
+                    .name("agents")
+                    .pane(PaneBuilder::agent("beta:codex", HarnessKind::CodexCli)),
+            ),
+        ]);
+
+        let mut state = AppState::with_inventory(inventory);
+        let mut search = SearchState::new(state.selection.clone());
+        search.draft.text = "codex".to_string();
+        state.search = Some(search);
+        state.rebuild_visible_state();
+
+        assert_eq!(
+            state.visible_targets(),
+            vec![SelectionTarget::Pane("beta:codex".into())]
+        );
+        assert_eq!(state.visible_target_count(), 1);
+    }
+
+    #[test]
+    fn selected_actionable_pane_uses_cached_first_visible_pane() {
+        let inventory = inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:0")
+                .name("agents")
+                .pane(
+                    PaneBuilder::agent("alpha:idle", HarnessKind::ClaudeCode)
+                        .title("idle")
+                        .status(AgentStatus::Idle)
+                        .activity_score(10),
+                )
+                .pane(
+                    PaneBuilder::agent("alpha:error", HarnessKind::ClaudeCode)
+                        .title("error")
+                        .status(AgentStatus::Error)
+                        .activity_score(10),
+                ),
+        )]);
+
+        let mut state = AppState::with_inventory(inventory);
+        state.sort_mode = SortMode::AttentionFirst;
+        state.rebuild_visible_state();
+
+        state.selection = Some(SelectionTarget::Session("alpha".into()));
+        assert_eq!(
+            state
+                .selected_actionable_pane_id()
+                .as_ref()
+                .map(|pane| pane.as_str()),
+            Some("alpha:error")
+        );
+
+        state.selection = Some(SelectionTarget::Window("alpha:0".into()));
+        assert_eq!(
+            state
+                .selected_actionable_pane_id()
+                .as_ref()
+                .map(|pane| pane.as_str()),
+            Some("alpha:error")
+        );
+    }
+
+    #[test]
+    fn selected_workspace_path_follows_actionable_pane_for_session_and_window_rows() {
+        let inventory = inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:0")
+                .name("agents")
+                .pane(
+                    PaneBuilder::agent("alpha:attention", HarnessKind::ClaudeCode)
+                        .title("attention")
+                        .working_dir("/tmp/actionable")
+                        .status(AgentStatus::NeedsAttention)
+                        .activity_score(80),
+                )
+                .pane(
+                    PaneBuilder::agent("alpha:helper", HarnessKind::ClaudeCode)
+                        .title("helper")
+                        .working_dir("/tmp/helper")
+                        .status(AgentStatus::Idle)
+                        .activity_score(10),
+                ),
+        )]);
+
+        let mut state = AppState::with_inventory(inventory);
+        state.sort_mode = SortMode::AttentionFirst;
+        state.rebuild_visible_state();
+
+        state.selection = Some(SelectionTarget::Session("alpha".into()));
+        assert_eq!(
+            state.selected_workspace_path(),
+            Some(PathBuf::from("/tmp/actionable"))
+        );
+        let session_entry = state
+            .selected_visible_entry()
+            .expect("session entry should exist");
+        assert_eq!(session_entry.aggregate_workspace_path, None);
+
+        state.selection = Some(SelectionTarget::Window("alpha:0".into()));
+        assert_eq!(
+            state.selected_workspace_path(),
+            Some(PathBuf::from("/tmp/actionable"))
+        );
+        let window_entry = state
+            .selected_visible_entry()
+            .expect("window entry should exist");
+        assert_eq!(window_entry.aggregate_workspace_path, None);
+    }
+
+    #[test]
+    fn refresh_priority_pane_ids_include_viewport_selected_and_attention_rows() {
+        let inventory = inventory([
+            SessionBuilder::new("alpha").window(
+                WindowBuilder::new("alpha:0")
+                    .name("agents")
+                    .pane(
+                        PaneBuilder::agent("alpha:error", HarnessKind::ClaudeCode)
+                            .title("error")
+                            .status(AgentStatus::Error),
+                    )
+                    .pane(
+                        PaneBuilder::agent("alpha:idle", HarnessKind::ClaudeCode)
+                            .title("idle")
+                            .status(AgentStatus::Idle),
+                    ),
+            ),
+            SessionBuilder::new("beta").window(
+                WindowBuilder::new("beta:0").name("agents").pane(
+                    PaneBuilder::agent("beta:idle", HarnessKind::CodexCli)
+                        .title("beta")
+                        .status(AgentStatus::Idle),
+                ),
+            ),
+        ]);
+
+        let mut state = AppState::with_inventory(inventory);
+        state.sort_mode = SortMode::AttentionFirst;
+        state.rebuild_visible_state();
+        state.set_sidebar_viewport_rows(2);
+        state.selection = Some(SelectionTarget::Pane("beta:idle".into()));
+        state.reconcile_sidebar_scroll();
+
+        let priority = state.refresh_priority_pane_ids();
+
+        assert!(priority.contains(&"beta:idle".into()));
+        assert!(priority.contains(&"alpha:error".into()));
     }
 }

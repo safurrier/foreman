@@ -9,6 +9,9 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(os.environ.get("MISE_PROJECT_ROOT", "."))
 PROJECT_NAME = "foreman"
+VALIDATION_ROOT = PROJECT_ROOT / ".ai" / "validation"
+UX_VALIDATION_ROOT = VALIDATION_ROOT / "ux"
+RELEASE_VALIDATION_ROOT = VALIDATION_ROOT / "release"
 
 _B = "\033[1m"  # bold
 _BLUE = "\033[34m"
@@ -39,3 +42,9 @@ def run(cmd: list[str], cwd: Path | None = None) -> None:
     result = subprocess.run(cmd, cwd=cwd or PROJECT_ROOT)  # noqa: S603
     if result.returncode != 0:
         sys.exit(result.returncode)
+
+
+def validation_artifacts_required() -> bool:
+    return os.environ.get("FOREMAN_REQUIRE_VALIDATION_ARTIFACTS") == "1" or os.environ.get(
+        "CI"
+    ) == "true"

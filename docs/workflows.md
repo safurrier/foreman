@@ -113,7 +113,7 @@ checks pass.
 `mise run verify` now also runs `mise run verify-release`, which reruns the
 compiled-binary release gauntlet serially and writes a report under:
 
-`.ai/plans/2026-04-10-151735-release-validation-gauntlet/artifacts/`
+`.ai/validation/release/`
 
 That rerun is intentional. `cargo test --all-features` proves the broader Rust
 suite, and `verify-release` reruns the operator gauntlet as the explicit
@@ -126,16 +126,40 @@ GitHub Actions now uploads the same evidence as review artifacts:
 
 Those artifacts include:
 
-- `.ai/plans/2026-04-10-110931-tui-ux-diagnostic/artifacts/`
-- `.ai/plans/2026-04-10-151735-release-validation-gauntlet/artifacts/`
+- `.ai/validation/ux/`
+- `.ai/validation/release/`
 
-`mise run verify-ux` also runs the ignored `runtime_profiling` smoke so lag
-regressions caused by synchronous lookup work show up in the heavy lane instead
-of only in manual UX testing.
+In CI and release runs, those validation artifacts are required. Missing UX or
+release evidence is a real failure, not a skipped upload.
+
+`mise run verify-ux` also runs the ignored `runtime_profiling` smokes so lag
+regressions caused by synchronous lookup work or repeated `j/k` navigation under
+load show up in the heavy lane instead of only in manual UX testing. That lane
+now also checks staged tmux refresh behavior so full-inventory capture regressions
+show up before they reach manual tmux testing.
 
 The runtime smoke in that lane now covers the live help/legend surface,
-small-layout help scrolling, harness-view cycling, and acting on the filtered
-selection inside a real tmux server.
+small-layout help scrolling, harness-view cycling, deterministic native-hook
+provenance and attention surfacing in the live dashboard, live popup focus with
+`f`, and acting on the filtered selection inside a real tmux server.
+
+For local lag triage, `foreman --debug` now emits timing lines for:
+- `action` with enriched `move-selection` context
+- `render_frame`
+- `inventory_tmux`
+- `inventory_native`
+
+When `inventory_tmux` looks expensive, check whether the line shows high
+`captures=` counts or whether cached preview reuse has dropped unexpectedly.
+
+Those logs land in the active `latest.log` file under the configured Foreman log
+directory and are the first place to check before chasing tmux itself.
+
+That split is intentional:
+- `mise run verify` proves the dashboard/operator surface inside a real tmux
+  server without relying on provider auth or network behavior.
+- `mise run verify-native` proves the actual Claude, Codex, and Pi CLI contracts
+  in isolated temp environments.
 
 The release gauntlet expands that proof into three coherent compiled-binary
 journeys:

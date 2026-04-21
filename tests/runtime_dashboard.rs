@@ -1,6 +1,9 @@
 mod support;
 
 use foreman::adapters::tmux::{SystemTmuxBackend, TmuxAdapter};
+use std::io::Write;
+use std::path::Path;
+use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 use support::tmux::TmuxFixture;
@@ -8,6 +11,61 @@ use tempfile::tempdir;
 
 fn foreman_bin() -> &'static str {
     env!("CARGO_BIN_EXE_foreman")
+}
+
+fn claude_hook_bin() -> &'static str {
+    env!("CARGO_BIN_EXE_foreman-claude-hook")
+}
+
+fn sleeping_shell_command(workdir: &Path, banner: &str) -> String {
+    let script = format!(
+        "cd {} && printf '%s\\n' {} && exec sleep 600",
+        shell_escape(workdir.display().to_string().as_str()),
+        shell_escape(banner)
+    );
+    format!("sh -lc {}", shell_escape(&script))
+}
+
+fn shell_escape(input: &str) -> String {
+    format!("'{}'", input.replace('\'', r#"'\''"#))
+}
+
+fn send_claude_hook_event(native_dir: &Path, pane_id: &str, payload: &str) {
+    let mut child = Command::new(claude_hook_bin())
+        .args(["--native-dir", native_dir.to_str().expect("utf-8 path")])
+        .env("TMUX_PANE", pane_id)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("claude hook command should spawn");
+
+    child
+        .stdin
+        .take()
+        .expect("hook stdin should exist")
+        .write_all(payload.as_bytes())
+        .expect("hook payload should be written");
+
+    let output = child
+        .wait_with_output()
+        .expect("hook command should finish");
+    if !output.status.success() {
+        panic!(
+            "claude hook failed\nstderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+fn send_text(fixture: &TmuxFixture, target: &str, text: &str) {
+    for ch in text.chars() {
+        let key = match ch {
+            ' ' => "Space".to_string(),
+            _ => ch.to_string(),
+        };
+        fixture.send_keys(target, &[key.as_str()]);
+    }
 }
 
 fn wait_for_alt_capture_not_contains(
@@ -32,7 +90,7 @@ fn interactive_binary_renders_dashboard_and_sends_input_to_selected_agent() {
     let fixture = TmuxFixture::new();
     let agent_pane = fixture.new_session(
         "alpha",
-        r#"sh -lc 'printf "%s\n" "Claude Code ready"; while IFS= read -r line; do printf "%s\n" "INPUT:$line"; done'"#,
+        &fixture.interactive_echo_command("Claude Code ready", "INPUT:"),
     );
     fixture.wait_for_capture(&agent_pane, "Claude Code ready");
 
@@ -68,11 +126,11 @@ fn interactive_binary_help_and_harness_filter_walkthrough_stays_actionable() {
     let fixture = TmuxFixture::new();
     let claude_pane = fixture.new_session(
         "alpha",
-        r#"sh -lc 'printf "%s\n" "Claude Code ready"; while IFS= read -r line; do printf "%s\n" "CLAUDE:$line"; done'"#,
+        &fixture.interactive_echo_command("Claude Code ready", "CLAUDE:"),
     );
     let codex_pane = fixture.new_session(
         "beta",
-        r#"sh -lc 'printf "%s\n" "Codex CLI waiting for your input"; while IFS= read -r line; do printf "%s\n" "CODEX:$line"; done'"#,
+        &fixture.interactive_echo_command("Codex CLI waiting for your input", "CODEX:"),
     );
     fixture.wait_for_capture(&claude_pane, "Claude Code ready");
     fixture.wait_for_capture(&codex_pane, "Codex CLI waiting for your input");
@@ -126,7 +184,7 @@ fn interactive_binary_footer_tracks_focus_and_help_explains_provenance() {
     let fixture = TmuxFixture::new();
     let agent_pane = fixture.new_session(
         "alpha",
-        r#"sh -lc 'printf "%s\n" "Claude Code ready"; while IFS= read -r line; do printf "%s\n" "CLAUDE:$line"; done'"#,
+        &fixture.interactive_echo_command("Claude Code ready", "CLAUDE:"),
     );
     fixture.wait_for_capture(&agent_pane, "Claude Code ready");
 
@@ -176,7 +234,7 @@ fn interactive_binary_help_scrolls_in_small_layout() {
     let fixture = TmuxFixture::new();
     let claude_pane = fixture.new_session(
         "alpha",
-        r#"sh -lc 'printf "%s\n" "Claude Code ready"; while IFS= read -r line; do printf "%s\n" "CLAUDE:$line"; done'"#,
+        &fixture.interactive_echo_command("Claude Code ready", "CLAUDE:"),
     );
     fixture.wait_for_capture(&claude_pane, "Claude Code ready");
 
@@ -197,7 +255,7 @@ fn interactive_binary_help_scrolls_in_small_layout() {
 
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
     fixture.send_keys(&dashboard_pane, &["?"]);
-    fixture.wait_for_alt_capture(&dashboard_pane, "Navigate");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Legend");
     fixture.wait_for_alt_capture(&dashboard_pane, "Scroll j/k");
     wait_for_alt_capture_not_contains(&fixture, &dashboard_pane, "h cycles visible harnesses", 40);
 
@@ -217,7 +275,7 @@ fn interactive_binary_help_scrolls_in_small_layout() {
             "k", "k", "k",
         ],
     );
-    fixture.wait_for_alt_capture(&dashboard_pane, "Navigate");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Legend");
 
     fixture.send_keys(&dashboard_pane, &["Escape"]);
     wait_for_alt_capture_not_contains(&fixture, &dashboard_pane, "Scroll j/k", 40);
@@ -253,6 +311,120 @@ fn interactive_binary_popup_focus_action_exits_after_success() {
     fixture.send_keys(&dashboard_pane, &["j", "f"]);
     fixture.wait_for_capture(&dashboard_pane, "FOREMAN_EXITED");
     assert_eq!(fixture.active_pane_in("alpha"), agent_pane);
+}
+
+#[test]
+fn interactive_binary_surfaces_claude_native_status_and_attention_view() {
+    let fixture = TmuxFixture::new();
+    let workspaces = tempdir().expect("workspace root should exist");
+    let alpha_dir = workspaces.path().join("alpha");
+    let beta_dir = workspaces.path().join("beta");
+    std::fs::create_dir_all(&alpha_dir).expect("alpha dir should exist");
+    std::fs::create_dir_all(&beta_dir).expect("beta dir should exist");
+
+    let alpha_pane = fixture.new_session(
+        "alpha",
+        &sleeping_shell_command(&alpha_dir, "Claude Code ready"),
+    );
+    let beta_pane = fixture.new_session(
+        "beta",
+        &sleeping_shell_command(&beta_dir, "Codex CLI waiting for your input"),
+    );
+    fixture.wait_for_capture(&alpha_pane, "Claude Code ready");
+    fixture.wait_for_capture(&beta_pane, "Codex CLI waiting for your input");
+
+    let config_dir = tempdir().expect("config dir should exist");
+    let log_dir = tempdir().expect("log dir should exist");
+    let native_dir = tempdir().expect("native dir should exist");
+    let dashboard_command = format!(
+        "FOREMAN_CONFIG_HOME={} FOREMAN_LOG_DIR={} {} --tmux-socket {} --poll-interval-ms 100 --capture-lines 20 --no-notify --claude-native-dir {}",
+        config_dir.path().display(),
+        log_dir.path().display(),
+        foreman_bin(),
+        fixture.socket_path().display(),
+        native_dir.path().display(),
+    );
+    let dashboard_pane = fixture.new_session(
+        "dashboard",
+        &fixture.keep_alive_command(&dashboard_command, "FOREMAN_EXITED"),
+    );
+    fixture.resize_window("dashboard", 180, 48);
+
+    fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Status source: compatibility heuristic");
+    fixture.send_keys(&dashboard_pane, &["/"]);
+    send_text(&fixture, &dashboard_pane, "alpha");
+    fixture.send_keys(&dashboard_pane, &["Enter"]);
+    fixture.wait_for_alt_capture(&dashboard_pane, "Target pane: • ✦ alpha");
+    fixture.send_keys(&dashboard_pane, &["o"]);
+    fixture.wait_for_alt_capture(&dashboard_pane, "View: attention->recent");
+
+    send_claude_hook_event(
+        native_dir.path(),
+        &alpha_pane,
+        r#"{"hook_event_name":"UserPromptSubmit","prompt":"manual smoke"}"#,
+    );
+    fixture.wait_for_alt_capture(&dashboard_pane, "Status source: native hook");
+
+    send_claude_hook_event(
+        native_dir.path(),
+        &alpha_pane,
+        r#"{"hook_event_name":"Notification","notification_type":"permission_prompt"}"#,
+    );
+    fixture.wait_for_alt_capture(&dashboard_pane, "Target pane: ! ✦ alpha");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Status source: native hook");
+
+    fixture.send_keys(&dashboard_pane, &["q"]);
+    fixture.wait_for_capture(&dashboard_pane, "FOREMAN_EXITED");
+}
+
+#[test]
+fn interactive_binary_popup_focus_action_switches_cross_session_target() {
+    let fixture = TmuxFixture::new();
+    let workspaces = tempdir().expect("workspace root should exist");
+    let alpha_dir = workspaces.path().join("alpha");
+    let beta_dir = workspaces.path().join("beta");
+    std::fs::create_dir_all(&alpha_dir).expect("alpha dir should exist");
+    std::fs::create_dir_all(&beta_dir).expect("beta dir should exist");
+
+    let alpha_helper =
+        fixture.new_session("alpha", &sleeping_shell_command(&alpha_dir, "plain shell"));
+    let _alpha_agent = fixture.split_window(
+        &alpha_helper,
+        &sleeping_shell_command(&alpha_dir, "Claude Code ready"),
+    );
+    let beta_helper = fixture.new_session("beta", &sleeping_shell_command(&beta_dir, "beta shell"));
+    let beta_agent = fixture.split_window(
+        &beta_helper,
+        &sleeping_shell_command(&beta_dir, "Codex CLI waiting for your input"),
+    );
+    fixture.wait_for_capture(&beta_agent, "Codex CLI waiting for your input");
+
+    let config_dir = tempdir().expect("config dir should exist");
+    let log_dir = tempdir().expect("log dir should exist");
+    let dashboard_command = format!(
+        "FOREMAN_CONFIG_HOME={} FOREMAN_LOG_DIR={} {} --tmux-socket {} --poll-interval-ms 100 --capture-lines 20 --no-notify --popup",
+        config_dir.path().display(),
+        log_dir.path().display(),
+        foreman_bin(),
+        fixture.socket_path().display()
+    );
+    let dashboard_pane = fixture.new_session(
+        "dashboard",
+        &fixture.keep_alive_command(&dashboard_command, "FOREMAN_EXITED"),
+    );
+    fixture.resize_window("dashboard", 180, 48);
+
+    fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
+    fixture.send_keys(&dashboard_pane, &["/"]);
+    send_text(&fixture, &dashboard_pane, "beta");
+    fixture.send_keys(&dashboard_pane, &["Enter"]);
+    fixture.wait_for_alt_capture(&dashboard_pane, "Target pane: ! ◎ beta");
+    fixture.wait_for_alt_capture(&dashboard_pane, beta_dir.display().to_string().as_str());
+
+    fixture.send_keys(&dashboard_pane, &["f"]);
+    fixture.wait_for_capture(&dashboard_pane, "FOREMAN_EXITED");
+    assert_eq!(fixture.active_pane_in("beta"), beta_agent);
 }
 
 #[test]

@@ -49,9 +49,9 @@ jobs:
         with:
           name: release-validation-evidence
           path: |
-            .ai/plans/2026-04-10-110931-tui-ux-diagnostic/artifacts/
-            .ai/plans/2026-04-10-151735-release-validation-gauntlet/artifacts/
-          if-no-files-found: ignore
+            .ai/validation/ux/
+            .ai/validation/release/
+          if-no-files-found: error
 
   build:
     name: Build ${{ matrix.archive_name }}

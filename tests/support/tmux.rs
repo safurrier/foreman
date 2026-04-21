@@ -146,6 +146,21 @@ impl TmuxFixture {
     }
 
     #[allow(dead_code)]
+    pub fn interactive_echo_command(&self, banner: &str, prefix: &str) -> String {
+        render_interactive_echo_command(None, banner, prefix)
+    }
+
+    #[allow(dead_code)]
+    pub fn interactive_echo_command_in_workdir(
+        &self,
+        workdir: &Path,
+        banner: &str,
+        prefix: &str,
+    ) -> String {
+        render_interactive_echo_command(Some(workdir), banner, prefix)
+    }
+
+    #[allow(dead_code)]
     pub fn keep_alive_command(&self, command: &str, sentinel: &str) -> String {
         format!(
             "sh -lc '{}; printf \"%s\\n\" {}; exec sleep 60'",
@@ -313,6 +328,20 @@ impl TmuxFixture {
 #[allow(dead_code)]
 fn shell_escape(input: &str) -> String {
     format!("'{}'", input.replace('\'', r#"'\''"#))
+}
+
+fn render_interactive_echo_command(workdir: Option<&Path>, banner: &str, prefix: &str) -> String {
+    let mut script = String::new();
+    if let Some(workdir) = workdir {
+        script.push_str(&format!(
+            "import os\nos.chdir({:?})\n",
+            workdir.display().to_string()
+        ));
+    }
+    script.push_str(&format!(
+        "import sys\nprint({banner:?}, flush=True)\nfor line in sys.stdin:\n    print({prefix:?} + line.rstrip('\\n'), flush=True)\n"
+    ));
+    format!("python3 -u -c {}", shell_escape(&script))
 }
 
 fn is_transient_server_error(stderr: &str) -> bool {

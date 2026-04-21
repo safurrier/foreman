@@ -164,10 +164,13 @@ export default function (pi: ExtensionAPI) {{
     let pane_id = fixture.new_session(
         "alpha",
         &format!(
-            "sh -lc 'cd {work_dir}; export PATH=\"{bin_dir}:$PATH\"; printf \"Pi hook loop ready\\n\"; while IFS= read -r line; do printf \"PROMPT:%s\\n\" \"$line\"; pi --no-session -e {extension} -p \"$line\"; printf \"__PI_DONE__\\n\"; done'",
-            work_dir = shell_escape(work_dir.display().to_string().as_str()),
-            bin_dir = shell_escape(bin_dir.display().to_string().as_str()),
-            extension = shell_escape(extension_path.display().to_string().as_str()),
+            "python3 -u -c {script}",
+            script = shell_escape(&format!(
+                "import os\nimport subprocess\nimport sys\nos.chdir({work_dir:?})\nos.environ['PATH'] = {bin_dir:?} + os.pathsep + os.environ.get('PATH', '')\nextension_path = {extension:?}\nprint('Pi hook loop ready', flush=True)\nfor line in sys.stdin:\n    prompt = line.rstrip('\\n')\n    print(f'PROMPT:{{prompt}}', flush=True)\n    subprocess.run(['pi', '--no-session', '-e', extension_path, '-p', prompt], check=True)\n    print('__PI_DONE__', flush=True)\n",
+                work_dir = work_dir.display().to_string(),
+                bin_dir = bin_dir.display().to_string(),
+                extension = extension_path.display().to_string(),
+            )),
         ),
     );
     fixture.wait_for_capture(&pane_id, "Pi hook loop ready");

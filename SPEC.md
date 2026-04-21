@@ -112,6 +112,12 @@ yet expose a stable contract.
 - Foreman monitors panes across all tmux sessions, not just the currently attached session.
 - Monitoring refreshes on a configurable interval.
 - Foreman captures recent pane output for analysis and preview.
+- Foreman keeps tmux pane metadata fresh across the full inventory, but it does
+  not need to recapture full preview text for every pane on every refresh.
+- Preview freshness is prioritized for the selected row, the current sidebar
+  viewport, and panes that have changed identity or need attention.
+- Off-screen panes may temporarily reuse cached preview text and are refreshed
+  gradually across later polls.
 
 **R5. Integration architecture**
 
@@ -223,8 +229,10 @@ yet expose a stable contract.
 **R16. Sorting**
 
 - The dashboard provides at least two sidebar sort modes:
-- recent activity
-- attention-first status ordering
+- `recent -> status`
+- `attention -> recent`
+- `recent -> status` sorts by most recent activity first, then by status rank.
+- `attention -> recent` sorts by status rank first, then by most recent activity.
 - Changing sort mode preserves the current logical selection whenever possible.
 
 **R17. Pull request awareness**
@@ -312,6 +320,7 @@ yet expose a stable contract.
 - For each supported harness, Foreman defines how state transitions are debounced to avoid flicker and notification noise.
 - Native integrations should consume structured hooks, events, or machine-readable streams where available.
 - Compatibility integrations may use tmux-visible process metadata and captured terminal content, but these heuristics are treated as lower-confidence signals.
+- Compatibility integrations must not keep reviving an agent identity from stale title or preview text once the pane foreground command has returned to a shell.
 
 ### tmux contract
 
@@ -368,6 +377,8 @@ yet expose a stable contract.
 - Refreshes do not leave the dashboard pointing at an invalid target.
 - Selection remains logically stable across refresh and sorting changes.
 - Collapsed and expanded session state persists across refreshes.
+- Preview refresh prioritization does not change the logical selection model or
+  tmux targeting semantics.
 
 ### Integration precedence invariant
 
@@ -381,6 +392,8 @@ yet expose a stable contract.
 
 - tmux may be missing or not running.
 - A pane may fail to capture during polling.
+- Off-screen panes may temporarily show cached preview text while a later poll
+  refreshes them.
 - Native hooks, events, or machine-readable streams may be unavailable, misconfigured, or temporarily disconnected.
 - Compatibility heuristics may produce ambiguous or stale results.
 - Pull request tooling may be missing, unauthenticated, or rate-limited.
@@ -397,6 +410,9 @@ yet expose a stable contract.
 - The latest active run is easy to locate.
 - User-facing action failures are surfaced in the UI.
 - Pull request polling lifecycle and notification backend selection are observable through logs.
+- Debug logging surfaces timing for `move-selection`, `render_frame`, `inventory_tmux`, and `inventory_native`.
+- tmux timing logs expose how many previews were freshly captured vs reused from
+  cache on a given refresh.
 - Header-level system stats give the operator a quick read on local CPU and memory pressure.
 
 ## Acceptance
@@ -429,6 +445,7 @@ mise run ci
 **A4. Agent detection**
 
 - Given panes running supported agent families, including Claude Code, Codex CLI, Pi, Gemini CLI, and OpenCode signatures, when the monitor refreshes, those panes appear as recognized agents rather than generic panes.
+- Given a pane that previously showed supported agent output but whose foreground command is now a shell prompt, compatibility mode no longer treats that pane as an active agent based on stale preview or title text alone.
 
 **A5. Integration mode selection**
 
@@ -456,6 +473,7 @@ mise run ci
 - Activating a session header expands or collapses that session.
 - Given the dashboard is running, pressing `t` cycles the active theme without
   changing selection or mode.
+- The heavy validation lane includes a deterministic burst-navigation perf smoke that enforces a bounded `move-selection` latency budget with a crowded tmux fixture.
 - Given the dashboard is running, pressing `?` opens help with a legend for
   status and harness marks.
 - Given the help surface is taller than the visible popup, `j` / `k`,
@@ -525,7 +543,7 @@ mise run ci
 
 **A15. Sorting**
 
-- Given the dashboard is running, cycling sort mode reorders the sidebar by the selected mode and preserves the current logical selection where possible.
+- Given the dashboard is running, cycling sort mode reorders the sidebar by the selected preset (`recent -> status` or `attention -> recent`) and preserves the current logical selection where possible.
 
 **A16. Pull request awareness**
 
@@ -551,15 +569,18 @@ mise run ci
   binary.
 - Given `mise run verify-release` runs, the compiled binary completes the
   startup/discovery, action, and integration gauntlets inside temporary tmux
-  worlds and emits a durable checklist/report artifact.
+  worlds and emits a durable checklist/report artifact under `.ai/validation/release/`.
 - Given the focused runtime smoke runs, help/legend display, harness-view
-  cycling, and acting on the filtered selection all work in the compiled binary
-  inside real tmux.
+  cycling, deterministic native-hook provenance plus attention surfacing, live
+  `f` focus, and acting on the filtered selection all work in the compiled
+  binary inside real tmux.
 - Given the navigation performance smoke runs in the heavy UX lane, selection
   bursts do not trigger pull-request lookups for every intermediate workspace.
 - When CI runs, build, test, formatting, and lint checks succeed.
 - When CI runs the heavy validation lane, the UX artifact bundle and
   release-gauntlet report are uploaded as reviewable artifacts.
+- Those review artifacts come from a stable validation root under `.ai/validation/`
+  and missing evidence is treated as a failure.
 
 ### Definition of done
 

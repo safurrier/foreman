@@ -12,6 +12,7 @@ pub use state::{
     AgentSnapshot, AgentStatus, AppState, Filters, FlashNavigateKind, FlashState, FlashTarget,
     Focus, HarnessKind, IntegrationMode, Inventory, InventorySummary, ModalState, Mode,
     NotificationCooldownKey, NotificationKind, NotificationProfile, NotificationState,
-    OperatorAlert, OperatorAlertLevel, OperatorAlertSource, Pane, PaneId, SearchState,
-    SelectionTarget, Session, SessionId, SortMode, TextDraft, Window, WindowId,
+    OperatorAlert, OperatorAlertLevel, OperatorAlertSource, Pane, PaneId, PreviewProvenance,
+    SearchState, SelectionTarget, Session, SessionId, SidebarHarnessSummary, SidebarRowKind,
+    SortMode, TextDraft, VisibleTargetEntry, Window, WindowId,
 };

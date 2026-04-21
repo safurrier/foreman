@@ -115,8 +115,8 @@ pub struct MonitoringConfig {
 impl Default for MonitoringConfig {
     fn default() -> Self {
         Self {
-            poll_interval_ms: 1_000,
-            capture_lines: 200,
+            poll_interval_ms: 1_500,
+            capture_lines: 40,
         }
     }
 }

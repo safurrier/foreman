@@ -10,11 +10,16 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.environ["MISE_PROJECT_ROOT"], "scripts"))
-from lib import PROJECT_ROOT, log_ok, log_step  # noqa: E402
-
-ARTIFACT_DIR = (
-    PROJECT_ROOT / ".ai" / "plans" / "2026-04-10-110931-tui-ux-diagnostic" / "artifacts"
+from lib import (  # noqa: E402
+    PROJECT_ROOT,
+    UX_VALIDATION_ROOT,
+    log_error,
+    log_ok,
+    log_step,
+    validation_artifacts_required,
 )
+
+ARTIFACT_DIR = UX_VALIDATION_ROOT
 VISUAL_ENV_PATH = ARTIFACT_DIR / "visual-env.txt"
 TAPE_PATH = ARTIFACT_DIR / "foreman-ux-diagnostic.tape"
 PLACEHOLDER_VISUAL_ENV = (
@@ -22,6 +27,21 @@ PLACEHOLDER_VISUAL_ENV = (
     "socket=/tmp/foreman-ux-visual/tmux.sock\n"
     "log_dir=/tmp/foreman-ux-visual/logs\n"
 )
+EXPECTED_CAPTURE_PATHS = [
+    ARTIFACT_DIR / "foreman-ux-diagnostic.gif",
+    ARTIFACT_DIR / "foreman-ux-initial.png",
+    ARTIFACT_DIR / "foreman-ux-gruvbox.png",
+    ARTIFACT_DIR / "foreman-ux-no-color.png",
+    ARTIFACT_DIR / "foreman-ux-help.png",
+    ARTIFACT_DIR / "foreman-ux-search.png",
+    ARTIFACT_DIR / "foreman-ux-flash.png",
+]
+INITIAL_SCREENSHOT_PATH = ARTIFACT_DIR / "foreman-ux-initial.png"
+GRUVBOX_SCREENSHOT_PATH = ARTIFACT_DIR / "foreman-ux-gruvbox.png"
+NO_COLOR_SCREENSHOT_PATH = ARTIFACT_DIR / "foreman-ux-no-color.png"
+HELP_SCREENSHOT_PATH = ARTIFACT_DIR / "foreman-ux-help.png"
+SEARCH_SCREENSHOT_PATH = ARTIFACT_DIR / "foreman-ux-search.png"
+FLASH_SCREENSHOT_PATH = ARTIFACT_DIR / "foreman-ux-flash.png"
 
 
 def run(command: list[str], *, cwd: Path = PROJECT_ROOT) -> None:
@@ -66,7 +86,80 @@ def reset_visual_env() -> None:
     VISUAL_ENV_PATH.write_text(PLACEHOLDER_VISUAL_ENV, encoding="utf-8")
 
 
+def write_tape() -> None:
+    TAPE_PATH.write_text(
+        "\n".join(
+            [
+                f'Output "{(ARTIFACT_DIR / "foreman-ux-diagnostic.gif")}"',
+                "Set FontSize 15",
+                "Set Width 760",
+                "Set Height 540",
+                'Set FontFamily "Menlo"',
+                "Set LetterSpacing 0",
+                "Set LineHeight 1.2",
+                'Set Theme "Catppuccin Mocha"',
+                "Set Padding 20",
+                "Set TypingSpeed 0ms",
+                "Set PlaybackSpeed 1",
+                'Set Shell "bash"',
+                'Set WindowBar "Colorful"',
+                "",
+                f'Type@0ms "export PATH=$HOME/.cargo/bin:$PATH && cd {PROJECT_ROOT} && export PS1=\'$ \' && source {VISUAL_ENV_PATH}"',
+                "Enter",
+                "Sleep 500ms",
+                "Ctrl+L",
+                "Sleep 300ms",
+                "",
+                'Type@0ms "FOREMAN_LOG_DIR=$log_dir target/debug/foreman --no-notify --tmux-socket $socket"',
+                "Enter",
+                "Sleep 2200ms",
+                f'Screenshot "{INITIAL_SCREENSHOT_PATH}"',
+                "Sleep 500ms",
+                'Type "t"',
+                "Sleep 800ms",
+                f'Screenshot "{GRUVBOX_SCREENSHOT_PATH}"',
+                "Sleep 400ms",
+                'Type "ttttt"',
+                "Sleep 800ms",
+                f'Screenshot "{NO_COLOR_SCREENSHOT_PATH}"',
+                "Sleep 400ms",
+                'Type "t"',
+                "Sleep 400ms",
+                "",
+                'Type "?"',
+                "Sleep 800ms",
+                f'Screenshot "{HELP_SCREENSHOT_PATH}"',
+                "Sleep 400ms",
+                "",
+                'Type "?"',
+                "Sleep 400ms",
+                'Type "/"',
+                "Sleep 500ms",
+                'Type "gamma"',
+                "Sleep 800ms",
+                f'Screenshot "{SEARCH_SCREENSHOT_PATH}"',
+                "Sleep 500ms",
+                "Escape",
+                "Sleep 300ms",
+                'Type "s"',
+                "Sleep 700ms",
+                f'Screenshot "{FLASH_SCREENSHOT_PATH}"',
+                "Sleep 500ms",
+                "",
+                "Escape",
+                "Sleep 300ms",
+                'Type "q"',
+                "Sleep 300ms",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
 capture_only = "--capture-only" in sys.argv[1:]
+require_capture = validation_artifacts_required()
+ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
 
 if not capture_only:
     log_step("Running focused render regressions")
@@ -79,6 +172,9 @@ log_step("Running navigation/performance smoke")
 run(["cargo", "test", "--test", "runtime_profiling", "--", "--ignored"])
 
 if shutil.which("vhs") is None:
+    if require_capture:
+        log_error("VHS capture is required but `vhs` is not installed")
+        sys.exit(1)
     log_step("Skipping VHS capture because `vhs` is not installed")
     log_ok("UX verification complete")
     sys.exit(0)
@@ -93,6 +189,7 @@ with tempfile.TemporaryDirectory(prefix="foreman-ux-visual-") as temp_root:
     log_dir.mkdir(parents=True, exist_ok=True)
 
     write_visual_env(root, socket_path, log_dir)
+    write_tape()
 
     tmux(socket_path, "-f", "/dev/null", "start-server")
     try:
@@ -118,5 +215,13 @@ with tempfile.TemporaryDirectory(prefix="foreman-ux-visual-") as temp_root:
     finally:
         subprocess.run(["tmux", "-S", str(socket_path), "kill-server"], check=False)
         reset_visual_env()
+
+missing = [path for path in EXPECTED_CAPTURE_PATHS if not path.exists()]
+if missing:
+    log_error(
+        "Missing UX validation artifacts: "
+        + ", ".join(path.relative_to(PROJECT_ROOT).as_posix() for path in missing)
+    )
+    sys.exit(1)
 
 log_ok("UX verification complete")

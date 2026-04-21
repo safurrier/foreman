@@ -32,6 +32,9 @@ pub use pi_hook::{bridge_pi_event, PiHookBridgeError, PiHookBridgeRequest, PiHoo
 use std::path::Path;
 
 const WORKING_STATUS_DEBOUNCE_POLLS: u8 = 2;
+const SHELL_COMMANDS: &[&str] = &[
+    "ash", "bash", "csh", "dash", "fish", "ksh", "nu", "pwsh", "sh", "tcsh", "xonsh", "zsh",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CompatibilityObservation<'a> {
@@ -185,6 +188,10 @@ pub fn recognize_harness(
         return None;
     }
 
+    if is_shell_surface(observation) {
+        return None;
+    }
+
     if matches_any(observation, claude::recognition_tokens()) {
         return Some(HarnessKind::ClaudeCode);
     }
@@ -294,14 +301,22 @@ fn activity_score_for_status(status: AgentStatus) -> u64 {
 fn is_foreman_surface(observation: CompatibilityObservation<'_>) -> bool {
     let preview = observation.preview.to_ascii_lowercase();
 
-    observation
-        .current_command
-        .and_then(|command| command.split_whitespace().next())
-        .map(command_basename)
+    foreground_command_basename(observation.current_command)
         .is_some_and(|command| command == "foreman")
         || (preview.contains("foreman | ")
             && preview.contains("targets")
             && preview.contains("compose"))
+}
+
+fn is_shell_surface(observation: CompatibilityObservation<'_>) -> bool {
+    foreground_command_basename(observation.current_command)
+        .is_some_and(|command| SHELL_COMMANDS.contains(&command))
+}
+
+fn foreground_command_basename(current_command: Option<&str>) -> Option<&str> {
+    current_command
+        .and_then(|command| command.split_whitespace().next())
+        .map(command_basename)
 }
 
 fn command_basename(command: &str) -> &str {
@@ -379,6 +394,10 @@ mod tests {
             recognize_harness(None, "shell", "OpenCode interactive shell"),
             Some(HarnessKind::OpenCode)
         );
+        assert_eq!(
+            recognize_harness(Some("node"), "shell", "Codex CLI waiting for your input"),
+            Some(HarnessKind::CodexCli)
+        );
     }
 
     #[test]
@@ -399,9 +418,21 @@ mod tests {
     }
 
     #[test]
+    fn returns_none_for_shell_panes_with_stale_harness_breadcrumbs() {
+        assert_eq!(
+            recognize_harness(Some("zsh"), "claude", "Claude Code ready for the next task",),
+            None
+        );
+        assert_eq!(
+            recognize_harness(Some("bash"), "shell", "Codex CLI waiting for your input",),
+            None
+        );
+    }
+
+    #[test]
     fn compatibility_snapshot_maps_supported_harness_statuses() {
         let claude = compatibility_snapshot(observation(
-            Some("zsh"),
+            Some("claude"),
             "claude",
             "Claude Code is thinking about the next patch",
         ))
@@ -410,7 +441,7 @@ mod tests {
         assert_eq!(claude.status, AgentStatus::Working);
 
         let codex = compatibility_snapshot(observation(
-            Some("zsh"),
+            Some("node"),
             "codex",
             "Codex CLI waiting for your input before continuing",
         ))
@@ -427,7 +458,7 @@ mod tests {
         assert_eq!(pi.status, AgentStatus::Idle);
 
         let gemini = compatibility_snapshot(observation(
-            Some("zsh"),
+            Some("python3"),
             "gemini",
             "Gemini CLI ready for the next task",
         ))
@@ -435,12 +466,22 @@ mod tests {
         assert_eq!(gemini.status, AgentStatus::Idle);
 
         let opencode = compatibility_snapshot(observation(
-            Some("zsh"),
+            Some("node"),
             "opencode",
             "OpenCode panic: transport failed",
         ))
         .expect("snapshot should exist");
         assert_eq!(opencode.status, AgentStatus::Error);
+    }
+
+    #[test]
+    fn compatibility_snapshot_drops_shell_panes_with_stale_harness_text() {
+        assert!(compatibility_snapshot(observation(
+            Some("zsh"),
+            "claude",
+            "Claude Code is thinking about the next patch",
+        ))
+        .is_none());
     }
 
     #[test]

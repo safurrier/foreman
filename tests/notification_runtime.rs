@@ -42,6 +42,8 @@ fn wait_for_file_contents(path: &std::path::Path, needle: &str) {
 #[test]
 fn runtime_uses_configured_notification_backend_order() {
     let fixture = TmuxFixture::new();
+    let helper_pane = fixture.new_session("beta", &fixture.shell_command("Claude Code helper"));
+    fixture.wait_for_capture(&helper_pane, "Claude Code helper");
     let pane_id = fixture.new_session("alpha", &fixture.shell_command("Claude Code session"));
     fixture.wait_for_capture(&pane_id, "Claude Code session");
 
@@ -68,7 +70,7 @@ active_profile = "completion-only"
     .expect("config should be written");
 
     write_atomic(
-        &native_dir.join(format!("{pane_id}.json")),
+        &native_dir.join(format!("{helper_pane}.json")),
         r#"{"status":"working","activity_score":99}"#,
     );
 
@@ -105,9 +107,11 @@ active_profile = "completion-only"
 
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman");
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
+    fixture.send_keys(&dashboard_pane, &["j", "j", "j"]);
+    fixture.wait_for_alt_capture(&dashboard_pane, "› ▾ alpha");
 
     write_atomic(
-        &native_dir.join(format!("{pane_id}.json")),
+        &native_dir.join(format!("{helper_pane}.json")),
         r#"{"status":"idle","activity_score":44}"#,
     );
 
@@ -193,7 +197,7 @@ active_profile = "attention-only"
         r#"{"status":"idle","activity_score":44}"#,
     );
 
-    thread::sleep(Duration::from_millis(500));
+    wait_for_file_contents(&log_dir.join("latest.log"), "reason=profile_filtered");
     fixture.send_keys(&dashboard_pane, &["q"]);
     fixture.wait_for_capture(&dashboard_pane, "FOREMAN_EXITED");
 
@@ -210,7 +214,7 @@ fn interactive_input_then_completion_transition_emits_notification() {
     let fixture = TmuxFixture::new();
     let pane_id = fixture.new_session(
         "alpha",
-        r#"sh -lc 'printf "%s\n" "Claude Code ready"; while IFS= read -r line; do printf "%s\n" "INPUT:$line"; done'"#,
+        &fixture.interactive_echo_command("Claude Code ready", "INPUT:"),
     );
     fixture.wait_for_capture(&pane_id, "Claude Code ready");
     let beta_pane = fixture.new_session("beta", &fixture.shell_command("Claude Code ready"));

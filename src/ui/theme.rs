@@ -59,7 +59,7 @@ impl ThemeName {
                 danger: rgb(243, 139, 168),
                 selected_fg: rgb(30, 30, 46),
                 selected_bg: rgb(180, 190, 254),
-                working: rgb(137, 220, 235),
+                working: rgb(250, 179, 135),
                 attention: rgb(249, 226, 175),
                 idle: rgb(166, 227, 161),
                 error: rgb(243, 139, 168),
@@ -78,7 +78,7 @@ impl ThemeName {
                 danger: rgb(251, 73, 52),
                 selected_fg: rgb(40, 40, 40),
                 selected_bg: rgb(250, 189, 47),
-                working: rgb(142, 192, 124),
+                working: rgb(254, 128, 25),
                 attention: rgb(250, 189, 47),
                 idle: rgb(184, 187, 38),
                 error: rgb(251, 73, 52),
@@ -97,7 +97,7 @@ impl ThemeName {
                 danger: rgb(247, 118, 142),
                 selected_fg: rgb(26, 27, 38),
                 selected_bg: rgb(122, 162, 247),
-                working: rgb(125, 207, 255),
+                working: rgb(255, 158, 100),
                 attention: rgb(224, 175, 104),
                 idle: rgb(158, 206, 106),
                 error: rgb(247, 118, 142),
@@ -116,7 +116,7 @@ impl ThemeName {
                 danger: rgb(191, 97, 106),
                 selected_fg: rgb(46, 52, 64),
                 selected_bg: rgb(129, 161, 193),
-                working: rgb(94, 129, 172),
+                working: rgb(208, 135, 112),
                 attention: rgb(235, 203, 139),
                 idle: rgb(163, 190, 140),
                 error: rgb(191, 97, 106),
@@ -135,7 +135,7 @@ impl ThemeName {
                 danger: rgb(255, 85, 85),
                 selected_fg: rgb(40, 42, 54),
                 selected_bg: rgb(189, 147, 249),
-                working: rgb(139, 233, 253),
+                working: rgb(255, 184, 108),
                 attention: rgb(241, 250, 140),
                 idle: rgb(80, 250, 123),
                 error: rgb(255, 85, 85),
@@ -281,10 +281,10 @@ fn terminal_theme() -> Theme {
         danger_border: Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         selected: Style::default().add_modifier(Modifier::BOLD | Modifier::REVERSED),
         working: Style::default()
-            .fg(Color::Blue)
+            .fg(Color::Yellow)
             .add_modifier(Modifier::BOLD),
         attention: Style::default()
-            .fg(Color::Yellow)
+            .fg(Color::LightYellow)
             .add_modifier(Modifier::BOLD),
         idle: Style::default()
             .fg(Color::Green)

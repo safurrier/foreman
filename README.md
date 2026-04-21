@@ -118,6 +118,7 @@ Common dashboard keys:
 - `f` jumps tmux to the actionable pane
 - `Enter` sends in compose mode and acts on the selected row in normal mode
 - `/` starts search
+- `o` cycles `recent->status` and `attention->recent`
 - `s` starts flash jump
 - `h` cycles only the visible harness families, then returns to `all`
 - `H` / `P` reveal non-agent sessions or panes
@@ -127,8 +128,26 @@ Common dashboard keys:
 Preview and help also surface where a status came from:
 - `native hook` means a structured harness signal and is treated as higher confidence
 - `compatibility heuristic` means tmux-observed behavior and is treated as lower confidence
+- the help overlay starts with a legend for tree, status, and harness glyphs so the sidebar icons are decodable without guesswork
 - selected panes can now surface compact setup hints and point back to
   `foreman --setup --user --project` or `foreman --doctor` when compatibility fallback looks suspicious
+
+If `j` / `k` still feels slow locally, run with debug logging and inspect the latest run log:
+
+```bash
+foreman --debug
+tail -f ~/.local/state/foreman/logs/latest.log
+```
+
+Useful timing lines:
+- `timing operation=action action=move-selection ...`
+- `timing operation=render_frame ...`
+- `timing operation=inventory_tmux ...`
+- `timing operation=inventory_native ...`
+
+`inventory_tmux` now also shows how many panes were freshly captured vs reused
+from cached previews on that refresh, which is the first thing to check if
+local lag still feels tied to tmux polling.
 
 Theme selection:
 
@@ -339,10 +358,10 @@ mise run plan -- <slug>
 | `mise run ci` | CI entrypoint (= check) |
 | `mise run plan -- <slug>` | Create a plan directory for a unit of work |
 | `mise run verify` | Heavy validation (integration, docker, security) |
-| `mise run verify-release` | Release-confidence compiled-binary tmux gauntlet plus checklist/report artifact |
+| `mise run verify-release` | Release-confidence compiled-binary tmux gauntlet plus checklist/report artifact under `.ai/validation/release/` |
 | `mise run native-preflight` | Check tmux plus local Claude/Codex/Pi readiness before the real native E2E lane |
 | `mise run verify-native` | Real Claude, Codex, and Pi E2E drill; strict mode requires all env flags and actual execution |
-| `mise run verify-ux` | Focused TUI/runtime smoke, navigation perf smoke, plus VHS artifact refresh |
+| `mise run verify-ux` | Focused TUI/runtime smoke, deterministic native-dashboard/focus checks, navigation perf smoke, plus VHS artifact refresh under `.ai/validation/ux/` |
 
 ## GitHub Actions
 
@@ -361,6 +380,11 @@ mise run plan -- <slug>
    first, then strict `mise run verify-native`.
 5. Push a matching annotated tag such as `v1.0.0`.
 6. GitHub Actions verifies the repo and publishes release bundles.
+
+Validation evidence now lands in a stable root:
+
+- `.ai/validation/ux/`
+- `.ai/validation/release/`
 
 Strict native verification:
 

@@ -1,4 +1,4 @@
-use crate::adapters::tmux::{SystemTmuxBackend, TmuxAdapter};
+use crate::adapters::tmux::{InventoryLoadMetrics, SystemTmuxBackend, TmuxAdapter};
 use crate::app::{
     AppState, InventorySummary, OperatorAlert, OperatorAlertLevel, OperatorAlertSource,
 };
@@ -19,6 +19,7 @@ use crate::services::system_stats::{SysinfoSystemStatsBackend, SystemStatsServic
 use clap::Parser;
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 const CLI_ABOUT: &str = "Foreman - watch and control AI coding agents running in tmux.";
 const CLI_LONG_ABOUT: &str = "Foreman is a keyboard-first dashboard for AI coding agents running in tmux.\n\nUse when: you want one operator surface for Claude Code, Codex, Pi, Gemini, or OpenCode panes.\nDon't use to: inspect a plain tmux tree with no agent workflow.";
@@ -246,6 +247,14 @@ impl PreparedBootstrap {
             pi_native: self.pi_native,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct BootstrapNativeTiming {
+    pub claude_ms: u128,
+    pub codex_ms: u128,
+    pub pi_ms: u128,
+    pub total_ms: u128,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -496,7 +505,50 @@ pub(crate) fn prepare_bootstrap(
     logger
         .debug("bootstrap_debug_logging_enabled")
         .map_err(ConfigError::Io)?;
-    let (state, claude_native, codex_native, pi_native) = bootstrap_state(&runtime);
+    let (state, tmux_metrics, native_timing, claude_native, codex_native, pi_native) =
+        bootstrap_state(&runtime);
+    logger
+            .log_timing(
+                "inventory_tmux",
+                &format!(
+                    "pane_records={} captures={} priority_captures={} deferred_captures={} forced_captures={} reused_previews={} capture_failures={} list_panes_ms={} capture_total_ms={} capture_max_ms={} total_ms={}",
+                    tmux_metrics.pane_records,
+                    tmux_metrics.capture_count,
+                    tmux_metrics.priority_capture_count,
+                    tmux_metrics.deferred_capture_count,
+                    tmux_metrics.forced_capture_count,
+                    tmux_metrics.reused_preview_count,
+                    tmux_metrics.capture_failures,
+                    tmux_metrics.list_panes_ms,
+                    tmux_metrics.capture_total_ms,
+                tmux_metrics.capture_max_ms,
+                tmux_metrics.total_ms,
+            ),
+        )
+        .map_err(ConfigError::Io)?;
+    for pane_id in &tmux_metrics.capture_failure_panes {
+        logger
+            .log_tmux_capture_failure(pane_id.as_str())
+            .map_err(ConfigError::Io)?;
+    }
+    logger
+        .log_timing(
+            "inventory_native",
+            &format!(
+                "claude_ms={} codex_ms={} pi_ms={} total_ms={} claude_applied={} claude_fallbacks={} codex_applied={} codex_fallbacks={} pi_applied={} pi_fallbacks={}",
+                native_timing.claude_ms,
+                native_timing.codex_ms,
+                native_timing.pi_ms,
+                native_timing.total_ms,
+                claude_native.applied,
+                claude_native.fallback_to_compatibility,
+                codex_native.applied,
+                codex_native.fallback_to_compatibility,
+                pi_native.applied,
+                pi_native.fallback_to_compatibility,
+            ),
+        )
+        .map_err(ConfigError::Io)?;
     let inventory = state.inventory_summary();
     logger.log_inventory(&inventory).map_err(ConfigError::Io)?;
     logger
@@ -547,6 +599,8 @@ pub(crate) fn bootstrap_state(
     runtime: &RuntimeConfig,
 ) -> (
     AppState,
+    InventoryLoadMetrics,
+    BootstrapNativeTiming,
     ClaudeNativeOverlaySummary,
     CodexNativeOverlaySummary,
     PiNativeOverlaySummary,
@@ -555,23 +609,30 @@ pub(crate) fn bootstrap_state(
         .snapshot()
         .unwrap_or_default();
     let adapter = TmuxAdapter::new(SystemTmuxBackend::new(runtime.tmux_socket.clone()));
-    match adapter.load_inventory(runtime.capture_lines) {
-        Ok(mut inventory) => {
+    match adapter.load_inventory_profiled(runtime.capture_lines) {
+        Ok((mut inventory, tmux_metrics)) => {
+            let native_started = Instant::now();
+            let claude_started = Instant::now();
             let claude_native = apply_configured_claude_signals(
                 &mut inventory,
                 runtime.claude_native_dir.as_deref(),
                 runtime.claude_integration_preference,
             );
+            let claude_ms = claude_started.elapsed().as_millis();
+            let codex_started = Instant::now();
             let codex_native = apply_configured_codex_signals(
                 &mut inventory,
                 runtime.codex_native_dir.as_deref(),
                 runtime.codex_integration_preference,
             );
+            let codex_ms = codex_started.elapsed().as_millis();
+            let pi_started = Instant::now();
             let pi_native = apply_configured_pi_signals(
                 &mut inventory,
                 runtime.pi_native_dir.as_deref(),
                 runtime.pi_integration_preference,
             );
+            let pi_ms = pi_started.elapsed().as_millis();
 
             let mut state = AppState {
                 popup_mode: runtime.popup,
@@ -603,7 +664,19 @@ pub(crate) fn bootstrap_state(
                     ));
                 }
             }
-            (state, claude_native, codex_native, pi_native)
+            (
+                state,
+                tmux_metrics,
+                BootstrapNativeTiming {
+                    claude_ms,
+                    codex_ms,
+                    pi_ms,
+                    total_ms: native_started.elapsed().as_millis(),
+                },
+                claude_native,
+                codex_native,
+                pi_native,
+            )
         }
         Err(error) => {
             let mut state = AppState {
@@ -622,6 +695,8 @@ pub(crate) fn bootstrap_state(
             state.notifications.cooldown_ticks = runtime.notification_cooldown_ticks;
             (
                 state,
+                InventoryLoadMetrics::default(),
+                BootstrapNativeTiming::default(),
                 ClaudeNativeOverlaySummary::default(),
                 CodexNativeOverlaySummary::default(),
                 PiNativeOverlaySummary::default(),

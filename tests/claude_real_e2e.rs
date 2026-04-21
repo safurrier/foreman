@@ -93,6 +93,10 @@ fn claude_is_available() -> bool {
         .unwrap_or(false)
 }
 
+fn shell_quote(input: &str) -> String {
+    format!("'{}'", input.replace('\'', r#"'\''"#))
+}
+
 #[test]
 #[ignore = "requires Claude Code auth, network, and explicit opt-in"]
 fn real_claude_prompt_sent_through_dashboard_emits_completion_notification() {
@@ -210,11 +214,12 @@ native_dir = "{native_dir}"
     )
     .expect("config should be written");
 
-    let agent_command = format!(
-        "sh -lc 'export PATH=\"{}:$PATH\"; printf \"Claude hook loop ready\\n\"; while IFS= read -r line; do printf \"PROMPT:%s\\n\" \"$line\"; claude -p --settings \"{}\" \"$line\"; printf \"__CLAUDE_DONE__\\n\"; done'",
-        bin_dir.display(),
-        settings_path.display(),
+    let agent_script = format!(
+        "import os\nimport subprocess\nimport sys\nos.environ['PATH'] = {bin_dir:?} + os.pathsep + os.environ.get('PATH', '')\nsettings_path = {settings_path:?}\nprint('Claude hook loop ready', flush=True)\nfor line in sys.stdin:\n    prompt = line.rstrip('\\n')\n    print(f'PROMPT:{{prompt}}', flush=True)\n    subprocess.run(['claude', '-p', '--settings', settings_path, prompt], check=True)\n    print('__CLAUDE_DONE__', flush=True)\n",
+        bin_dir = bin_dir.display().to_string(),
+        settings_path = settings_path.display().to_string(),
     );
+    let agent_command = format!("python3 -u -c {}", shell_quote(&agent_script));
     let agent_pane = fixture.new_session("alpha", &agent_command);
     fixture.wait_for_capture(&agent_pane, "Claude hook loop ready");
 

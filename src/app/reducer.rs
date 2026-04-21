@@ -71,6 +71,7 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             state.modal = None;
             state.flash = None;
             state.search = Some(SearchState::new(state.selection.clone()));
+            state.rebuild_visible_state();
             reconcile_visible_selection(state);
         }
         Action::BeginFlash { kind } => {
@@ -150,6 +151,7 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
                         .and_then(|search| search.restore_selection);
                     state.mode = Mode::Normal;
                     state.focus = Focus::Sidebar;
+                    state.rebuild_visible_state();
                     restore_base_selection(state, restore_selection);
                     reconcile_pull_request_detail(state);
                     return Vec::new();
@@ -196,6 +198,9 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
         Action::SetFocus(focus) => {
             state.focus = focus;
         }
+        Action::SetSidebarViewportRows(rows) => {
+            state.set_sidebar_viewport_rows(rows as usize);
+        }
         Action::ScrollHelpBy(delta) => {
             if state.mode == Mode::Help {
                 if delta.is_negative() {
@@ -216,14 +221,19 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             }
         }
         Action::SetSelection(target) => {
-            if state.visible_targets().contains(&target) {
+            if state
+                .visible_target_entries()
+                .iter()
+                .any(|entry| entry.target == target)
+            {
                 state.selection = Some(target);
                 state.focus = Focus::Sidebar;
+                state.reconcile_sidebar_scroll();
                 reconcile_pull_request_detail(state);
             }
         }
         Action::MoveSelection(direction) => {
-            let visible_targets = state.visible_targets();
+            let visible_targets = state.visible_target_entries();
             if visible_targets.is_empty() {
                 state.selection = None;
                 return Vec::new();
@@ -232,7 +242,7 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             let current_index = state.selection.as_ref().and_then(|target| {
                 visible_targets
                     .iter()
-                    .position(|candidate| candidate == target)
+                    .position(|candidate| &candidate.target == target)
             });
 
             let next_index = match (current_index, direction) {
@@ -244,7 +254,8 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
                 (None, SelectionDirection::Next) => 0,
             };
 
-            state.selection = Some(visible_targets[next_index].clone());
+            state.selection = Some(visible_targets[next_index].target.clone());
+            state.reconcile_sidebar_scroll();
             reconcile_pull_request_detail(state);
         }
         Action::ReplaceInventory(mut inventory) => {
@@ -254,6 +265,7 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             state
                 .collapsed_sessions
                 .retain(|session_id| state.inventory.contains_session(session_id));
+            state.rebuild_visible_state();
             state.reconcile_selection();
             reconcile_interaction_state(state);
             reconcile_pull_request_detail(state);
@@ -271,10 +283,12 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             let selected = state.selection.clone();
             state.mode = Mode::Normal;
             state.search = None;
+            state.rebuild_visible_state();
 
             match selected {
                 Some(SelectionTarget::Session(session_id)) => {
                     state.collapsed_sessions.remove(&session_id);
+                    state.rebuild_visible_state();
                     reconcile_visible_selection(state);
                     reconcile_pull_request_detail(state);
                 }
@@ -315,6 +329,7 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
                 if let Some(search) = state.search.as_mut() {
                     if !matches!(edit, DraftEdit::InsertNewline) {
                         apply_draft_edit(&mut search.draft, edit);
+                        state.rebuild_visible_state();
                         reconcile_visible_selection(state);
                         reconcile_pull_request_detail(state);
                     }
@@ -384,12 +399,14 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
         }
         Action::ToggleShowNonAgentSessions => {
             state.filters.show_non_agent_sessions = !state.filters.show_non_agent_sessions;
+            state.rebuild_visible_state();
             state.reconcile_selection();
             reconcile_visible_selection(state);
             reconcile_pull_request_detail(state);
         }
         Action::ToggleShowNonAgentPanes => {
             state.filters.show_non_agent_panes = !state.filters.show_non_agent_panes;
+            state.rebuild_visible_state();
             state.reconcile_selection();
             reconcile_visible_selection(state);
             reconcile_pull_request_detail(state);
@@ -397,6 +414,7 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
         Action::CycleHarnessFilter => {
             let available_harnesses = state.inventory.available_harnesses();
             state.filters.cycle_harness(&available_harnesses);
+            state.rebuild_visible_state();
             state.reconcile_selection();
             reconcile_visible_selection(state);
             reconcile_pull_request_detail(state);
@@ -410,12 +428,14 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
                 state.collapsed_sessions.remove(&session_id);
             }
 
+            state.rebuild_visible_state();
             state.reconcile_selection();
             reconcile_visible_selection(state);
             reconcile_pull_request_detail(state);
         }
         Action::SetSortMode(sort_mode) => {
             state.sort_mode = sort_mode;
+            state.rebuild_visible_state();
             state.reconcile_selection();
             reconcile_visible_selection(state);
             reconcile_pull_request_detail(state);
@@ -511,24 +531,28 @@ fn restore_base_selection(state: &mut AppState, restore_selection: Option<Select
         &state.collapsed_sessions,
         state.sort_mode,
     );
+    state.reconcile_sidebar_scroll();
 }
 
 fn reconcile_visible_selection(state: &mut AppState) {
-    let visible_targets = state.visible_targets();
+    let visible_targets = state.visible_target_entries();
     if visible_targets.is_empty() {
         state.selection = None;
+        state.reconcile_sidebar_scroll();
         return;
     }
 
-    if state
-        .selection
-        .as_ref()
-        .is_some_and(|selection| visible_targets.contains(selection))
-    {
+    if state.selection.as_ref().is_some_and(|selection| {
+        visible_targets
+            .iter()
+            .any(|entry| &entry.target == selection)
+    }) {
+        state.reconcile_sidebar_scroll();
         return;
     }
 
-    state.selection = Some(visible_targets[0].clone());
+    state.selection = Some(visible_targets[0].target.clone());
+    state.reconcile_sidebar_scroll();
 }
 
 fn reconcile_flash_selection(state: &mut AppState) {
@@ -549,6 +573,7 @@ fn reconcile_flash_selection(state: &mut AppState) {
         restore_base_selection(state, flash.restore_selection.clone());
     }
 
+    state.reconcile_sidebar_scroll();
     reconcile_pull_request_detail(state);
 }
 
@@ -559,8 +584,8 @@ fn reconcile_interaction_state(state: &mut AppState) {
         state.input_draft.clear();
     }
 
-    if state.mode != Mode::Search {
-        state.search = None;
+    if state.mode != Mode::Search && state.search.take().is_some() {
+        state.rebuild_visible_state();
     }
 
     if state.mode != Mode::FlashNavigate {
@@ -659,7 +684,7 @@ fn notification_effects_for_refresh(
         previous_inventory,
         &state.inventory,
         NotificationPolicyContext {
-            selected_pane_id: state.selected_pane_id().as_ref(),
+            selected_pane_id: state.selected_actionable_pane_id().as_ref(),
             muted: state.notifications.muted,
             profile: state.notifications.profile,
             refresh_tick: state.notifications.refresh_tick,
@@ -733,6 +758,25 @@ mod tests {
             author: "alex".to_string(),
             status: PullRequestStatus::Open,
         })
+    }
+
+    fn tall_inventory() -> crate::app::Inventory {
+        let mut window = WindowBuilder::new("alpha:agents").name("agents");
+        for index in 0..6 {
+            window = window.pane(
+                PaneBuilder::agent(format!("alpha:pane:{index}"), HarnessKind::ClaudeCode)
+                    .title(if index == 0 {
+                        "needle".to_string()
+                    } else {
+                        format!("pane-{index}")
+                    })
+                    .working_dir("/tmp/alpha")
+                    .status(AgentStatus::Working)
+                    .activity_score((10 - index) as u64),
+            );
+        }
+
+        inventory([SessionBuilder::new("alpha").window(window)])
     }
 
     #[test]
@@ -836,6 +880,55 @@ mod tests {
             state.selection,
             Some(SelectionTarget::Window("beta:agents".into()))
         );
+    }
+
+    #[test]
+    fn move_selection_reconciles_sidebar_scroll_for_small_viewport() {
+        let mut state = AppState::with_inventory(tall_inventory());
+        reduce(&mut state, Action::SetSidebarViewportRows(3));
+        reduce(
+            &mut state,
+            Action::SetSelection(SelectionTarget::Pane("alpha:pane:0".into())),
+        );
+
+        assert_eq!(state.sidebar_scroll, 0);
+
+        reduce(&mut state, Action::MoveSelection(SelectionDirection::Next));
+        assert_eq!(
+            state.selection,
+            Some(SelectionTarget::Pane("alpha:pane:1".into()))
+        );
+        assert_eq!(state.sidebar_scroll, 1);
+
+        reduce(&mut state, Action::MoveSelection(SelectionDirection::Next));
+        assert_eq!(
+            state.selection,
+            Some(SelectionTarget::Pane("alpha:pane:2".into()))
+        );
+        assert_eq!(state.sidebar_scroll, 2);
+    }
+
+    #[test]
+    fn search_reconciles_sidebar_scroll_after_row_count_shrinks() {
+        let mut state = AppState::with_inventory(tall_inventory());
+        reduce(&mut state, Action::SetSidebarViewportRows(3));
+        reduce(
+            &mut state,
+            Action::SetSelection(SelectionTarget::Pane("alpha:pane:4".into())),
+        );
+
+        assert!(state.sidebar_scroll > 0);
+
+        reduce(&mut state, Action::BeginSearch);
+        for ch in "needle".chars() {
+            reduce(&mut state, Action::EditDraft(DraftEdit::InsertChar(ch)));
+        }
+
+        assert_eq!(
+            state.selection,
+            Some(SelectionTarget::Pane("alpha:pane:0".into()))
+        );
+        assert_eq!(state.sidebar_scroll, 0);
     }
 
     #[test]
@@ -1552,22 +1645,39 @@ mod tests {
 
     #[test]
     fn replace_inventory_emits_completion_notification_and_records_cooldown() {
-        let mut state = AppState::with_inventory(inventory([SessionBuilder::new("alpha").window(
-            WindowBuilder::new("alpha:agents").pane(
-                PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
-                    .working_dir("/tmp/alpha")
-                    .status(AgentStatus::Working),
-            ),
-        )]));
-        state.selection = Some(SelectionTarget::Session("alpha".into()));
+        let initial_inventory = inventory([SessionBuilder::new("alpha")
+            .window(
+                WindowBuilder::new("alpha:agents").pane(
+                    PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
+                        .working_dir("/tmp/alpha")
+                        .status(AgentStatus::Working),
+                ),
+            )
+            .window(
+                WindowBuilder::new("alpha:side").pane(
+                    PaneBuilder::agent("alpha:helper", HarnessKind::ClaudeCode)
+                        .working_dir("/tmp/alpha-helper")
+                        .status(AgentStatus::Idle),
+                ),
+            )]);
+        let mut state = AppState::with_inventory(initial_inventory);
+        state.selection = Some(SelectionTarget::Pane("alpha:helper".into()));
 
-        let refreshed_inventory = inventory([SessionBuilder::new("alpha").window(
-            WindowBuilder::new("alpha:agents").pane(
-                PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
-                    .working_dir("/tmp/alpha")
-                    .status(AgentStatus::Idle),
-            ),
-        )]);
+        let refreshed_inventory = inventory([SessionBuilder::new("alpha")
+            .window(
+                WindowBuilder::new("alpha:agents").pane(
+                    PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
+                        .working_dir("/tmp/alpha")
+                        .status(AgentStatus::Idle),
+                ),
+            )
+            .window(
+                WindowBuilder::new("alpha:side").pane(
+                    PaneBuilder::agent("alpha:helper", HarnessKind::ClaudeCode)
+                        .working_dir("/tmp/alpha-helper")
+                        .status(AgentStatus::Idle),
+                ),
+            )]);
 
         let first_effects = reduce(
             &mut state,
@@ -1644,6 +1754,78 @@ mod tests {
             &muted_effects[0],
             super::Effect::LogNotificationDecision { decision }
                 if decision.request.is_none()
+        ));
+    }
+
+    #[test]
+    fn replace_inventory_suppresses_notification_for_session_and_window_selection() {
+        let initial_inventory = inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:agents")
+                .pane(
+                    PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
+                        .working_dir("/tmp/actionable")
+                        .status(AgentStatus::Working)
+                        .activity_score(50),
+                )
+                .pane(
+                    PaneBuilder::agent("alpha:helper", HarnessKind::ClaudeCode)
+                        .working_dir("/tmp/helper")
+                        .status(AgentStatus::Idle)
+                        .activity_score(5),
+                ),
+        )]);
+        let refreshed_inventory = inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:agents")
+                .pane(
+                    PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
+                        .working_dir("/tmp/actionable")
+                        .status(AgentStatus::Idle)
+                        .activity_score(20),
+                )
+                .pane(
+                    PaneBuilder::agent("alpha:helper", HarnessKind::ClaudeCode)
+                        .working_dir("/tmp/helper")
+                        .status(AgentStatus::Idle)
+                        .activity_score(5),
+                ),
+        )]);
+
+        let mut session_state = AppState::with_inventory(initial_inventory.clone());
+        session_state.selection = Some(SelectionTarget::Session("alpha".into()));
+        let first_session_effects = reduce(
+            &mut session_state,
+            Action::ReplaceInventory(refreshed_inventory.clone()),
+        );
+        assert!(first_session_effects.is_empty());
+        let session_effects = reduce(
+            &mut session_state,
+            Action::ReplaceInventory(refreshed_inventory.clone()),
+        );
+        assert_eq!(session_effects.len(), 1);
+        assert!(matches!(
+            &session_effects[0],
+            super::Effect::LogNotificationDecision { decision }
+                if decision.request.is_none()
+                    && decision.pane_id == crate::app::PaneId::new("alpha:claude")
+        ));
+
+        let mut window_state = AppState::with_inventory(initial_inventory);
+        window_state.selection = Some(SelectionTarget::Window("alpha:agents".into()));
+        let first_window_effects = reduce(
+            &mut window_state,
+            Action::ReplaceInventory(refreshed_inventory.clone()),
+        );
+        assert!(first_window_effects.is_empty());
+        let window_effects = reduce(
+            &mut window_state,
+            Action::ReplaceInventory(refreshed_inventory),
+        );
+        assert_eq!(window_effects.len(), 1);
+        assert!(matches!(
+            &window_effects[0],
+            super::Effect::LogNotificationDecision { decision }
+                if decision.request.is_none()
+                    && decision.pane_id == crate::app::PaneId::new("alpha:claude")
         ));
     }
 

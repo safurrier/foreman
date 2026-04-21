@@ -9,10 +9,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.environ["MISE_PROJECT_ROOT"], "scripts"))
-from lib import PROJECT_ROOT, log_ok, log_step  # noqa: E402
+from lib import PROJECT_ROOT, RELEASE_VALIDATION_ROOT, log_error, log_ok, log_step  # noqa: E402
 
 PLAN_DIR = PROJECT_ROOT / ".ai" / "plans" / "2026-04-10-151735-release-validation-gauntlet"
-ARTIFACT_DIR = PLAN_DIR / "artifacts"
+ARTIFACT_DIR = RELEASE_VALIDATION_ROOT
 OUTPUT_PATH = ARTIFACT_DIR / "release-gauntlet-output.txt"
 REPORT_PATH = ARTIFACT_DIR / "release-validation-report.md"
 CHECKLIST_PATH = PLAN_DIR / "CHECKLIST.md"
@@ -86,6 +86,14 @@ write_report(status)
 
 if result.returncode != 0:
     sys.exit(result.returncode)
+
+missing = [path for path in [OUTPUT_PATH, REPORT_PATH] if not path.exists()]
+if missing:
+    log_error(
+        "Missing release validation artifacts: "
+        + ", ".join(path.relative_to(PROJECT_ROOT).as_posix() for path in missing)
+    )
+    sys.exit(1)
 
 log_ok("Release gauntlet")
 log_ok(f"Report: {REPORT_PATH.relative_to(PROJECT_ROOT)}")

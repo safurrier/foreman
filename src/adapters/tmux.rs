@@ -1,9 +1,13 @@
-use crate::app::{Inventory, Pane, PaneId, Session, SessionId, Window, WindowId};
+use crate::app::{
+    Inventory, Pane, PaneId, PreviewProvenance, Session, SessionId, Window, WindowId,
+};
 use crate::integrations::{compatibility_snapshot, CompatibilityObservation};
+use std::collections::BTreeSet;
 use std::fmt;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::Instant;
 
 const LIST_PANES_FORMAT: &str = "#{session_id}\t#{session_name}\t#{window_id}\t#{window_name}\t#{pane_id}\t#{pane_title}\t#{pane_current_command}\t#{pane_current_path}";
 
@@ -70,6 +74,46 @@ pub struct KillPaneResult {
     pub pane_id: PaneId,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct InventoryLoadMetrics {
+    pub pane_records: usize,
+    pub capture_count: usize,
+    pub priority_capture_count: usize,
+    pub deferred_capture_count: usize,
+    pub forced_capture_count: usize,
+    pub capture_failures: usize,
+    pub capture_failure_panes: Vec<PaneId>,
+    pub reused_preview_count: usize,
+    pub list_panes_ms: u128,
+    pub capture_total_ms: u128,
+    pub capture_max_ms: u128,
+    pub total_ms: u128,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct InventoryLoadPolicy {
+    pub priority_panes: BTreeSet<PaneId>,
+    pub deferred_panes: BTreeSet<PaneId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CaptureReason {
+    Priority,
+    Deferred,
+    Forced,
+}
+
+impl CaptureReason {
+    fn track(self, metrics: &mut InventoryLoadMetrics) {
+        metrics.capture_count += 1;
+        match self {
+            Self::Priority => metrics.priority_capture_count += 1,
+            Self::Deferred => metrics.deferred_capture_count += 1,
+            Self::Forced => metrics.forced_capture_count += 1,
+        }
+    }
+}
+
 pub trait TmuxBackend {
     fn list_panes(&self) -> Result<Vec<TmuxPaneRecord>, TmuxError>;
 
@@ -107,14 +151,70 @@ impl<B> TmuxAdapter<B> {
 
 impl<B: TmuxBackend> TmuxAdapter<B> {
     pub fn load_inventory(&self, capture_lines: usize) -> Result<Inventory, TmuxError> {
+        self.load_inventory_profiled(capture_lines)
+            .map(|(inventory, _)| inventory)
+    }
+
+    pub fn load_inventory_profiled(
+        &self,
+        capture_lines: usize,
+    ) -> Result<(Inventory, InventoryLoadMetrics), TmuxError> {
+        self.load_inventory_profiled_with_policy(
+            capture_lines,
+            None,
+            &InventoryLoadPolicy::default(),
+        )
+    }
+
+    pub fn load_inventory_profiled_with_policy(
+        &self,
+        capture_lines: usize,
+        previous_inventory: Option<&Inventory>,
+        policy: &InventoryLoadPolicy,
+    ) -> Result<(Inventory, InventoryLoadMetrics), TmuxError> {
+        let load_started = Instant::now();
+        let list_panes_started = Instant::now();
         let pane_records = self.backend.list_panes()?;
+        let list_panes_ms = list_panes_started.elapsed().as_millis();
+        let mut metrics = InventoryLoadMetrics {
+            pane_records: pane_records.len(),
+            list_panes_ms,
+            ..InventoryLoadMetrics::default()
+        };
         let mut sessions: Vec<Session> = Vec::new();
 
         for record in pane_records {
-            let preview = self
-                .backend
-                .capture_pane(&record.pane_id, capture_lines)
-                .unwrap_or_default();
+            let previous_pane =
+                previous_inventory.and_then(|inventory| inventory.pane(&record.pane_id));
+            let (preview, preview_provenance) =
+                match preview_resolution(previous_pane, &record, policy) {
+                    Some(reason) => {
+                        reason.track(&mut metrics);
+                        let capture_started = Instant::now();
+                        let capture =
+                            match self.backend.capture_pane(&record.pane_id, capture_lines) {
+                                Ok(preview) => (preview, PreviewProvenance::Captured),
+                                Err(_) => {
+                                    metrics.capture_failures += 1;
+                                    metrics.capture_failure_panes.push(record.pane_id.clone());
+                                    (String::new(), PreviewProvenance::CaptureFailed)
+                                }
+                            };
+                        let capture_ms = capture_started.elapsed().as_millis();
+                        metrics.capture_total_ms += capture_ms;
+                        metrics.capture_max_ms = metrics.capture_max_ms.max(capture_ms);
+                        capture
+                    }
+                    None => {
+                        metrics.reused_preview_count += 1;
+                        (
+                            previous_pane
+                                .map(|pane| pane.preview.clone())
+                                .unwrap_or_default(),
+                            PreviewProvenance::ReusedCached,
+                        )
+                    }
+                };
             let pane_title = record.pane_title.clone();
             let current_command = record.current_command.clone();
             let agent = compatibility_snapshot(CompatibilityObservation::new(
@@ -128,6 +228,7 @@ impl<B: TmuxBackend> TmuxAdapter<B> {
                 current_command,
                 working_dir: record.current_path.clone(),
                 preview,
+                preview_provenance,
                 agent,
             };
 
@@ -162,7 +263,8 @@ impl<B: TmuxBackend> TmuxAdapter<B> {
             }
         }
 
-        Ok(Inventory::new(sessions))
+        metrics.total_ms = load_started.elapsed().as_millis();
+        Ok((Inventory::new(sessions), metrics))
     }
 
     pub fn focus_pane(&self, pane_id: &PaneId) -> Result<(), TmuxError> {
@@ -192,6 +294,36 @@ impl<B: TmuxBackend> TmuxAdapter<B> {
     pub fn kill_pane(&self, pane_id: &PaneId) -> Result<KillPaneResult, TmuxError> {
         self.backend.kill_pane(pane_id)
     }
+}
+
+fn preview_resolution(
+    previous_pane: Option<&Pane>,
+    record: &TmuxPaneRecord,
+    policy: &InventoryLoadPolicy,
+) -> Option<CaptureReason> {
+    let Some(previous_pane) = previous_pane else {
+        return Some(CaptureReason::Forced);
+    };
+
+    if pane_metadata_changed(previous_pane, record) || previous_pane.preview.is_empty() {
+        return Some(CaptureReason::Forced);
+    }
+
+    if policy.priority_panes.contains(&record.pane_id) {
+        return Some(CaptureReason::Priority);
+    }
+
+    if policy.deferred_panes.contains(&record.pane_id) {
+        return Some(CaptureReason::Deferred);
+    }
+
+    None
+}
+
+fn pane_metadata_changed(previous_pane: &Pane, record: &TmuxPaneRecord) -> bool {
+    previous_pane.title != non_empty(record.pane_title.clone(), record.pane_id.as_str())
+        || previous_pane.current_command != record.current_command
+        || previous_pane.working_dir != record.current_path
 }
 
 #[derive(Debug, Clone, Default)]
@@ -286,14 +418,25 @@ impl TmuxBackend for SystemTmuxBackend {
     }
 
     fn focus_pane(&self, pane_id: &PaneId) -> Result<(), TmuxError> {
-        let window_id = self.run_tmux(&[
+        let target = self.run_tmux(&[
             "display-message",
             "-p",
             "-t",
             pane_id.as_str(),
-            "#{window_id}",
+            "#{session_id}\t#{window_id}",
         ])?;
-        let window_id = window_id.trim();
+        let (session_id, window_id) = target.trim().split_once('\t').ok_or_else(|| {
+            TmuxError::Parse(format!(
+                "missing session_id or window_id in focus target: {target}"
+            ))
+        })?;
+
+        match self.run_tmux(&["switch-client", "-t", session_id]) {
+            Ok(_) => {}
+            Err(TmuxError::CommandFailed { stderr, .. })
+                if stderr.contains("no current client") || stderr.contains("no client") => {}
+            Err(error) => return Err(error),
+        }
 
         self.run_tmux(&["select-window", "-t", window_id])?;
         self.run_tmux(&["select-pane", "-t", pane_id.as_str()])?;
@@ -451,12 +594,16 @@ fn sanitize_tmux_name(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        KillPaneResult, RenameWindowResult, SendInputResult, SpawnWindowResult, TmuxAdapter,
-        TmuxBackend, TmuxError, TmuxPaneRecord,
+        InventoryLoadPolicy, KillPaneResult, RenameWindowResult, SendInputResult,
+        SpawnWindowResult, TmuxAdapter, TmuxBackend, TmuxError, TmuxPaneRecord,
     };
-    use crate::app::{AgentStatus, AppState, PaneId, SelectionTarget, SessionId, WindowId};
+    use crate::app::{
+        fixtures::{inventory, PaneBuilder},
+        AgentStatus, AppState, PaneId, PreviewProvenance, SelectionTarget, SessionBuilder,
+        SessionId, WindowBuilder, WindowId,
+    };
     use std::cell::RefCell;
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
     use std::path::PathBuf;
 
     #[derive(Debug, Default)]
@@ -465,6 +612,7 @@ mod tests {
         captures: BTreeMap<PaneId, Result<String, String>>,
         list_error: Option<String>,
         focused_pane: Option<PaneId>,
+        capture_calls: RefCell<Vec<PaneId>>,
         sent_input: RefCell<Vec<(PaneId, String)>>,
         renamed_windows: RefCell<Vec<(WindowId, String)>>,
         spawned_windows: RefCell<Vec<(SessionId, String)>>,
@@ -490,6 +638,7 @@ mod tests {
         }
 
         fn capture_pane(&self, pane_id: &PaneId, _lines: usize) -> Result<String, TmuxError> {
+            self.capture_calls.borrow_mut().push(pane_id.clone());
             match self.captures.get(pane_id) {
                 Some(Ok(capture)) => Ok(capture.clone()),
                 Some(Err(message)) => Err(TmuxError::Unavailable(message.clone())),
@@ -584,9 +733,17 @@ mod tests {
                     "agents",
                     "%1",
                     "alpha-main",
-                    Some("zsh"),
+                    Some("claude"),
                 ),
-                pane_record("$2", "beta", "@2", "agents", "%2", "beta-main", Some("zsh")),
+                pane_record(
+                    "$2",
+                    "beta",
+                    "@2",
+                    "agents",
+                    "%2",
+                    "beta-main",
+                    Some("node"),
+                ),
                 pane_record("$3", "notes", "@3", "notes", "%3", "notes", Some("zsh")),
             ],
             ..FakeTmuxBackend::default()
@@ -617,10 +774,34 @@ mod tests {
     fn load_inventory_maps_statuses_from_capture_preview() {
         let backend = FakeTmuxBackend {
             panes: vec![
-                pane_record("$1", "alpha", "@1", "agents", "%1", "claude", Some("zsh")),
-                pane_record("$1", "alpha", "@1", "agents", "%2", "codex", Some("zsh")),
-                pane_record("$1", "alpha", "@1", "agents", "%3", "gemini", Some("zsh")),
-                pane_record("$1", "alpha", "@1", "agents", "%4", "opencode", Some("zsh")),
+                pane_record(
+                    "$1",
+                    "alpha",
+                    "@1",
+                    "agents",
+                    "%1",
+                    "claude",
+                    Some("claude"),
+                ),
+                pane_record("$1", "alpha", "@1", "agents", "%2", "codex", Some("node")),
+                pane_record(
+                    "$1",
+                    "alpha",
+                    "@1",
+                    "agents",
+                    "%3",
+                    "gemini",
+                    Some("python3"),
+                ),
+                pane_record(
+                    "$1",
+                    "alpha",
+                    "@1",
+                    "agents",
+                    "%4",
+                    "opencode",
+                    Some("node"),
+                ),
             ],
             ..FakeTmuxBackend::default()
         }
@@ -664,6 +845,33 @@ mod tests {
     }
 
     #[test]
+    fn load_inventory_drops_shell_panes_with_stale_harness_preview() {
+        let backend = FakeTmuxBackend {
+            panes: vec![pane_record(
+                "$1",
+                "alpha",
+                "@1",
+                "agents",
+                "%1",
+                "claude",
+                Some("zsh"),
+            )],
+            ..FakeTmuxBackend::default()
+        }
+        .with_capture("%1", Ok("Claude Code ready"));
+
+        let inventory = TmuxAdapter::new(backend)
+            .load_inventory(50)
+            .expect("inventory should load");
+
+        assert!(inventory
+            .pane(&PaneId::new("%1"))
+            .expect("pane should exist")
+            .agent
+            .is_none());
+    }
+
+    #[test]
     fn load_inventory_keeps_panes_visible_when_capture_fails() {
         let backend = FakeTmuxBackend {
             panes: vec![pane_record(
@@ -695,6 +903,159 @@ mod tests {
     }
 
     #[test]
+    fn load_inventory_profiled_tracks_capture_failures() {
+        let backend = FakeTmuxBackend {
+            panes: vec![
+                pane_record(
+                    "$1",
+                    "alpha",
+                    "@1",
+                    "agents",
+                    "%1",
+                    "alpha-main",
+                    Some("claude"),
+                ),
+                pane_record("$1", "alpha", "@1", "agents", "%2", "helper", Some("zsh")),
+            ],
+            ..FakeTmuxBackend::default()
+        }
+        .with_capture("%1", Ok("Claude Code ready"))
+        .with_capture("%2", Err("capture failed"));
+
+        let (inventory, metrics) = TmuxAdapter::new(backend)
+            .load_inventory_profiled(50)
+            .expect("inventory should still load");
+
+        assert_eq!(inventory.pane_count(), 2);
+        assert_eq!(metrics.pane_records, 2);
+        assert_eq!(metrics.capture_count, 2);
+        assert_eq!(metrics.capture_failures, 1);
+        assert_eq!(metrics.capture_failure_panes, vec![PaneId::new("%2")]);
+        assert!(metrics.total_ms >= metrics.list_panes_ms);
+        assert!(metrics.capture_total_ms >= metrics.capture_max_ms);
+        assert_eq!(
+            inventory
+                .pane(&PaneId::new("%2"))
+                .expect("pane should exist")
+                .preview_provenance,
+            PreviewProvenance::CaptureFailed
+        );
+    }
+
+    #[test]
+    fn load_inventory_profiled_reuses_stable_offscreen_previews() {
+        let previous_inventory = inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("agents")
+                .pane(
+                    PaneBuilder::agent("%1", crate::app::HarnessKind::ClaudeCode)
+                        .title("alpha-main")
+                        .current_command("claude")
+                        .working_dir("/workspace")
+                        .preview("Claude Code old selected preview"),
+                )
+                .pane(
+                    PaneBuilder::agent("%2", crate::app::HarnessKind::CodexCli)
+                        .title("beta-main")
+                        .current_command("node")
+                        .working_dir("/workspace")
+                        .preview("Codex CLI cached offscreen preview"),
+                ),
+        )]);
+        let backend = FakeTmuxBackend {
+            panes: vec![
+                pane_record(
+                    "$1",
+                    "alpha",
+                    "@1",
+                    "agents",
+                    "%1",
+                    "alpha-main",
+                    Some("claude"),
+                ),
+                pane_record(
+                    "$1",
+                    "alpha",
+                    "@1",
+                    "agents",
+                    "%2",
+                    "beta-main",
+                    Some("node"),
+                ),
+            ],
+            ..FakeTmuxBackend::default()
+        }
+        .with_capture("%1", Ok("Claude Code fresh selected preview"))
+        .with_capture("%2", Ok("Codex CLI fresh but deferred"));
+
+        let policy = InventoryLoadPolicy {
+            priority_panes: BTreeSet::from([PaneId::new("%1")]),
+            deferred_panes: BTreeSet::new(),
+        };
+        let (inventory, metrics) = TmuxAdapter::new(backend)
+            .load_inventory_profiled_with_policy(40, Some(&previous_inventory), &policy)
+            .expect("inventory should load");
+
+        assert_eq!(metrics.capture_count, 1);
+        assert_eq!(metrics.priority_capture_count, 1);
+        assert_eq!(metrics.reused_preview_count, 1);
+        assert_eq!(
+            inventory
+                .pane(&PaneId::new("%2"))
+                .expect("pane should exist")
+                .preview,
+            "Codex CLI cached offscreen preview"
+        );
+        assert_eq!(
+            inventory
+                .pane(&PaneId::new("%2"))
+                .expect("pane should exist")
+                .preview_provenance,
+            PreviewProvenance::ReusedCached
+        );
+    }
+
+    #[test]
+    fn load_inventory_profiled_forces_recapture_when_metadata_changes() {
+        let previous_inventory = inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("agents").pane(
+                PaneBuilder::agent("%1", crate::app::HarnessKind::ClaudeCode)
+                    .title("alpha-main")
+                    .current_command("claude")
+                    .working_dir("/workspace")
+                    .preview("Claude Code old preview"),
+            ),
+        )]);
+        let backend = FakeTmuxBackend {
+            panes: vec![pane_record(
+                "$1",
+                "alpha",
+                "@1",
+                "agents",
+                "%1",
+                "alpha-main",
+                Some("zsh"),
+            )],
+            ..FakeTmuxBackend::default()
+        }
+        .with_capture("%1", Ok("plain shell"));
+
+        let policy = InventoryLoadPolicy::default();
+        let (inventory, metrics) = TmuxAdapter::new(backend)
+            .load_inventory_profiled_with_policy(40, Some(&previous_inventory), &policy)
+            .expect("inventory should load");
+
+        assert_eq!(metrics.capture_count, 1);
+        assert_eq!(metrics.forced_capture_count, 1);
+        assert_eq!(metrics.reused_preview_count, 0);
+        let pane = inventory
+            .pane(&PaneId::new("%1"))
+            .expect("pane should exist");
+        assert_eq!(pane.preview, "plain shell");
+        assert_eq!(pane.preview_provenance, PreviewProvenance::Captured);
+        assert!(pane.agent.is_none());
+    }
+
+    #[test]
     fn default_visibility_hides_non_agent_sessions_and_panes() {
         let backend = FakeTmuxBackend {
             panes: vec![
@@ -705,7 +1066,7 @@ mod tests {
                     "agents",
                     "%1",
                     "alpha-main",
-                    Some("zsh"),
+                    Some("claude"),
                 ),
                 pane_record(
                     "$1",

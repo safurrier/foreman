@@ -148,6 +148,10 @@ impl RunLogger {
         self.write_line("WARN", &format!("tmux_bootstrap_error {error}"))
     }
 
+    pub fn log_tmux_capture_failure(&mut self, pane_id: &str) -> io::Result<()> {
+        self.write_line("WARN", &format!("tmux_capture_failed pane_id={pane_id}"))
+    }
+
     pub fn log_pull_request_lookup(
         &mut self,
         workspace_path: &Path,
@@ -390,8 +394,8 @@ mod tests {
             codex_native_dir: None,
             pi_native_dir: None,
             log_verbosity: LogVerbosity::Info,
-            poll_interval_ms: 1_000,
-            capture_lines: 200,
+            poll_interval_ms: 1_500,
+            capture_lines: 40,
             popup: false,
             pull_request_monitoring_enabled: true,
             pull_request_poll_interval_ms: 30_000,
@@ -475,7 +479,7 @@ mod tests {
         let contents =
             std::fs::read_to_string(logger.summary().run_path).expect("run log should be readable");
         assert!(contents.contains("bootstrap_complete"));
-        assert!(contents.contains("poll_interval_ms=1000"));
+        assert!(contents.contains("poll_interval_ms=1500"));
         assert!(contents.contains("pr_monitoring_enabled=true"));
         assert!(contents.contains("pr_poll_interval_ms=30000"));
         assert!(contents.contains("notification_cooldown_ticks=3"));
