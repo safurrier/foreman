@@ -12,6 +12,17 @@ if (PROJECT_ROOT / "Cargo.toml").exists():
     run(["cargo", "fetch"], cwd=PROJECT_ROOT)
 log_ok("Rust dependencies fetched")
 
+rustup = shutil.which("rustup")
+if rustup and (PROJECT_ROOT / "Cargo.toml").exists():
+    log_step("Ensuring rustfmt and clippy are installed")
+    toolchain = os.environ.get("RUSTUP_TOOLCHAIN", "").strip()
+    command = [rustup, "component", "add"]
+    if toolchain:
+        command.extend(["--toolchain", toolchain])
+    command.extend(["rustfmt", "clippy"])
+    run(command, cwd=PROJECT_ROOT)
+    log_ok("Rust formatting and lint components installed")
+
 # Install pre-commit hooks if available
 pre_commit_cfg = PROJECT_ROOT / ".pre-commit-config.yaml"
 git_dir = PROJECT_ROOT / ".git"
