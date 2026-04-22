@@ -562,14 +562,22 @@ active_profile = "all"
     harness
         .fixture()
         .wait_for_alt_capture(&dashboard, "notify=MUTED");
+    let muted_working_refresh_count = harness.log_occurrence_count(refresh_marker);
     harness.write_native_signal(
         &alpha.pane_id,
         r#"{"status":"working","activity_score":120}"#,
     );
-    thread::sleep(Duration::from_millis(300));
+    harness.wait_for_log_occurrence_count(refresh_marker, muted_working_refresh_count + 1);
+    let muted_idle_refresh_count = harness.log_occurrence_count(refresh_marker);
     harness.write_native_signal(&alpha.pane_id, r#"{"status":"idle","activity_score":44}"#);
-    thread::sleep(Duration::from_millis(600));
+    harness.wait_for_log_occurrence_count(refresh_marker, muted_idle_refresh_count + 2);
     assert_eq!(harness.nonempty_lines(&notification_file).len(), 1);
+    let muted_reset_refresh_count = harness.log_occurrence_count(refresh_marker);
+    harness.write_native_signal(
+        &alpha.pane_id,
+        r#"{"status":"working","activity_score":120}"#,
+    );
+    harness.wait_for_log_occurrence_count(refresh_marker, muted_reset_refresh_count + 1);
 
     harness.fixture().send_keys(&dashboard, &["m", "n"]);
     harness
