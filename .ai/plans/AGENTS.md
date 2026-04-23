@@ -42,9 +42,28 @@ status: in-progress          → append to LEARNING_LOG.md as you go
 status: complete             → after merge
 ```
 
+If a slice changes real harness or native hook behavior, `status: complete`
+requires the actual real-harness proof, not a skip-only drill:
+
+```bash
+mise run native-preflight
+FOREMAN_REQUIRE_REAL_E2E=1 \
+FOREMAN_REAL_CLAUDE_E2E=1 \
+FOREMAN_REAL_CODEX_E2E=1 \
+FOREMAN_REAL_PI_E2E=1 \
+mise run verify-native
+```
+
 `mise run plan` rejects invalid slugs and existing slugs so plan paths stay stable.
 
 ## Example
 
 See `_example/` for a complete reference plan showing the progression from
 planned through completion with realistic entries.
+
+## What Belongs Here
+
+- Commit structured plan files under `.ai/plans/<slug>/`
+- Keep stable validation outputs under `.ai/validation/`
+- Do not create committed scratch under `.ai/handoffs/`, `.ai/research/`, or
+  `.ai/plans/<slug>/artifacts/`

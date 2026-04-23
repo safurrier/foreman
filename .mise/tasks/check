@@ -4,31 +4,56 @@
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.environ["MISE_PROJECT_ROOT"], "scripts"))
-from lib import log_ok, log_step, PROJECT_ROOT  # noqa: E402
-
-TASKS = PROJECT_ROOT / ".mise" / "tasks"
-
-
-def run_task(name: str, *args: str) -> None:
-    r = subprocess.run([sys.executable, str(TASKS / name), *args])
-    if r.returncode != 0:
-        sys.exit(r.returncode)
+from lib import PROJECT_ROOT, log_error, log_ok, log_step, run  # noqa: E402
 
 
 log_step("Running quality gate (check)")
 
 log_step("Step 1/4: format check")
-run_task("fmt", "--check")
+log_step("Checking Rust formatting")
+fmt = subprocess.run(
+    ["cargo", "fmt", "--check"],
+    cwd=PROJECT_ROOT,
+    capture_output=True,
+    text=True,
+)
+if fmt.returncode != 0:
+    log_error("Rust files need formatting:")
+    print(fmt.stdout + fmt.stderr)
+    sys.exit(fmt.returncode)
+log_ok("Rust format")
 
 log_step("Step 2/4: lint")
-run_task("lint")
+log_step("Linting Rust code")
+run(
+    ["cargo", "clippy", "--all-targets", "--all-features", "--", "-D", "warnings"],
+    cwd=PROJECT_ROOT,
+)
+log_ok("Rust lint")
 
 log_step("Step 3/4: typecheck")
-run_task("typecheck")
+log_step("Type-checking Rust code (cargo check)")
+run(["cargo", "check", "--all-targets", "--all-features"], cwd=PROJECT_ROOT)
+log_ok("Rust typecheck")
 
 log_step("Step 4/4: test")
-run_task("test")
+log_step("Running Rust tests")
+results_dir = PROJECT_ROOT / "test-results"
+results_dir.mkdir(parents=True, exist_ok=True)
+tests = subprocess.run(
+    ["cargo", "test", "--all-features"],
+    cwd=PROJECT_ROOT,
+    capture_output=True,
+    text=True,
+)
+output = tests.stdout + tests.stderr
+(results_dir / "cargo-test.txt").write_text(output)
+print(output, end="")
+if tests.returncode != 0:
+    sys.exit(tests.returncode)
+log_ok("Rust tests")
 
 log_ok("All checks passed")

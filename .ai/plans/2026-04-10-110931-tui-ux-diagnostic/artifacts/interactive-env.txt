@@ -1,0 +1,9 @@
+root=/tmp/foreman-ux-interactive-UFVPDw
+socket=/tmp/foreman-ux-interactive-UFVPDw/tmux.sock
+log_dir=/tmp/foreman-ux-interactive-UFVPDw/logs
+alpha=%0
+alpha=%1
+beta=%2
+dashboard=%5
+gamma=%3
+notes=%4

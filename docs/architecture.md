@@ -7,110 +7,235 @@ description: >
 index:
   - id: system-overview
     keywords: [components, data-flows, trust-boundaries, modules]
+  - id: goals-non-goals
+    keywords: [goals, non-goals, scope]
   - id: invariants-boundaries
-    keywords: [invariants, security, migrations, worktree-safety, observability, correlation-id, idempotent]
+    keywords: [invariants, state, worktree-safety, observability, failure-modes]
   - id: principles-patterns
-    keywords: [thin-handlers, timeouts, structured-logs, typed-utilities, principles]
+    keywords: [commands, reducer, effects, patterns, principles]
   - id: cross-cutting-workflows
     keywords: [validation-loop, check, verify, artifact-debugging, ci-failure]
   - id: decisions
     keywords: [adrs, decisions, truth-hierarchy, decisions-dir]
+  - id: module-map
+    keywords: [modules, boundaries, package-map]
   - id: where-human-thought-goes
     keywords: [human-ownership, agent-ownership, promotion-rules]
 ---
 
-# foreman — Architecture
+# foreman - Architecture
 
-> This document is the durable system of record for invariants, principles, and decisions.
-> Keep it updated as the system evolves. Agents: read this before implementing.
+> This document is the durable system of record for invariants, principles, and
+> decisions. Keep it updated as the system evolves. Agents: read this before
+> implementing.
 
-## 1. System Overview
+## System Overview
 
 **Stack**: rust
 
-### Components
+Foreman is a keyboard-first Ratatui dashboard for monitoring and controlling AI
+coding agents running inside tmux. The product contract lives in `SPEC.md`. This
+document records the architecture and the seams that let that contract stay
+testable as the app grows.
 
-<!-- List major components/modules and their responsibilities -->
+### Components
 
 | Component | Purpose |
 |---|---|
-| <!-- name --> | <!-- purpose --> |
+| CLI + config | Parse startup flags, config path/init flows, setup and doctor flows, public debug logging, runtime overrides, popup mode, short-lived popup startup cache hydration, notification policy defaults, and per-harness integration preference |
+| Runtime loop | Own terminal setup, event polling, redraw cadence, effect execution, and runtime-level soft-failure alerting during interactive runs |
+| App state core | Own `Command`, `Action`, `Mode`, `Focus`, selection state, filters, sort mode, modal state, and reducer logic |
+| Ratatui renderer | Render header, sidebar, preview, input, footer, help, search/modal overlays, inline flash labels, and loading states from pure state using semantic theme tokens, built-in palette themes, compact harness marks, and no-color-safe glyph fallbacks |
+| tmux adapter | Discover sessions/windows/panes, capture pane output, focus panes, send input, rename windows, create windows, and kill panes |
+| Harness integrations | Detect supported harness families, translate compatibility signals for Claude, Codex, Pi, Gemini CLI, and OpenCode, and overlay native signals for Claude, Codex, and Pi when available |
+| Pull request service | Resolve pull request metadata for the selected workspace, and own browser-open and clipboard-copy seams with graceful degradation |
+| Notification service | Apply pure suppression and cooldown policy, build dispatcher order from typed config, dispatch best-effort notifications with backend fallback, and surface observable decisions |
+| System stats service | Capture a lightweight local CPU and memory pressure snapshot for the header without turning Foreman into a telemetry system |
+| Logging + telemetry | Persist structured run logs, latest-run pointer, retention cleanup, header-level system stats, and timing lines for startup-cache load/write behavior |
 
 ### Primary Data Flows
 
-<!-- Describe the main request/data flows through the system -->
-
-1. <!-- flow 1 -->
+1. **Startup and boot**
+   `foreman` parses config and overrides, starts logging, initializes adapters,
+   builds initial state, captures a system-stats snapshot, and then enters the
+   long-running dashboard loop that redraws the shell, polls tmux, and executes
+   reducer-emitted effects.
+2. **Refresh and status loop**
+   Poll tick triggers tmux discovery and pane capture, harness interpreters
+   derive status signals, reducer updates state, and renderer redraws.
+3. **Operator action loop**
+   Key input maps to `Command`, then `Action`, then reducer state
+   transition, then optional Effects through adapters, then redraw. Draft text
+   and modal targets stay in reducer-owned state rather than widget-local state.
+4. **Attention loop**
+   Status transitions flow through notification policy, which decides whether to
+   emit, suppress, or debounce a notification and logs the decision.
 
 ### Trust Boundaries
 
-<!-- Where does trust change? e.g., external API boundary, user input validation point -->
-
-- <!-- boundary 1 -->
-
----
-
-## 2. Goals / Non-Goals
-
-**Goals** — what this system optimizes for:
-
-- <!-- goal 1 -->
-
-**Non-Goals** — explicit exclusions:
-
-- <!-- non-goal 1 -->
-
----
-
-## 3. Invariants & Boundaries
-
-> These rules prevent catastrophic mistakes. Violating them requires an ADR.
-
-### Security & Auth
-
-- All authorization and critical validation occur in trusted service boundaries, not in clients.
-- New endpoints or background jobs must declare their auth model before merging.
-
-### Data & Migrations
-
-- Database migrations are forward-only; no rollback scripts.
-- Schema changes require a migration and a compatibility plan.
-
-### Worktree Safety
-
-- All services must start and all tests must pass from a **clean checkout or Git worktree**.
-- No reliance on absolute paths, mutable global state, or undeclared local artifacts.
-- Build artifacts must be deterministic or listed in `.gitignore`.
-
-### Traceability & Observability
-
-- All requests and background jobs carry a **correlation ID** (`trace_id` / `request_id`).
-- Distributed calls propagate trace context.
-- Logs are **structured** (machine-parseable) and include stable keys: `service`, `env`,
-  correlation ID.
-- Background jobs are **idempotent** and safe to retry.
-
-> If these constraints do not yet apply (e.g., pure CLI, library), remove inapplicable
-> sections and document why.
+- **User input boundary**: CLI flags, config file contents, search text, rename
+  text, and direct pane input are untrusted until parsed and validated.
+- **tmux boundary**: session inventory, pane metadata, and captured terminal
+  content come from an external process and may be stale, partial, or missing.
+- **Harness boundary**: native integration signals are more structured but still
+  external to Foreman and may disconnect or downgrade to compatibility mode.
+  For Claude Code and Codex CLI, those signals arrive through official hook
+  events bridged into per-pane JSON files keyed by `TMUX_PANE` or an explicit
+  pane id when the hook runs outside tmux. For Pi, those signals arrive through
+  Pi extension lifecycle events that call a small Foreman companion command,
+  which writes the same per-pane JSON files.
+- **Local tooling boundary**: Git, GitHub-aware commands, browser openers,
+  clipboard tools, and notification backends are optional dependencies and must
+  fail soft.
 
 ---
 
-## 4. Principles & Preferred Patterns
+## Goals / Non-Goals
 
-> Durable preferences. If a rule is critical and objective, enforce it in CI instead.
+**Goals** - what this system optimizes for:
 
-- **Prefer thin handlers and service-layer logic** — reduces test cost and keeps handlers
-  stateless.
-- **Prefer explicit timeouts and retries on external calls** — prevents silent hangs.
-- **Prefer structured logs with correlation IDs** — debugging depends on traceability.
-- **Prefer shared typed utilities over one-off implementations** — invariants stay
-  centralized.
+- Give the operator one keyboard-first control surface for multi-agent tmux work.
+- Keep working, needs-attention, idle, error, and unknown states easy to
+  distinguish at a glance.
+- Prefer durable architecture seams over ad hoc shell logic in the UI layer.
+- Make most behavior testable without requiring a live tmux server.
+- Keep native integrations first-class while preserving compatibility-mode
+  usefulness.
 
-<!-- Add project-specific principles here -->
+**Non-Goals** - explicit exclusions:
+
+- Foreman is not a tmux replacement.
+- Foreman is not a general-purpose plugin host.
+- Foreman does not need to expose every low-level harness event in the main
+  status model.
+- Foreman does not include pull request mutation features such as review,
+  merge, or comment.
 
 ---
 
-## 5. Cross-Cutting Workflows
+## Invariants & Boundaries
+
+> These rules prevent architectural drift. Violating them requires an ADR.
+
+### State and rendering invariants
+
+- `render = pure(state)`. Rendering does not mutate state, block on I/O, or
+  derive hidden side effects.
+- Exactly one focus target is active at a time.
+- Only one high-priority mode consumes input at a time.
+- Direct-input drafts and rename/spawn/kill modal targets live in `AppState`;
+  widgets render them but do not own them.
+- Search queries, flash prefixes, and their restore-selection targets also live
+  in `AppState`; cancel behavior is reducer-owned rather than widget-local.
+- Selected workspace identity is derived from tmux pane working directories, not
+  sidebar row indexes or cursor position.
+- Pull request cache entries, detail-panel state, and auto-open suppression are
+  keyed by workspace path in `AppState`.
+- Notification mute state, profile, refresh tick, configured cooldown, and
+  per-pane cooldowns also live in `AppState`; refresh reconciliation emits
+  notification effects but does not choose notification backends directly.
+- Header system stats and the latest operator-visible alert also live in
+  `AppState`, so rendering stays pure and failure surfaces remain testable.
+- Pull request detail may auto-open on first discovery, but once the operator
+  closes it, later refreshes do not auto-reopen it for that same workspace.
+- Refreshes, filtering, and sorting must not leave selection pointing at an
+  invalid target.
+- Collapsed session state persists across refreshes.
+
+### Integration and adapter invariants
+
+- Native integration state wins over compatibility heuristics when both are
+  available for the same agent.
+- Harness mode preference is typed config owned by runtime/bootstrap code; the
+  reducer only consumes the resulting inventory state.
+- Claude Code hook bridging is outside the reducer and renderer. The bridge
+  reads hook stdin, resolves the pane identity, and writes atomic signal files
+  that runtime later consumes.
+- Codex hook bridging follows the same boundary, but the strongest current
+  real-binary validation is at the hook boundary itself. In local validation,
+  `codex exec` emitted native hooks reliably in non-interactive mode while the
+  same command inside a tmux TTY did not.
+- Pi native bridging follows the same reducer-agnostic boundary, but the
+  transport is a thin Pi extension that calls a Foreman companion binary on
+  `agent_start`, `agent_end`, and `session_shutdown`.
+- Gemini CLI and OpenCode currently ship as compatibility-only integrations, so
+  their operator-visible status comes from tmux-visible process and capture
+  heuristics until a better native seam exists.
+- Compatibility heuristics are allowed to be lower confidence, but they must
+  fail soft rather than hide the pane entirely.
+- All tmux, GitHub, browser, clipboard, and notification effects flow through
+  adapters or services, never the renderer or reducer.
+- tmux action adapters return structured success/failure results rather than
+  leaking subprocess text into reducer-facing code.
+- Destructive pane actions require explicit confirmation.
+
+### Persistence and runtime boundaries
+
+- Config is user-scoped, typed, safe to load with defaults, and additive so
+  older config files continue to parse when new fields land.
+- Setup and doctor flows may write user-level and repo-level integration files,
+  but those writes must stay scoped, additive, and safe to rerun.
+- Logs are user-scoped, keep a latest-run pointer, and clean up old runs
+  automatically.
+- No reliance on absolute paths, mutable global state, or undeclared local
+  artifacts.
+- The app must remain usable as an empty shell when tmux or optional local
+  tooling is unavailable.
+
+### Worktree safety
+
+- The crate builds and tests from a clean checkout or Git worktree.
+- Generated artifacts are deterministic or ignored.
+- Plan artifacts under `.ai/plans/` are documentation inputs, not runtime
+  dependencies.
+
+### Traceability and observability
+
+- Run logs are structured and machine-parseable.
+- Action failures that matter to the operator are visible in the UI and in logs.
+- Pull request lookups, notification suppression decisions, and integration-mode
+  selection are observable in logs.
+- Header-level system stats give a quick local CPU and memory read without
+  becoming a heavy telemetry subsystem.
+
+---
+
+## Principles & Patterns
+
+> Durable preferences. If a rule is critical and objective, enforce it in CI.
+
+- **Prefer commands over raw keys** - input maps to `Command`, then `Action`;
+  business logic never matches raw keycodes.
+- **Prefer a pure reducer with explicit Effects** - reducer owns state
+  transitions; adapters own I/O.
+- **Prefer fake-backed contract tests** - most tmux, pull request, and
+  notification behavior should be validated behind seams before live smoke tests.
+- **Prefer pure notification policy** - transition detection, suppression, and
+  cooldown rules should stay deterministic and unit-testable before any shell
+  backend is involved.
+- **Prefer stable logical identity over index-based selection** - selection
+  should survive refreshes and reordering whenever possible.
+- **Prefer keyboard-first, instant interaction** - navigation should feel
+  immediate, with no delay inserted between keypress and state change.
+- **Prefer progressive disclosure** - header, sidebar, preview, and input stay
+  primary; search, flash, help, rename, spawn, and PR detail remain secondary
+  surfaces.
+- **Keep overlays reducer-owned** - help scroll position, modal drafts, search
+  state, and flash state belong in `AppState` so overlay behavior stays
+  testable and deterministic.
+- **Prefer compact badges over repeated prose** - dense tree rows should expose
+  status, harness, and primary identity at a glance; details belong in preview
+  or overlay surfaces, not in every sidebar row. If a mark needs explanation,
+  the help surface should carry the legend instead of expanding every row.
+- **Prefer monochrome-safe status cues** - color may help, but labels and
+  symbols must carry meaning on their own.
+- **Prefer deterministic jump labels** - flash navigation labels should be
+  stable for a given visible target set and avoid prefix ambiguity within one
+  invocation.
+
+---
+
+## Cross-Cutting Workflows
 
 ### Validation Loop
 
@@ -118,26 +243,52 @@ CI defines "passing." Local commands mirror CI exactly:
 
 ```bash
 mise run check    # fast: fmt + lint + typecheck + unit tests  (on push)
-mise run verify   # heavy: integration, security, docker        (on PR)
+mise run verify   # heavy: integration + release gauntlet + docker  (on PR)
+mise run verify-release  # compiled-binary operator gauntlet + report
+mise run verify-native  # opt-in real Claude/Codex/Pi drill
+mise run verify-ux  # focused TUI/runtime smoke + perf smoke + VHS capture
 ```
 
-CI failures emit test artifacts to `test-results/` (uploaded by `actions/upload-artifact`).
+GitHub Actions currently maps those workflows like this:
+- `.github/workflows/ci.yml` runs `mise run ci` on pushes to `main` and pull
+  requests to `main`, and runs `mise run verify` for pull requests.
+- The pull-request verify job uploads the UX artifact directory and the
+  release-gauntlet report directory so reviewers can inspect visual/operator
+  evidence from CI, not just logs.
+- `.github/workflows/release.yml` runs on version tags, re-verifies the repo,
+  builds release archives for the supported target runners, and publishes the
+  GitHub release bundles.
 
-### Artifact-First Debugging
+### Test strategy by layer
 
-When CI fails:
+| Layer | Primary purpose |
+|---|---|
+| Unit tests | Reducer logic, command/action mapping, config parsing, status debouncing, precedence rules |
+| Ratatui buffer tests | Surface visibility, focus treatment, overlays, empty-state shell, monochrome-safe status presentation |
+| Adapter contract tests | tmux, harness, pull request, and notification seams with fakes or spies |
+| Real-environment smoke / E2E tests | End-to-end operator journeys that require a real CLI process, live tmux coordination, external tooling, or runtime/perf regression assertions from logs |
 
-1. Open the GitHub Actions run summary → **Artifacts** → `test-results`.
-2. **Python**: `test-results/junit.xml` — structured test output with failure details.
-3. **Go**: `test-results/go-test.txt` — verbose test log.
-4. Integration/docker failures: check logs in `test-results/`.
+### Pre-push documentation and contract sync
+
+Before pushing feature work:
+
+1. `mise run check`
+2. `/plan-sync`
+3. `/spec-sync`
+4. `/context-engineering update` when AGENTS routing changed
+5. `/docs-workflow update` when docs changed
+
+### Artifact-first debugging
+
+When CI fails, inspect the uploaded `test-results/` artifact first and use it
+to choose the narrowest reproducible local command.
 
 ---
 
-## 6. Decisions (ADRs)
+## Decisions
 
-Global architectural decisions live in `docs/decisions/`. Include only decisions that
-materially constrain work.
+Global architectural decisions live in `docs/decisions/`. Include only
+decisions that materially constrain work.
 
 **Truth hierarchy** (highest to lowest authority):
 
@@ -154,34 +305,51 @@ materially constrain work.
 
 ---
 
-## 7. Module Map
+## Module Map
 
-<!-- For single-project repos, list major internal modules.
-     For apps workspace, list apps and packages with links. -->
+The codebase now has the core runtime seams below. Keep new work inside these
+boundaries unless an ADR changes them.
 
 | Module | Purpose | Docs |
 |---|---|---|
-| <!-- module --> | <!-- purpose --> | — |
+| src/cli.rs | CLI flags, config path/init flows, doctor flows, debug logging flag, runtime override parsing, and bootstrap wiring | `SPEC.md` |
+| src/doctor.rs | Shared diagnosis model for config, machine, repo wiring, live runtime fallback, and safe fix scaffolds used by both CLI and runtime/UI surfaces | `SPEC.md` |
+| src/bin/foreman-claude-hook.rs | Claude Code hook bridge CLI that resolves the signal directory and writes native per-pane status files | This document |
+| src/bin/foreman-codex-hook.rs | Codex hook bridge CLI that resolves the signal directory and writes native per-pane status files | This document |
+| src/bin/foreman-pi-hook.rs | Pi lifecycle bridge CLI that resolves the signal directory and writes native per-pane status files | This document |
+| src/runtime.rs | Interactive terminal setup, event polling, redraw cadence, effect execution, and runtime-level soft-failure handling | This document |
+| src/app/ | Core state, commands, actions, reducer, selectors, drafts, modal targets, and UI-facing invariants | This document |
+| src/ui/ | Ratatui layout, widgets, rendering, and buffer-test helpers | This document |
+| src/adapters/tmux.rs | tmux discovery, capture, pane working-directory lookup, focus, send-input, rename, spawn, and kill seam; transport only, no status heuristics | `SPEC.md` |
+| src/integrations/ | Harness recognition, compatibility status derivation, debounce logic, hook-to-signal bridging, shared native file-signal helpers, native-over-compatibility precedence overlays, and config-driven per-harness mode preference | `SPEC.md` |
+| src/services/notifications.rs | Notification policy, configured cooldowns, backend-order wiring, backend fallback, and dispatch seams | `SPEC.md` |
+| src/services/pull_requests.rs | Pull request lookup, browser/copy effects, and degradation behavior | `SPEC.md` |
+| src/services/system_stats.rs | Header-level CPU and memory pressure snapshots behind a small service seam | This document |
+| src/services/logging.rs | Run logs, latest-run pointer, retention cleanup, and bootstrap/inventory summaries | `SPEC.md` |
 
 ---
 
-## 8. Where Human Thought Goes
+## Where Human Thought Goes
 
 **Humans define**:
 
-- Invariants and boundaries (section 3)
-- Decision records (ADRs)
-- What gets enforced in CI/tooling
-- Observability minimums
-- Worktree compatibility rules
+- Invariants and boundaries in `SPEC.md` and this document
+- Status semantics for supported harnesses
+- Architectural decisions and ADRs
+- What belongs in the fast quality gate versus heavy verification
+- Which operator-facing trade-offs are acceptable when native and compatibility
+  signals disagree
 
 **Agents own**:
 
-- Implementation following these constraints
-- Completing the validation loop (`mise run check` must pass before committing)
+- Implementation that follows these constraints
+- Adding the highest-leverage tests before wiring I/O
+- Keeping plan, spec, and architecture docs in sync with meaningful behavior
+  changes
+- Completing the validation loop before committing
 
 **Promotion rules**:
 
-- Repeated ambiguity → document here or in module docs
-- Repeated objective failure → encode in CI/tooling
-- Repeated preference debate → optional Skill plugin (`.agent/skills/`)
+- Repeated ambiguity -> document here or in module docs
+- Repeated objective failure -> encode in CI/tooling
+- Repeated preference debate -> optional Skill plugin (`.agent/skills/`)

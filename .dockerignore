@@ -1,0 +1,6 @@
+.git
+.ai
+target
+test-results
+*.log
+.DS_Store

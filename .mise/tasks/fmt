@@ -1,78 +1,29 @@
 #!/usr/bin/env -S uv run python
-# MISE description="Format code"
+# MISE description="Format Rust code"
 # MISE depends=["setup"]
 import os
 import subprocess
 import sys
 
 sys.path.insert(0, os.path.join(os.environ["MISE_PROJECT_ROOT"], "scripts"))
-from lib import (  # noqa: E402
-    PROJECT_ROOT,
-    dispatch_module,
-    dispatch_stack,
-    get_shape,
-    log_error,
-    log_ok,
-    log_step,
-    run,
-    run_per_module,
-)
+from lib import PROJECT_ROOT, log_error, log_ok, log_step, run  # noqa: E402
 
 check = "--check" in sys.argv[1:]
 
-
-def fmt_python(cwd=PROJECT_ROOT):
-    log_step("Checking Python formatting" if check else "Formatting Python code")
-    cmd = ["uv", "run", "ruff", "format"]
-    if check:
-        cmd.append("--check")
-    cmd.append(".")
-    run(cmd, cwd=cwd)
-    log_ok("Python format")
-
-
-def fmt_go(cwd=PROJECT_ROOT):
-    if check:
-        log_step("Checking Go formatting")
-        result = subprocess.run(
-            ["gofumpt", "-l", "."],
-            capture_output=True,
-            text=True,
-            cwd=cwd,
-        )
-        if result.stdout.strip():
-            log_error("Go files need formatting:")
-            print(result.stdout)
-            sys.exit(1)
-    else:
-        log_step("Formatting Go code")
-        run(["gofumpt", "-w", "."], cwd=cwd)
-    log_ok("Go format")
-
-
-def fmt_rust(cwd=PROJECT_ROOT):
-    if check:
-        log_step("Checking Rust formatting")
-        result = subprocess.run(
-            ["cargo", "fmt", "--check"],
-            capture_output=True,
-            text=True,
-            cwd=cwd,
-        )
-        if result.returncode != 0:
-            log_error("Rust files need formatting:")
-            print(result.stdout + result.stderr)
-            sys.exit(1)
-    else:
-        log_step("Formatting Rust code")
-        run(["cargo", "fmt"], cwd=cwd)
-    log_ok("Rust format")
-
-
-if get_shape() == "apps":
-    run_per_module(
-        "fmt",
-        dispatch_module({"python": fmt_python, "go": fmt_go, "rust": fmt_rust}),
+if check:
+    log_step("Checking Rust formatting")
+    result = subprocess.run(
+        ["cargo", "fmt", "--check"],
+        capture_output=True,
+        text=True,
+        cwd=PROJECT_ROOT,
     )
+    if result.returncode != 0:
+        log_error("Rust files need formatting:")
+        print(result.stdout + result.stderr)
+        sys.exit(1)
 else:
-    dispatch_stack({"python": fmt_python, "go": fmt_go, "rust": fmt_rust})
+    log_step("Formatting Rust code")
+    run(["cargo", "fmt"], cwd=PROJECT_ROOT)
+
+log_ok("Rust format")

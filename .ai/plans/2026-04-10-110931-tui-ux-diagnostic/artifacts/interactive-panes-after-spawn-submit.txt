@@ -1,0 +1,7 @@
+alpha agents %0 bash 0
+alpha agents %1 bash 0
+beta beta-main %2 bash 0
+beta printf %6 bash 0
+dashboard target/debug/foreman %5 foreman 0
+gamma agents %3 bash 0
+notes notes %4 bash 0

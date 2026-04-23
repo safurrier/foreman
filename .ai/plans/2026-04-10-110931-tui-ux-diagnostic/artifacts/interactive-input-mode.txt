@@ -1,0 +1,36 @@
+┌Header────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│Foreman | mode=INPUT | focus=INPUT | visible_targets=9 | cpu=222% mem=80% | pr=#1 OPEN | notify=MUTED                 │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌Sidebar────────────────────────────────┐┌Preview──────────────────────────────────────────────────────────────────────┐
+│  Session  beta                        ││Selected pane: M1-AFurrier                                                   │
+│  Window   agents                      ││Status: ATTN                                                                 │
+│> Pane     M1-AFurrier [ATTN]          ││Harness: CodexCli                                                            │
+│  Session  alpha                       ││Command: bash                                                                │
+│  Window   agents                      ││                                                                             │
+│  Pane     M1-AFurrier [IDLE]          ││Codex CLI waiting for your input                                             │
+│  Session  gamma                       ││sh-3.2$                                                                      │
+│  Window   agents                      ││                                                                             │
+│  Pane     M1-AFurrier [IDLE]          ││Workspace: /Users/alex.furrier/git_repositories/foreman                      │
+│                                       ││Notifications: MUTED                                                         │
+│                                       ││PR: #1 OPEN - Release foreman 1.0                                            │
+│                                       ││                                                                             │
+│                                       ││Pull Request                                                                 │
+│                                       ││#1 OPEN                                                                      │
+│                                       ││Title: Release foreman 1.0                                                   │
+│                                       ││Repo: foreman                                                                │
+│                                       ││Branches: feat/add-foreman-spec -> main                                      │
+│                                       ││Author: safurrier                                                            │
+│                                       ││URL: https://github.com/safurrier/foreman/pull/1                             │
+│                                       ││Actions: p toggle | O open | Y copy                                          │
+│                                       │└─────────────────────────────────────────────────────────────────────────────┘
+│                                       │┌* Input──────────────────────────────────────────────────────────────────────┐
+│                                       ││Compose text for the selected pane.                                          │
+│                                       ││                                                                             │
+│                                       ││Ctrl+S: send | Esc: cancel                                                   │
+│                                       ││                                                                             │
+│                                       ││                                                                             │
+│                                       ││                                                                             │
+└───────────────────────────────────────┘└─────────────────────────────────────────────────────────────────────────────┘
+┌Footer────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│MODE: INPUT | FOCUS: INPUT | Ctrl+S Send | Esc Cancel                                                                 │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

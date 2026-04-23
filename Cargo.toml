@@ -1,5 +1,19 @@
 [package]
 name = "foreman"
-version = "0.1.0"
+version = "1.0.0"
+default-run = "foreman"
 edition = "2021"
+rust-version = "1.88"
 description = "TUI for managing AI agents across tmux"
+
+[dependencies]
+clap = { version = "4.5.4", features = ["derive"] }
+crossterm = "0.28"
+ratatui = "0.29"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sysinfo = "0.33"
+toml = "0.8"
+
+[dev-dependencies]
+tempfile = "3.13"

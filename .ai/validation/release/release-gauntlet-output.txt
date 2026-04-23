@@ -1,0 +1,10 @@
+
+running 3 tests
+test release_action_gauntlet_proves_search_flash_sort_and_pane_operations ... ok
+test release_integration_gauntlet_proves_pr_notifications_and_graceful_degradation ... ok
+test release_startup_navigation_gauntlet_proves_discovery_filters_and_help ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 58.50s
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.24s
+     Running tests/release_gauntlet.rs (target/debug/deps/release_gauntlet-fd507c58f628d4e2)

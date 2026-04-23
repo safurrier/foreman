@@ -1,0 +1,6 @@
+slug: pi-native-integration
+branch: feat/add-foreman-spec
+created: 2026-04-10
+pr:
+status: complete
+source: User requested the next native harness to be Pi with the same validation bar as Claude and Codex, including a real Pi-binary E2E path.

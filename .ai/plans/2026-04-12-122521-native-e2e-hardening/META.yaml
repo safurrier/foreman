@@ -1,0 +1,6 @@
+slug: native-e2e-hardening
+branch: feat/add-foreman-spec
+created: 2026-04-12
+pr:
+status: complete
+source: follow-on-native-e2e-hardening

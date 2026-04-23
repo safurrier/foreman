@@ -1,0 +1,81 @@
+#!/usr/bin/env -S uv run python
+# MISE description="Opt-in real harness E2E drill for Claude, Codex, and Pi"
+# MISE depends=["setup"]
+import os
+import subprocess
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+sys.path.insert(0, os.path.join(os.environ["MISE_PROJECT_ROOT"], "scripts"))
+from lib import PROJECT_ROOT, log_error, log_ok, log_step  # noqa: E402
+
+
+@dataclass(frozen=True)
+class Case:
+    env_var: str
+    provider: str
+    test_name: str
+
+
+CASES = [
+    Case("FOREMAN_REAL_CLAUDE_E2E", "claude", "claude_real_e2e"),
+    Case("FOREMAN_REAL_CODEX_E2E", "codex", "codex_real_e2e"),
+    Case("FOREMAN_REAL_PI_E2E", "pi", "pi_real_e2e"),
+]
+
+PREFLIGHT_TASK = Path(PROJECT_ROOT) / ".mise" / "tasks" / "native-preflight"
+
+
+def run(test_name: str) -> None:
+    result = subprocess.run(
+        ["cargo", "test", "--test", test_name, "--", "--ignored", "--nocapture"],
+        cwd=PROJECT_ROOT,
+    )
+    if result.returncode != 0:
+        sys.exit(result.returncode)
+
+
+def run_preflight(providers: list[str]) -> None:
+    result = subprocess.run(
+        [str(PREFLIGHT_TASK), *sum((["--provider", provider] for provider in providers), [])],
+        cwd=PROJECT_ROOT,
+    )
+    if result.returncode != 0:
+        sys.exit(result.returncode)
+
+
+log_step("Running opt-in real harness drill")
+
+strict = bool(os.environ.get("FOREMAN_REQUIRE_REAL_E2E"))
+enabled_cases = [case for case in CASES if os.environ.get(case.env_var)]
+missing_env_cases = [case for case in CASES if not os.environ.get(case.env_var)]
+
+if strict and missing_env_cases:
+    for case in missing_env_cases:
+        log_error(
+            "Strict native closeout requires "
+            f"{case.env_var}=1 for {case.test_name}"
+        )
+    sys.exit(1)
+
+if enabled_cases:
+    run_preflight([case.provider for case in enabled_cases])
+
+ran_any = False
+for case in CASES:
+    if case in enabled_cases:
+        log_step(f"{case.test_name} enabled via {case.env_var}")
+        run(case.test_name)
+        ran_any = True
+    else:
+        log_step(f"Skipping {case.test_name} ({case.env_var} not set)")
+
+if strict and not ran_any:
+    log_error("Strict native closeout requested but no real harness E2Es ran")
+    sys.exit(1)
+
+if not ran_any:
+    log_step("No real harness E2Es were enabled")
+
+log_ok("Native harness drill complete")

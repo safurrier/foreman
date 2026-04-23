@@ -1,0 +1,24 @@
+┌Header────────────────────────────────────────────────────────────────────────┐
+│Foreman | mode=NORMAL | focus=PREVIEW | visible_targets=9 | cpu=167% mem=79% |│
+└──────────────────────────────────────────────────────────────────────────────┘
+┌Sidebar──────────────────┐┌* Preview──────────────────────────────────────────┐
+│  Session  beta          ││Selected session: alpha                            │
+│  Window   sh            ││Windows: 1                                         │
+│  Pane     M1-AFurrier   ││                                                   │
+│[ATTN]                   ││Expand or choose a pane to inspect work.           │
+│> Session  alpha         ││                                                   │
+│  Window   sh            ││Workspace:                                         │
+│  Pane     M1-AFurrier   ││/Users/alex.furrier/git_repositories/foreman       │
+│[IDLE]                   ││Notifications: MUTED                               │
+│  Session  gamma         ││PR: #1 OPEN - Release foreman 1.0                  │
+│  Window   sh            ││                                                   │
+│  Pane     M1-AFurrier   ││Pull Request                                       │
+│[IDLE]                   │└───────────────────────────────────────────────────┘
+│                         │┌Input──────────────────────────────────────────────┐
+│                         ││Direct input is available for the selected pane.   │
+│                         ││                                                   │
+│                         ││                                                   │
+└─────────────────────────┘└───────────────────────────────────────────────────┘
+┌Footer────────────────────────────────────────────────────────────────────────┐
+│MODE: NORMAL | FOCUS: PREVIEW | ? Help | / Search | s Flash | p PR | O Open | │
+└──────────────────────────────────────────────────────────────────────────────┘

@@ -14,13 +14,17 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install mise
-        uses: jdx/mise-action@v2
+        uses: jdx/mise-action@v3
+        with:
+          install: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Setup
         run: mise run setup
 
       - name: Check
-        run: mise run ci
+        run: mise run check
 
       - name: Upload test artifacts
         if: always()
@@ -41,10 +45,24 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install mise
-        uses: jdx/mise-action@v2
+        uses: jdx/mise-action@v3
+        with:
+          install: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Setup
         run: mise run setup
 
       - name: Verify
         run: mise run verify
+
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-evidence
+          path: |
+            .ai/validation/ux/
+            .ai/validation/release/
+          if-no-files-found: error

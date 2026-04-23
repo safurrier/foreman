@@ -1,2 +1,11 @@
 /target/
 **/*.rs.bk
+**/__pycache__/
+*.py[cod]
+/test-results/
+/.ai/handoffs/
+/.ai/research/
+/.ai/plans/**/artifacts/
+/.claude/settings.local.json
+/.codex/hooks.json
+/.pi/extensions/foreman.ts

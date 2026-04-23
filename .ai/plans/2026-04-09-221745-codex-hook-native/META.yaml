@@ -1,0 +1,6 @@
+slug: codex-hook-native
+branch: feat/add-foreman-spec
+created: 2026-04-09
+pr:
+status: complete
+source: User requested the next native integration after Claude and asked to assess Codex-native stop functionality and remaining SPEC gaps.

@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Foreman Retro vs agent-scaffold</title>
+  <style>
+    :root {
+      --bg: #f4efe6;
+      --panel: #fffaf2;
+      --ink: #1d1a16;
+      --muted: #675f55;
+      --line: #d8cdbd;
+      --good: #255f38;
+      --warn: #8a5b12;
+      --bad: #8b2e2e;
+      --accent: #0f5f73;
+      --shadow: 0 18px 60px rgba(29, 26, 22, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif;
+      background:
+        radial-gradient(circle at top left, rgba(15,95,115,0.08), transparent 30%),
+        radial-gradient(circle at top right, rgba(138,91,18,0.08), transparent 26%),
+        var(--bg);
+      color: var(--ink);
+      line-height: 1.5;
+    }
+
+    .wrap {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 32px 20px 60px;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, rgba(255,250,242,0.96), rgba(247,240,228,0.96));
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+      border-radius: 24px;
+      padding: 28px;
+      margin-bottom: 22px;
+    }
+
+    h1, h2, h3 {
+      margin: 0 0 10px;
+      line-height: 1.15;
+    }
+
+    h1 { font-size: clamp(2rem, 4vw, 3.4rem); }
+    h2 { font-size: 1.4rem; margin-top: 28px; }
+    h3 { font-size: 1.05rem; margin-top: 20px; }
+
+    p, li { font-size: 1rem; }
+    .muted { color: var(--muted); }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+      margin: 22px 0;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: var(--shadow);
+    }
+
+    .card.good { border-top: 6px solid var(--good); }
+    .card.warn { border-top: 6px solid var(--warn); }
+    .card.bad { border-top: 6px solid var(--bad); }
+    .card.accent { border-top: 6px solid var(--accent); }
+
+    ul {
+      margin: 10px 0 0 20px;
+      padding: 0;
+    }
+
+    code {
+      background: rgba(29, 26, 22, 0.06);
+      padding: 1px 5px;
+      border-radius: 6px;
+      font-size: 0.95em;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .step {
+      padding: 14px 16px;
+      border-left: 4px solid var(--accent);
+      background: rgba(255,250,242,0.75);
+      border-radius: 12px;
+      border: 1px solid var(--line);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 16px;
+      background: var(--panel);
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+
+    th, td {
+      text-align: left;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+
+    th {
+      background: rgba(15,95,115,0.08);
+      font-size: 0.95rem;
+    }
+
+    blockquote {
+      margin: 12px 0;
+      padding: 12px 14px;
+      border-left: 4px solid var(--accent);
+      background: rgba(15,95,115,0.06);
+      color: var(--ink);
+    }
+
+    .foot {
+      margin-top: 28px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(255,250,242,0.85);
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <p class="muted">Retro generated on 2026-04-11 from repo docs, all plan logs, git history, and <code>../agent-scaffold</code>.</p>
+      <h1>Foreman did not outgrow the scaffold by accident.</h1>
+      <p>The scaffold gave a good outer loop. Foreman started moving fast only after the repo added a product-specific spec, a real architecture record, a chunked plan, and heavy validation lanes for tmux, compiled-binary flows, UX evidence, and real harness drills.</p>
+    </section>
+
+    <section class="grid">
+      <article class="card good">
+        <h2>What Worked</h2>
+        <ul>
+          <li>Stable task contract from day 0: <code>plan</code>, <code>check</code>, <code>verify</code>, <code>ci</code>.</li>
+          <li>Spec-first vertical slicing produced a clean build order.</li>
+          <li>Validation culture moved from fake seams to real boundaries instead of stopping early.</li>
+          <li>Recurring lessons were eventually promoted into durable docs.</li>
+        </ul>
+      </article>
+
+      <article class="card bad">
+        <h2>Where It Lacked</h2>
+        <ul>
+          <li>Generated docs were placeholder-heavy and not shaped for a harness TUI.</li>
+          <li>The architecture template was biased toward service backends, not reducer/render/tmux seams.</li>
+          <li>Plan templates were too thin for a multi-stage rebuild.</li>
+          <li>The Rust starter was a hello-world binary plus <code>Greeter</code>.</li>
+          <li>The generic <code>verify</code> lane was too weak for harness engineering.</li>
+        </ul>
+      </article>
+
+      <article class="card warn">
+        <h2>What Needed Real Discovery</h2>
+        <ul>
+          <li>Codex hook behavior changed between non-interactive mode and tmux TTY.</li>
+          <li>Detached tmux alternate-screen capture was flaky.</li>
+          <li>CI exposed shell portability, window-index assumptions, and startup races.</li>
+          <li>UX trust gaps only became obvious under operator-style walkthroughs.</li>
+        </ul>
+      </article>
+
+      <article class="card accent">
+        <h2>Best Scaffold Upgrade</h2>
+        <p>Add an explicit <code>tui-harness</code> archetype. That would have removed the largest avoidable churn without pretending empirical harness work can be templated away.</p>
+      </article>
+    </section>
+
+    <section class="card">
+      <h2>Git History Shape</h2>
+      <div class="timeline">
+        <div class="step"><strong>2026-04-08</strong> - <code>e70165c</code> initializes a generic Rust scaffold.</div>
+        <div class="step"><strong>2026-04-08 to 2026-04-09</strong> - core product shape lands: spec, app state, CLI, render shell, tmux inventory, focus flow, compatibility status, direct actions, search, PRs, notifications, runtime.</div>
+        <div class="step"><strong>2026-04-09 to 2026-04-10</strong> - native harness work and release hardening land: Claude, Codex, Pi, release automation, Docker and tmux portability fixes.</div>
+        <div class="step"><strong>2026-04-10 to 2026-04-11</strong> - trust and evidence work lands: UX diagnostics, release gauntlet, focus/help/footer clarity, CI artifact surfacing.</div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Key Evidence</h2>
+      <blockquote>
+        "the safest path is spec-first and test-first rather than trying to wire tmux, Ratatui, and harness integrations all at once."
+        <br>
+        <span class="muted">.ai/plans/2026-04-08-160754-spec-driven-tdd/LEARNING_LOG.md:13-15</span>
+      </blockquote>
+      <blockquote>
+        "Current coverage is broad but fragmented ... not yet organized into a single 'everything important actually works together' validation story."
+        <br>
+        <span class="muted">.ai/plans/2026-04-10-151735-release-validation-gauntlet/LEARNING_LOG.md:15-18</span>
+      </blockquote>
+      <blockquote>
+        "The plan logs were the right place to mine for repeated failures ... But those artifacts should stay historical. The stable repo guidance belongs in AGENTS.md and docs/."
+        <br>
+        <span class="muted">.ai/plans/2026-04-10-100544-context-improve-sync/LEARNING_LOG.md:17-23</span>
+      </blockquote>
+      <blockquote>
+        <code>fn main() { println!("Hello from {{ project_name }}!"); }</code>
+        <br>
+        <span class="muted">../agent-scaffold/stacks/rust/src/main.rs.tmpl:1-3</span>
+      </blockquote>
+    </section>
+
+    <section class="card">
+      <h2>What Would Have Made It More One-Shot</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Change from the start</th>
+            <th>Why it matters</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Product-specific AGENTS, SPEC, and architecture</td>
+            <td>Would have removed early placeholder rewrite churn and made boundaries explicit on day 0.</td>
+          </tr>
+          <tr>
+            <td>Complex-plan mode with traceability and validation-layer prompts</td>
+            <td>The first real Foreman plan had to invent that structure anyway.</td>
+          </tr>
+          <tr>
+            <td>Named heavy validation lanes</td>
+            <td><code>verify-release</code>, <code>verify-ux</code>, and <code>verify-native</code> became core, not optional polish.</td>
+          </tr>
+          <tr>
+            <td>Harness fixture helpers</td>
+            <td>Retry, alternate-screen fallback, and atomic signal writes were required to make the real-boundary story stable.</td>
+          </tr>
+          <tr>
+            <td>Workflow docs in addition to architecture</td>
+            <td>Foreman needed a durable place for rough edges, validation rules, and lesson promotion.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>Recommended `agent-scaffold` Upgrades</h2>
+      <ul>
+        <li>Add a <code>tui-harness</code> archetype, not just stack + shape.</li>
+        <li>Generate <code>docs/tour.md</code> and <code>docs/workflows.md</code>.</li>
+        <li>Add a complex-plan template with traceability, exit criteria, and a one-shot retrospective prompt.</li>
+        <li>Let archetypes register named heavy lanes and artifact/report conventions.</li>
+        <li>Scaffold tmux and harness fixture helpers for the archetype.</li>
+        <li>Provide optional companion-binary stubs and release packaging hooks.</li>
+        <li>Harden Docker validation defaults when a Dockerfile is scaffolded.</li>
+      </ul>
+    </section>
+
+    <section class="foot">
+      <strong>Bottom line:</strong> the scaffold gave Foreman a solid shell. The missing piece was not "more generic intelligence." It was a repo archetype that already assumed reducer-driven TUI work, external harness boundaries, and evidence-heavy validation.
+    </section>
+  </div>
+</body>
+</html>

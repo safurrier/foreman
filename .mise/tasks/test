@@ -1,5 +1,5 @@
 #!/usr/bin/env -S uv run python
-# MISE description="Run unit tests"
+# MISE description="Run Rust unit, integration, and smoke tests"
 # MISE depends=["setup"]
 import os
 import subprocess
@@ -7,65 +7,21 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.environ["MISE_PROJECT_ROOT"], "scripts"))
-from lib import (  # noqa: E402
-    PROJECT_ROOT,
-    dispatch_module,
-    dispatch_stack,
-    get_shape,
-    log_ok,
-    log_step,
-    run,
-    run_per_module,
+from lib import PROJECT_ROOT, log_ok, log_step  # noqa: E402
+
+log_step("Running Rust tests")
+results_dir = PROJECT_ROOT / "test-results"
+results_dir.mkdir(parents=True, exist_ok=True)
+result = subprocess.run(
+    ["cargo", "test", "--all-features"],
+    cwd=PROJECT_ROOT,
+    capture_output=True,
+    text=True,
 )
+output = result.stdout + result.stderr
+(results_dir / "cargo-test.txt").write_text(output)
+print(output, end="")
+if result.returncode != 0:
+    sys.exit(result.returncode)
 
-
-def test_python(cwd=PROJECT_ROOT):
-    log_step("Running Python tests")
-    run(["uv", "run", "pytest"], cwd=cwd)
-    log_ok("Python tests")
-
-
-def test_go(cwd=PROJECT_ROOT):
-    log_step("Running Go tests")
-    results_dir = Path(cwd) / "test-results"
-    results_dir.mkdir(parents=True, exist_ok=True)
-    result = subprocess.run(
-        ["go", "test", "-v", "./..."],
-        cwd=cwd,
-        env={**os.environ, "CGO_ENABLED": "0"},
-        capture_output=True,
-        text=True,
-    )
-    output = result.stdout + result.stderr
-    (results_dir / "go-test.txt").write_text(output)
-    print(output, end="")
-    if result.returncode != 0:
-        sys.exit(result.returncode)
-    log_ok("Go tests")
-
-
-def test_rust(cwd=PROJECT_ROOT):
-    log_step("Running Rust tests")
-    results_dir = Path(cwd) / "test-results"
-    results_dir.mkdir(parents=True, exist_ok=True)
-    result = subprocess.run(
-        ["cargo", "test", "--all-features"],
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-    )
-    output = result.stdout + result.stderr
-    (results_dir / "cargo-test.txt").write_text(output)
-    print(output, end="")
-    if result.returncode != 0:
-        sys.exit(result.returncode)
-    log_ok("Rust tests")
-
-
-if get_shape() == "apps":
-    run_per_module(
-        "test",
-        dispatch_module({"python": test_python, "go": test_go, "rust": test_rust}),
-    )
-else:
-    dispatch_stack({"python": test_python, "go": test_go, "rust": test_rust})
+log_ok("Rust tests")

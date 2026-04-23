@@ -1,0 +1,19 @@
+#!/usr/bin/env -S uv run python
+# MISE description="Install foreman binaries into the local cargo bin directory"
+# MISE depends=["setup"]
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.environ["MISE_PROJECT_ROOT"], "scripts"))
+from lib import PROJECT_ROOT, log_ok, log_step, run  # noqa: E402
+
+log_step("Installing foreman binaries")
+cmd = ["cargo", "install", "--path", ".", "--locked", "--force"]
+cmd.extend(sys.argv[1:])
+run(cmd, cwd=PROJECT_ROOT)
+log_ok("foreman installed")
+print()
+print("Next steps:")
+print("  foreman --setup --user --project")
+print("  foreman --doctor")
+print("  foreman")

@@ -1,0 +1,36 @@
+┌Header────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│Foreman | mode=SPAWN | focus=SIDEBAR | visible_targets=12 | cpu=226% mem=81% | pr=#1 OPEN | notify=MUTED              │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌* Sidebar──────────────────────────────┐┌Preview──────────────────────────────────────────────────────────────────────┐
+│  Session  beta                        ││Selected pane: M1-AFurrier                                                   │
+│  Window   beta-main                   ││Status: ATTN                                                                 │
+│> Pane     M1-AFurrier [ATTN]          ││Harness: CodexCli                                                            │
+│  Session  dashboard                   ││Command: bash                                                                │
+│  Window   target/debug/foreman        ││                                                                             │
+│  Pane     M1-AFurrier [ATTN]          ││Codex CLI waiting for your input                                             │
+│  Session  alpha                       ││sh-3.2$ printf 'UX_DIRECT_OK\n'                                              │
+│  Window   agents     ┌Spawn Agent─────────────────────────────────────────────────────────────┐                      │
+│  Pane     M1-AFurrier│Target session: $1                                                      │                      │
+│  Session  gamma      │                                                                        │                      │
+│  Window   agents     │printf 'Claude Code ready\n';                                           │                      │
+│  Pane     M1-AFurrier│                                                                        │                      │
+│                      │Enter or Ctrl+S: spawn                                                  │                      │
+│                      │Esc: cancel                                                             │                      │
+│                      │                                                                        │                      │
+│                      │                                                                        │                      │
+│                      │                                                                        │                      │
+│                      │                                                                        │                      │
+│                      │                                                                        │                      │
+│                      │                                                                        │                      │
+│                      └────────────────────────────────────────────────────────────────────────┘──────────────────────┘
+│                                       │┌Input────────────────────────────────────────────────────────────────────────┐
+│                                       ││Direct input is available for the selected pane.                             │
+│                                       ││                                                                             │
+│                                       ││                                                                             │
+│                                       ││                                                                             │
+│                                       ││                                                                             │
+│                                       ││                                                                             │
+└───────────────────────────────────────┘└─────────────────────────────────────────────────────────────────────────────┘
+┌Footer────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│MODE: SPAWN | FOCUS: SIDEBAR | Enter Spawn | Esc Cancel                                                               │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

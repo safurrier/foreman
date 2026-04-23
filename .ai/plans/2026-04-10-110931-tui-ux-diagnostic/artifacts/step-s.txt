@@ -1,0 +1,24 @@
+┌Header────────────────────────────────────────────────────────────────────────┐
+│Foreman | mode=FLASH | focus=SIDEBAR | visible_targets=9 | cpu=167% mem=79% | │
+└──────────────────────────────────────────────────────────────────────────────┘
+┌* Sidebar────────────────┐┌Preview────────────────────────────────────────────┐
+│  [a] Session  beta      ││Selected session: gamma                            │
+│  [b] Window   sh        ││Windows: 1                                         │
+│  [c] Pane               ││                                                   │
+│M1-AFurrier [ATTN]       ││Expand or choose a pane to inspect work.           │
+│  [d] Session  alpha     ││                                                   │
+│  [e] Window   sh┌Flash─────────────────────────────────────┐                 │
+│  [f] Pane       │Mode: Jump                                │es/foreman       │
+│M1-AFurrier [IDLE│Typed: <empty>                            │                 │
+│> [g] Session  ga│Labels: 9                                 │                 │
+│  [h] Window   sh│                                          │                 │
+│  [i] Pane       └──────────────────────────────────────────┘                 │
+│M1-AFurrier [IDLE]       │└───────────────────────────────────────────────────┘
+│                         │┌Input──────────────────────────────────────────────┐
+│                         ││Direct input is available for the selected pane.   │
+│                         ││                                                   │
+│                         ││                                                   │
+└─────────────────────────┘└───────────────────────────────────────────────────┘
+┌Footer────────────────────────────────────────────────────────────────────────┐
+│MODE: FLASH | FOCUS: SIDEBAR | Type Label | Esc Cancel                        │
+└──────────────────────────────────────────────────────────────────────────────┘

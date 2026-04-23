@@ -1,0 +1,6 @@
+slug: help-scroll-footer-pass
+branch: feat/add-foreman-spec
+created: 2026-04-11
+pr: 1
+status: complete
+source: user: improve operator usability again, make the footer less cryptic, and make the help popup scrollable

@@ -1,0 +1,6 @@
+slug: harness-filter-icon-pass
+branch: feat/add-foreman-spec
+created: 2026-04-10
+pr:
+status: complete
+source: user: improve TUI information architecture with harness filters, clearer badges, and UX validation

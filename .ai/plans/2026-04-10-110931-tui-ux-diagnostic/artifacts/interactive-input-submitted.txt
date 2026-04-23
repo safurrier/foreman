@@ -1,0 +1,36 @@
+┌Header────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│Foreman | mode=NORMAL | focus=INPUT | visible_targets=12 | cpu=222% mem=80% | pr=#1 OPEN | notify=MUTED               │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌Sidebar────────────────────────────────┐┌Preview──────────────────────────────────────────────────────────────────────┐
+│  Session  beta                        ││Selected pane: M1-AFurrier                                                   │
+│  Window   agents                      ││Status: ATTN                                                                 │
+│> Pane     M1-AFurrier [ATTN]          ││Harness: CodexCli                                                            │
+│  Session  dashboard                   ││Command: bash                                                                │
+│  Window   target/debug/foreman        ││                                                                             │
+│  Pane     M1-AFurrier [ATTN]          ││Codex CLI waiting for your input                                             │
+│  Session  alpha                       ││sh-3.2$ printf 'UX_DIRECT_OK\n'                                              │
+│  Window   agents                      ││UX_DIRECT_OK                                                                 │
+│  Pane     M1-AFurrier [IDLE]          ││sh-3.2$                                                                      │
+│  Session  gamma                       ││                                                                             │
+│  Window   agents                      ││Workspace: /Users/alex.furrier/git_repositories/foreman                      │
+│  Pane     M1-AFurrier [IDLE]          ││Notifications: MUTED                                                         │
+│                                       ││PR: #1 OPEN - Release foreman 1.0                                            │
+│                                       ││                                                                             │
+│                                       ││Pull Request                                                                 │
+│                                       ││#1 OPEN                                                                      │
+│                                       ││Title: Release foreman 1.0                                                   │
+│                                       ││Repo: foreman                                                                │
+│                                       ││Branches: feat/add-foreman-spec -> main                                      │
+│                                       ││Author: safurrier                                                            │
+│                                       │└─────────────────────────────────────────────────────────────────────────────┘
+│                                       │┌* Input──────────────────────────────────────────────────────────────────────┐
+│                                       ││Input focused. Press Enter or i to compose.                                  │
+│                                       ││                                                                             │
+│                                       ││                                                                             │
+│                                       ││                                                                             │
+│                                       ││                                                                             │
+│                                       ││                                                                             │
+└───────────────────────────────────────┘└─────────────────────────────────────────────────────────────────────────────┘
+┌Footer────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│MODE: NORMAL | FOCUS: INPUT | ? Help | / Search | s Flash | p PR | O Open | Y Copy | m Mute | n Profile | q Quit      │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

@@ -1,0 +1,6 @@
+slug: stale-harness-nav-latency
+branch: feat/add-foreman-spec
+created: 2026-04-20
+pr:
+status: complete
+source: stale-agent-detection-and-navigation-performance

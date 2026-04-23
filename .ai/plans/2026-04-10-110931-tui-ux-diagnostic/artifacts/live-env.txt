@@ -1,0 +1,9 @@
+root=/tmp/foreman-ux-live-e29BOv
+socket=/tmp/foreman-ux-live-e29BOv/tmux.sock
+log_dir=/tmp/foreman-ux-live-e29BOv/logs
+alpha=%0
+alpha_helper=%1
+beta=%2
+gamma=%3
+notes=%4
+dashboard=%5

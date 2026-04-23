@@ -1,0 +1,6 @@
+slug: focus-hints-artifacts
+branch: feat/add-foreman-spec
+created: 2026-04-11
+pr: 1
+status: complete
+source: user: do the remaining focus-aware footer/help hints, add integration-source or confidence hinting, remove mouse navigation from the spec, and surface UX or release evidence in CI artifacts

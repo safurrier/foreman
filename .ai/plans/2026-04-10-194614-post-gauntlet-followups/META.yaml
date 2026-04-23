@@ -1,0 +1,6 @@
+slug: post-gauntlet-followups
+branch: feat/add-foreman-spec
+created: 2026-04-10
+pr: 1
+status: complete
+source: user: do the release-gauntlet follow-ups, make keybind coverage explicit, clarify tmux focus behavior, and tighten heavy validation

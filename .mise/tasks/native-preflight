@@ -1,0 +1,169 @@
+#!/usr/bin/env -S uv run python
+# MISE description="Check local readiness for real Claude, Codex, and Pi E2Es"
+# MISE depends=["setup"]
+import argparse
+import os
+import re
+import subprocess
+import sys
+from dataclasses import dataclass
+
+sys.path.insert(0, os.path.join(os.environ["MISE_PROJECT_ROOT"], "scripts"))
+from lib import PROJECT_ROOT, log_error, log_ok, log_step, log_warn  # noqa: E402
+
+PROVIDERS = ("claude", "codex", "pi")
+MIN_CODEX_HOOK_VERSION = (0, 116, 0)
+VERSION_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
+
+
+@dataclass(frozen=True)
+class CommandResult:
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+def run_capture(cmd: list[str]) -> CommandResult:
+    result = subprocess.run(
+        cmd,
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    return CommandResult(
+        returncode=result.returncode,
+        stdout=result.stdout.strip(),
+        stderr=result.stderr.strip(),
+    )
+
+
+def parse_semver(text: str) -> tuple[int, int, int] | None:
+    match = VERSION_RE.search(text)
+    if not match:
+        return None
+    return tuple(int(part) for part in match.groups())
+
+
+def format_semver(version: tuple[int, int, int]) -> str:
+    return ".".join(str(part) for part in version)
+
+
+def ensure_tmux() -> list[str]:
+    result = run_capture(["tmux", "-V"])
+    if result.returncode != 0:
+        detail = result.stderr or result.stdout or "tmux is not available"
+        return [f"tmux unavailable: {detail}"]
+    log_ok(f"tmux ready ({result.stdout})")
+    return []
+
+
+def ensure_claude() -> list[str]:
+    failures: list[str] = []
+    version = run_capture(["claude", "--version"])
+    if version.returncode != 0:
+        detail = version.stderr or version.stdout or "claude CLI is not available"
+        return [f"claude unavailable: {detail}"]
+    log_ok(f"claude ready ({version.stdout})")
+
+    auth = run_capture(["claude", "auth", "status"])
+    if auth.returncode != 0:
+        detail = auth.stderr or auth.stdout or "claude auth status failed"
+        failures.append(f"claude auth unavailable: {detail}")
+    else:
+        log_ok("claude auth status passed")
+    return failures
+
+
+def ensure_codex() -> list[str]:
+    failures: list[str] = []
+    version = run_capture(["codex", "--version"])
+    if version.returncode != 0:
+        detail = version.stderr or version.stdout or "codex CLI is not available"
+        return [f"codex unavailable: {detail}"]
+
+    parsed = parse_semver(version.stdout)
+    if parsed is None:
+        failures.append(f"could not parse codex version: {version.stdout or '<empty>'}")
+    else:
+        log_ok(f"codex ready ({version.stdout})")
+        if parsed < MIN_CODEX_HOOK_VERSION:
+            failures.append(
+                "codex on PATH is too old for UserPromptSubmit hooks: "
+                f"found {format_semver(parsed)}, need >= {format_semver(MIN_CODEX_HOOK_VERSION)}"
+            )
+
+    auth = run_capture(["codex", "login", "status"])
+    if auth.returncode != 0:
+        detail = auth.stderr or auth.stdout or "codex login status failed"
+        failures.append(f"codex auth unavailable: {detail}")
+    else:
+        log_ok("codex login status passed")
+
+    features = run_capture(["codex", "features", "list"])
+    if features.returncode != 0:
+        detail = features.stderr or features.stdout or "codex features list failed"
+        failures.append(f"codex feature inventory unavailable: {detail}")
+    elif "codex_hooks" not in features.stdout:
+        failures.append(
+            "codex on PATH does not expose the codex_hooks feature required by the real E2E"
+        )
+    else:
+        log_ok("codex hook feature detected")
+
+    return failures
+
+
+def ensure_pi() -> list[str]:
+    version = run_capture(["pi", "--version"])
+    if version.returncode != 0:
+        detail = version.stderr or version.stdout or "pi CLI is not available"
+        return [f"pi unavailable: {detail}"]
+    detail = version.stdout or version.stderr or "version unavailable"
+    log_ok(f"pi ready ({detail})")
+    log_warn(
+        "pi auth is not preflighted here; the real pi E2E remains the source of truth"
+    )
+    return []
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Check readiness for Foreman's real harness E2Es."
+    )
+    parser.add_argument(
+        "--provider",
+        dest="providers",
+        action="append",
+        choices=PROVIDERS,
+        help="Provider to check. Repeat to limit the preflight to a subset.",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    selected = args.providers or list(PROVIDERS)
+
+    log_step(f"Running native E2E preflight for: {', '.join(selected)}")
+
+    failures: list[str] = []
+    if any(provider in selected for provider in ("claude", "pi")):
+        failures.extend(ensure_tmux())
+
+    for provider in selected:
+        if provider == "claude":
+            failures.extend(ensure_claude())
+        elif provider == "codex":
+            failures.extend(ensure_codex())
+        elif provider == "pi":
+            failures.extend(ensure_pi())
+
+    if failures:
+        for failure in failures:
+            log_error(failure)
+        sys.exit(1)
+
+    log_ok("Native preflight passed")
+
+
+main()
