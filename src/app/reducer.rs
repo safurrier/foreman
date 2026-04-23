@@ -99,6 +99,12 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
         Action::SetSystemStats(snapshot) => {
             state.system_stats = snapshot;
         }
+        Action::SetStartupLoading(startup_loading) => {
+            state.startup_loading = startup_loading;
+        }
+        Action::SetStartupCacheAge(startup_cache_age_ms) => {
+            state.startup_cache_age_ms = startup_cache_age_ms;
+        }
         Action::SetStartupError(startup_error) => {
             state.startup_error = startup_error;
         }

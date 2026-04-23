@@ -221,7 +221,7 @@ yet expose a stable contract.
 **R15. Flash navigation**
 
 - The dashboard provides a fast label-based jump mode.
-- Flash navigation overlays short labels on visible targets.
+- Flash navigation renders short labels inline on visible targets without obscuring the target rows.
 - It supports both jump-only and jump-and-focus variants.
 - It supports overflow beyond single-character labels.
 - It can be canceled cleanly.
@@ -283,6 +283,8 @@ yet expose a stable contract.
 
 - The command-line interface is exposed through `foreman`.
 - It supports normal interactive startup.
+- Normal interactive startup renders immediately with a loading state before the first tmux inventory refresh completes.
+- Popup startup may seed that first render from a fresh persisted inventory snapshot, but cached state must be marked and replaced by live tmux refresh.
 - It supports showing the config path.
 - It supports initializing a config file.
 - It supports popup execution mode.
@@ -440,7 +442,7 @@ mise run ci
 
 **A3. Multi-session discovery**
 
-- Given at least two tmux sessions with visible panes, when the dashboard starts, both sessions appear in the sidebar.
+- Given at least two tmux sessions with visible panes, when the dashboard starts, it renders a loading state immediately and then both sessions appear in the sidebar after the first background inventory refresh.
 
 **A4. Agent detection**
 
@@ -538,7 +540,7 @@ mise run ci
 
 **A14. Flash navigation**
 
-- Given flash navigation is active, typing a visible label jumps directly to that target.
+- Given flash navigation is active, typing a visible label jumps directly to that target while the labels remain visible inline in the sidebar.
 - Using the focus variant focuses the chosen pane in tmux.
 
 **A15. Sorting**
@@ -576,6 +578,8 @@ mise run ci
   binary inside real tmux.
 - Given the navigation performance smoke runs in the heavy UX lane, selection
   bursts do not trigger pull-request lookups for every intermediate workspace.
+- Given the popup startup cache path is enabled, the heavy UX lane proves
+  cached-first render and verifies startup-cache writes stay cheap and bounded.
 - When CI runs, build, test, formatting, and lint checks succeed.
 - When CI runs the heavy validation lane, the UX artifact bundle and
   release-gauntlet report are uploaded as reviewable artifacts.

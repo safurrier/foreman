@@ -9,7 +9,7 @@ use crate::services::system_stats::SystemStatsSnapshot;
 
 macro_rules! id_type {
     ($name:ident) => {
-        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
         pub struct $name(String);
 
         impl $name {
@@ -218,7 +218,8 @@ impl HarnessKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum AgentStatus {
     Working,
     NeedsAttention,
@@ -260,7 +261,8 @@ impl AgentStatus {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum IntegrationMode {
     Native,
     Compatibility,
@@ -289,7 +291,7 @@ impl IntegrationMode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentSnapshot {
     pub harness: HarnessKind,
     pub status: AgentStatus,
@@ -299,7 +301,7 @@ pub struct AgentSnapshot {
     pub debounce_ticks: u8,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Pane {
     pub id: PaneId,
     pub title: String,
@@ -359,9 +361,11 @@ impl Pane {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum PreviewProvenance {
     Captured,
+    PendingCapture,
     ReusedCached,
     CaptureFailed,
 }
@@ -370,6 +374,7 @@ impl PreviewProvenance {
     pub fn label(self) -> &'static str {
         match self {
             Self::Captured => "captured",
+            Self::PendingCapture => "pending capture",
             Self::ReusedCached => "reused cached preview",
             Self::CaptureFailed => "capture failed",
         }
@@ -378,6 +383,9 @@ impl PreviewProvenance {
     pub fn detail(self) -> &'static str {
         match self {
             Self::Captured => "Preview source: captured from tmux on the latest refresh.",
+            Self::PendingCapture => {
+                "Preview source: tmux preview capture is queued after startup or viewport-priority refresh."
+            }
             Self::ReusedCached => {
                 "Preview source: reused cached preview while tmux refresh prioritized other panes."
             }
@@ -388,7 +396,7 @@ impl PreviewProvenance {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Window {
     pub id: WindowId,
     pub name: String,
@@ -455,7 +463,7 @@ impl Window {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Session {
     pub id: SessionId,
     pub name: String,
@@ -520,7 +528,7 @@ impl Session {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Inventory {
     pub sessions: Vec<Session>,
 }
@@ -1092,6 +1100,8 @@ pub struct AppState {
     pub modal: Option<ModalState>,
     pub system_stats: SystemStatsSnapshot,
     pub operator_alert: Option<OperatorAlert>,
+    pub startup_loading: bool,
+    pub startup_cache_age_ms: Option<u64>,
     pub startup_error: Option<String>,
     pub runtime_diagnostics: Vec<DoctorFinding>,
     pub visible_state: VisibleStateCache,
@@ -1105,6 +1115,8 @@ pub struct InventorySummary {
     pub visible_sessions: usize,
     pub visible_windows: usize,
     pub visible_panes: usize,
+    pub startup_loading: bool,
+    pub startup_cache_age_ms: Option<u64>,
     pub startup_error: Option<String>,
 }
 
@@ -1133,6 +1145,8 @@ impl Default for AppState {
             modal: None,
             system_stats: SystemStatsSnapshot::default(),
             operator_alert: None,
+            startup_loading: false,
+            startup_cache_age_ms: None,
             startup_error: None,
             runtime_diagnostics: Vec::new(),
             visible_state: VisibleStateCache::default(),
@@ -1282,6 +1296,8 @@ impl AppState {
             visible_sessions: self.visible_state.visible_sessions,
             visible_windows: self.visible_state.visible_windows,
             visible_panes: self.visible_state.visible_panes,
+            startup_loading: self.startup_loading,
+            startup_cache_age_ms: self.startup_cache_age_ms,
             startup_error: self.startup_error.clone(),
         }
     }

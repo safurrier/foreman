@@ -1,11 +1,13 @@
 mod support;
 
 use foreman::adapters::tmux::{SystemTmuxBackend, TmuxAdapter};
+use std::fs;
 use std::io::Write;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use support::tmux::TmuxFixture;
 use tempfile::tempdir;
 
@@ -85,6 +87,49 @@ fn wait_for_alt_capture_not_contains(
     panic!("pane {target} still contained unexpected text: {needle}");
 }
 
+fn wait_for_log_contains(log_path: &Path, needle: &str, attempts: usize) {
+    for _ in 0..attempts {
+        let contents = fs::read_to_string(log_path).unwrap_or_default();
+        if contents.contains(needle) {
+            return;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+
+    panic!("expected log {} to contain {needle}", log_path.display());
+}
+
+fn real_tmux_path() -> String {
+    let output = Command::new("sh")
+        .args(["-lc", "command -v tmux"])
+        .output()
+        .expect("command -v tmux should run");
+    assert!(
+        output.status.success(),
+        "command -v tmux failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .expect("tmux path should be utf-8")
+        .trim()
+        .to_string()
+}
+
+fn write_slow_tmux_proxy(dir: &Path, delay_seconds: &str) {
+    let tmux_path = real_tmux_path();
+    let script = format!(
+        "#!/bin/sh\nsleep {delay_seconds}\nexec {} \"$@\"\n",
+        shell_escape(&tmux_path)
+    );
+    let path = dir.join("tmux");
+    fs::write(&path, script).expect("slow tmux proxy should be written");
+    let mut permissions = fs::metadata(&path)
+        .expect("slow tmux proxy metadata should exist")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&path, permissions).expect("slow tmux proxy should be executable");
+}
+
 #[test]
 fn interactive_binary_renders_dashboard_and_sends_input_to_selected_agent() {
     let fixture = TmuxFixture::new();
@@ -119,6 +164,71 @@ fn interactive_binary_renders_dashboard_and_sends_input_to_selected_agent() {
 
     fixture.send_keys(&dashboard_pane, &["q"]);
     fixture.wait_for_capture(&dashboard_pane, "FOREMAN_EXITED");
+}
+
+#[test]
+fn interactive_binary_uses_cached_inventory_before_slow_live_refresh() {
+    let fixture = TmuxFixture::new();
+    let agent_pane = fixture.new_session(
+        "alpha",
+        &fixture.interactive_echo_command("Claude Code ready", "CLAUDE:"),
+    );
+    fixture.wait_for_capture(&agent_pane, "Claude Code ready");
+
+    let config_dir = tempdir().expect("config dir should exist");
+    let log_dir = tempdir().expect("log dir should exist");
+    let latest_log_path = log_dir.path().join("latest.log");
+
+    let warm_command = format!(
+        "FOREMAN_CONFIG_HOME={} FOREMAN_LOG_DIR={} {} --popup --debug --tmux-socket {} --poll-interval-ms 100 --capture-lines 20 --no-notify",
+        config_dir.path().display(),
+        log_dir.path().display(),
+        foreman_bin(),
+        fixture.socket_path().display()
+    );
+    let warm_pane = fixture.new_session(
+        "dashboard-warm",
+        &fixture.keep_alive_command(&warm_command, "FOREMAN_EXITED"),
+    );
+
+    fixture.wait_for_alt_capture(&warm_pane, "Foreman | NORMAL");
+    fixture.wait_for_alt_capture(&warm_pane, "alpha");
+    wait_for_log_contains(
+        &latest_log_path,
+        "timing operation=startup_cache_write outcome=written",
+        120,
+    );
+    fixture.send_keys(&warm_pane, &["q"]);
+    fixture.wait_for_capture(&warm_pane, "FOREMAN_EXITED");
+
+    let slow_tmux_dir = tempdir().expect("slow tmux dir should exist");
+    write_slow_tmux_proxy(slow_tmux_dir.path(), "2.0");
+    let cached_command = format!(
+        "PATH={}:$PATH FOREMAN_CONFIG_HOME={} FOREMAN_LOG_DIR={} {} --popup --debug --tmux-socket {} --poll-interval-ms 100 --capture-lines 20 --no-notify",
+        slow_tmux_dir.path().display(),
+        config_dir.path().display(),
+        log_dir.path().display(),
+        foreman_bin(),
+        fixture.socket_path().display()
+    );
+    let cached_pane = fixture.new_session(
+        "dashboard-cache",
+        &fixture.keep_alive_command(&cached_command, "FOREMAN_EXITED"),
+    );
+
+    let cached_started = Instant::now();
+    fixture.wait_for_alt_capture(&cached_pane, "cached ");
+    fixture.wait_for_alt_capture(&cached_pane, "alpha");
+    let cached_visible_at = cached_started.elapsed();
+    wait_for_alt_capture_not_contains(&fixture, &cached_pane, "cached ", 120);
+    let live_refresh_replaced_at = cached_started.elapsed();
+    assert!(
+        cached_visible_at + Duration::from_millis(400) < live_refresh_replaced_at,
+        "expected cached startup frame to land well before live refresh replaced it (cached_visible_at={cached_visible_at:?}, live_refresh_replaced_at={live_refresh_replaced_at:?})"
+    );
+
+    fixture.send_keys(&cached_pane, &["q"]);
+    fixture.wait_for_capture(&cached_pane, "FOREMAN_EXITED");
 }
 
 #[test]
@@ -263,7 +373,7 @@ fn interactive_binary_help_scrolls_in_small_layout() {
         &dashboard_pane,
         &[
             "j", "j", "j", "j", "j", "j", "j", "j", "j", "j", "j", "j", "j", "j", "j", "j", "j",
-            "j", "j", "j",
+            "j", "j", "j", "j", "j", "j", "j", "j", "j", "j", "j", "j", "j",
         ],
     );
     fixture.wait_for_alt_capture(&dashboard_pane, "h cycles visible harnesses");
@@ -272,7 +382,7 @@ fn interactive_binary_help_scrolls_in_small_layout() {
         &dashboard_pane,
         &[
             "k", "k", "k", "k", "k", "k", "k", "k", "k", "k", "k", "k", "k", "k", "k", "k", "k",
-            "k", "k", "k",
+            "k", "k", "k", "k", "k", "k", "k", "k", "k", "k", "k", "k", "k",
         ],
     );
     fixture.wait_for_alt_capture(&dashboard_pane, "Legend");
@@ -307,10 +417,43 @@ fn interactive_binary_popup_focus_action_exits_after_success() {
 
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman");
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
+    fixture.wait_for_alt_capture(&dashboard_pane, "▾ alpha");
+    fixture.wait_for_alt_capture(&dashboard_pane, "• ✦ foreman");
 
-    fixture.send_keys(&dashboard_pane, &["j", "f"]);
+    fixture.send_keys(&dashboard_pane, &["f"]);
     fixture.wait_for_capture(&dashboard_pane, "FOREMAN_EXITED");
     assert_eq!(fixture.active_pane_in("alpha"), agent_pane);
+}
+
+#[test]
+fn interactive_binary_renders_loading_before_first_inventory_fill() {
+    let fixture = TmuxFixture::new();
+    let agent_pane = fixture.new_session("alpha", &fixture.shell_command("Claude Code ready"));
+    fixture.wait_for_capture(&agent_pane, "Claude Code ready");
+
+    let config_dir = tempdir().expect("config dir should exist");
+    let log_dir = tempdir().expect("log dir should exist");
+    let fake_bin = tempdir().expect("fake tmux dir should exist");
+    write_slow_tmux_proxy(fake_bin.path(), "0.25");
+    let dashboard_command = format!(
+        "PATH={}:$PATH FOREMAN_CONFIG_HOME={} FOREMAN_LOG_DIR={} {} --tmux-socket {} --poll-interval-ms 100 --capture-lines 200 --no-notify",
+        fake_bin.path().display(),
+        config_dir.path().display(),
+        log_dir.path().display(),
+        foreman_bin(),
+        fixture.socket_path().display()
+    );
+    let dashboard_pane = fixture.new_session(
+        "dashboard",
+        &fixture.keep_alive_command(&dashboard_command, "FOREMAN_EXITED"),
+    );
+
+    fixture.wait_for_alt_capture(&dashboard_pane, "Loading tmux inventory");
+    fixture.wait_for_alt_capture(&dashboard_pane, "alpha");
+    wait_for_alt_capture_not_contains(&fixture, &dashboard_pane, "Loading tmux inventory", 60);
+
+    fixture.send_keys(&dashboard_pane, &["q"]);
+    fixture.wait_for_capture(&dashboard_pane, "FOREMAN_EXITED");
 }
 
 #[test]
@@ -448,6 +591,7 @@ fn interactive_binary_spawn_modal_submits_with_enter() {
     );
 
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
+    fixture.wait_for_alt_capture(&dashboard_pane, "▾ alpha");
     fixture.send_keys(
         &dashboard_pane,
         &["N", "s", "l", "e", "e", "p", "Space", "6", "0", "Enter"],

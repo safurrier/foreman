@@ -2304,6 +2304,7 @@ mod tests {
             crate::config::AppPaths {
                 config_file: config_file.to_path_buf(),
                 log_dir: log_dir.to_path_buf(),
+                startup_cache_dir: crate::config::default_startup_cache_dir(log_dir),
             },
             AppConfig::default(),
             &crate::cli::Cli::parse_from(["foreman"]),

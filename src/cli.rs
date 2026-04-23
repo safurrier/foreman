@@ -15,6 +15,7 @@ use crate::integrations::{
     ClaudeNativeOverlaySummary, CodexNativeOverlaySummary, PiNativeOverlaySummary,
 };
 use crate::services::logging::{RunLogSummary, RunLogger};
+use crate::services::startup_cache::{load_startup_cache, StartupCacheLoadResult};
 use crate::services::system_stats::{SysinfoSystemStatsBackend, SystemStatsService};
 use clap::Parser;
 use std::fmt;
@@ -24,6 +25,7 @@ use std::time::Instant;
 const CLI_ABOUT: &str = "Foreman - watch and control AI coding agents running in tmux.";
 const CLI_LONG_ABOUT: &str = "Foreman is a keyboard-first dashboard for AI coding agents running in tmux.\n\nUse when: you want one operator surface for Claude Code, Codex, Pi, Gemini, or OpenCode panes.\nDon't use to: inspect a plain tmux tree with no agent workflow.";
 const CLI_AFTER_HELP: &str = "First-time setup:\n  foreman --setup --user --project\n  foreman --doctor\n  foreman\n\nPreview setup changes:\n  foreman --setup --user --project --dry-run\n\nScoped installs:\n  foreman --setup --user\n  foreman --setup --project --codex --repo /path/to/repo\n\nAnother repo:\n  foreman --setup --project --repo /path/to/repo\n  foreman --doctor --repo /path/to/repo";
+pub(crate) const STARTUP_CACHE_MAX_AGE_MS: u64 = 15_000;
 
 #[derive(Debug, Parser, Clone)]
 #[command(
@@ -233,6 +235,7 @@ pub(crate) struct PreparedBootstrap {
     pub claude_native: ClaudeNativeOverlaySummary,
     pub codex_native: CodexNativeOverlaySummary,
     pub pi_native: PiNativeOverlaySummary,
+    pub startup_cache_generated_at_ms: Option<u64>,
 }
 
 impl PreparedBootstrap {
@@ -331,7 +334,7 @@ pub fn run_main(cli: Cli) -> Result<(), RunError> {
         return Ok(());
     }
 
-    let prepared = prepare_bootstrap(&cli, paths)?;
+    let prepared = prepare_runtime_bootstrap(&cli, paths)?;
     crate::runtime::run(prepared)?;
     Ok(())
 }
@@ -495,16 +498,7 @@ pub(crate) fn prepare_bootstrap(
     let file_config = load_config(&paths.config_file)?;
     let runtime = RuntimeConfig::from_sources(paths, file_config, cli);
 
-    let mut logger = RunLogger::start(
-        &runtime.log_dir,
-        runtime.log_retention,
-        runtime.log_verbosity,
-    )
-    .map_err(ConfigError::Io)?;
-    logger.log_bootstrap(&runtime).map_err(ConfigError::Io)?;
-    logger
-        .debug("bootstrap_debug_logging_enabled")
-        .map_err(ConfigError::Io)?;
+    let mut logger = start_run_logger(&runtime)?;
     let (state, tmux_metrics, native_timing, claude_native, codex_native, pi_native) =
         bootstrap_state(&runtime);
     logger
@@ -592,7 +586,173 @@ pub(crate) fn prepare_bootstrap(
         claude_native,
         codex_native,
         pi_native,
+        startup_cache_generated_at_ms: None,
     })
+}
+
+fn prepare_runtime_bootstrap(
+    cli: &Cli,
+    paths: crate::config::AppPaths,
+) -> Result<PreparedBootstrap, RunError> {
+    let file_config = load_config(&paths.config_file)?;
+    let runtime = RuntimeConfig::from_sources(paths, file_config, cli);
+    let mut logger = start_run_logger(&runtime)?;
+    let system_stats = SystemStatsService::new(SysinfoSystemStatsBackend::new())
+        .snapshot()
+        .unwrap_or_default();
+    let cache_load_started = Instant::now();
+    let cache_result = if runtime.popup {
+        match load_startup_cache(&runtime, STARTUP_CACHE_MAX_AGE_MS) {
+            Ok(result) => Some(result),
+            Err(error) => {
+                logger
+                    .info(&format!("startup_cache_load_failed error={error}"))
+                    .map_err(ConfigError::Io)?;
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let cache_elapsed_ms = cache_load_started.elapsed().as_millis();
+    let (mut state, startup_cache_generated_at_ms) = match cache_result {
+        Some(StartupCacheLoadResult::Loaded(cache)) => {
+            logger
+                .log_timing(
+                    "startup_cache_load",
+                    &format!(
+                        "outcome=loaded elapsed_ms={cache_elapsed_ms} age_ms={} sessions={} panes={} path={}",
+                        cache.age_ms,
+                        cache.inventory.session_count(),
+                        cache.inventory.pane_count(),
+                        cache.path.display(),
+                    ),
+                )
+                .map_err(ConfigError::Io)?;
+            let mut state = AppState::with_inventory(cache.inventory);
+            state.popup_mode = runtime.popup;
+            state.system_stats = system_stats;
+            state.startup_loading = true;
+            state.startup_cache_age_ms = Some(cache.age_ms);
+            (state, Some(cache.generated_at_ms))
+        }
+        Some(StartupCacheLoadResult::Missing { path }) => {
+            logger
+                .log_timing(
+                    "startup_cache_load",
+                    &format!(
+                        "outcome=missing elapsed_ms={cache_elapsed_ms} path={}",
+                        path.display()
+                    ),
+                )
+                .map_err(ConfigError::Io)?;
+            (
+                AppState {
+                    popup_mode: runtime.popup,
+                    system_stats,
+                    startup_loading: true,
+                    ..AppState::default()
+                },
+                None,
+            )
+        }
+        Some(StartupCacheLoadResult::Stale { path, age_ms }) => {
+            logger
+                .log_timing(
+                    "startup_cache_load",
+                    &format!(
+                        "outcome=stale elapsed_ms={cache_elapsed_ms} age_ms={age_ms} path={}",
+                        path.display()
+                    ),
+                )
+                .map_err(ConfigError::Io)?;
+            (
+                AppState {
+                    popup_mode: runtime.popup,
+                    system_stats,
+                    startup_loading: true,
+                    ..AppState::default()
+                },
+                None,
+            )
+        }
+        Some(StartupCacheLoadResult::Empty { path }) => {
+            logger
+                .log_timing(
+                    "startup_cache_load",
+                    &format!(
+                        "outcome=empty elapsed_ms={cache_elapsed_ms} path={}",
+                        path.display()
+                    ),
+                )
+                .map_err(ConfigError::Io)?;
+            (
+                AppState {
+                    popup_mode: runtime.popup,
+                    system_stats,
+                    startup_loading: true,
+                    ..AppState::default()
+                },
+                None,
+            )
+        }
+        Some(StartupCacheLoadResult::Invalid { path, reason }) => {
+            logger
+                .log_timing(
+                    "startup_cache_load",
+                    &format!(
+                        "outcome=invalid elapsed_ms={cache_elapsed_ms} path={} reason={reason}",
+                        path.display()
+                    ),
+                )
+                .map_err(ConfigError::Io)?;
+            (
+                AppState {
+                    popup_mode: runtime.popup,
+                    system_stats,
+                    startup_loading: true,
+                    ..AppState::default()
+                },
+                None,
+            )
+        }
+        None => (
+            AppState {
+                popup_mode: runtime.popup,
+                system_stats,
+                startup_loading: true,
+                ..AppState::default()
+            },
+            None,
+        ),
+    };
+    state.notifications.muted = !runtime.notifications_enabled;
+    state.notifications.profile = runtime.notification_profile;
+    state.notifications.cooldown_ticks = runtime.notification_cooldown_ticks;
+
+    Ok(PreparedBootstrap {
+        runtime,
+        logger,
+        state,
+        claude_native: ClaudeNativeOverlaySummary::default(),
+        codex_native: CodexNativeOverlaySummary::default(),
+        pi_native: PiNativeOverlaySummary::default(),
+        startup_cache_generated_at_ms,
+    })
+}
+
+fn start_run_logger(runtime: &RuntimeConfig) -> Result<RunLogger, ConfigError> {
+    let mut logger = RunLogger::start(
+        &runtime.log_dir,
+        runtime.log_retention,
+        runtime.log_verbosity,
+    )
+    .map_err(ConfigError::Io)?;
+    logger.log_bootstrap(runtime).map_err(ConfigError::Io)?;
+    logger
+        .debug("bootstrap_debug_logging_enabled")
+        .map_err(ConfigError::Io)?;
+    Ok(logger)
 }
 
 pub(crate) fn bootstrap_state(
@@ -707,8 +867,12 @@ pub(crate) fn bootstrap_state(
 
 #[cfg(test)]
 mod tests {
-    use super::{run, Cli, RunOutcome};
-    use crate::app::OperatorAlertSource;
+    use super::{prepare_runtime_bootstrap, run, Cli, RunOutcome};
+    use crate::app::{
+        inventory, HarnessKind, OperatorAlertSource, PaneBuilder, SessionBuilder, WindowBuilder,
+    };
+    use crate::config::resolve_paths;
+    use crate::services::startup_cache::write_startup_cache;
     use clap::Parser;
     use tempfile::tempdir;
 
@@ -818,6 +982,44 @@ mod tests {
             }
             other => panic!("expected bootstrapped outcome, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn runtime_bootstrap_uses_fresh_popup_startup_cache() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let config_file = temp_dir.path().join("config.toml");
+        let log_dir = temp_dir.path().join("logs");
+        let cli = Cli::parse_from([
+            "foreman",
+            "--popup",
+            "--config-file",
+            config_file.to_str().expect("utf-8 path"),
+            "--log-dir",
+            log_dir.to_str().expect("utf-8 path"),
+        ]);
+        let paths =
+            resolve_paths(Some(&config_file), Some(&log_dir)).expect("paths should resolve");
+        let runtime = crate::config::RuntimeConfig::from_sources(
+            paths.clone(),
+            crate::config::AppConfig::default(),
+            &cli,
+        );
+        let inventory = inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:agents").pane(
+                PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
+                    .working_dir("/tmp/alpha")
+                    .preview("Claude Code ready"),
+            ),
+        )]);
+        write_startup_cache(&runtime, &inventory).expect("cache write should succeed");
+
+        let prepared =
+            prepare_runtime_bootstrap(&cli, paths).expect("runtime bootstrap should succeed");
+
+        assert!(prepared.state.startup_loading);
+        assert!(prepared.state.startup_cache_age_ms.is_some());
+        assert_eq!(prepared.state.inventory, inventory);
+        assert!(prepared.startup_cache_generated_at_ms.is_some());
     }
 
     #[test]

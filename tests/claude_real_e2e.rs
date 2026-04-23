@@ -241,6 +241,8 @@ native_dir = "{native_dir}"
 
     fixture.wait_for_alt_capture_attempts(&dashboard_pane, "Foreman", 200);
     fixture.wait_for_alt_capture_attempts(&dashboard_pane, "Foreman | NORMAL", 200);
+    fixture.wait_for_alt_capture_attempts(&dashboard_pane, "alpha", 200);
+    fixture.wait_for_alt_capture_attempts(&dashboard_pane, "beta", 200);
 
     fixture.send_keys(&dashboard_pane, &["j", "j"]);
     fixture.wait_for_alt_capture_attempts(&dashboard_pane, "Compose ->", 80);
@@ -249,10 +251,12 @@ native_dir = "{native_dir}"
         &dashboard_pane,
         &[
             "i", "O", "n", "l", "y", "Space", "o", "u", "t", "p", "u", "t", "Space", "O", "K",
-            "C-s", "j",
+            "C-s",
         ],
     );
     fixture.wait_for_capture_attempts(&agent_pane, "PROMPT:Only output OK", 120);
+    fixture.send_keys(&dashboard_pane, &["j", "j", "j"]);
+    fixture.wait_for_alt_capture_attempts(&dashboard_pane, "beta / foreman / foreman", 80);
 
     fixture.wait_for_capture_attempts(&agent_pane, "__CLAUDE_DONE__", 400);
     wait_for_file_contents(&hook_trace, "submit");

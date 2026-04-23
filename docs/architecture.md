@@ -42,16 +42,16 @@ testable as the app grows.
 
 | Component | Purpose |
 |---|---|
-| CLI + config | Parse startup flags, config path/init flows, setup and doctor flows, public debug logging, runtime overrides, popup mode, notification policy defaults, and per-harness integration preference |
+| CLI + config | Parse startup flags, config path/init flows, setup and doctor flows, public debug logging, runtime overrides, popup mode, short-lived popup startup cache hydration, notification policy defaults, and per-harness integration preference |
 | Runtime loop | Own terminal setup, event polling, redraw cadence, effect execution, and runtime-level soft-failure alerting during interactive runs |
 | App state core | Own `Command`, `Action`, `Mode`, `Focus`, selection state, filters, sort mode, modal state, and reducer logic |
-| Ratatui renderer | Render header, sidebar, preview, input, footer, help, and overlays from pure state using semantic theme tokens, built-in palette themes, compact harness marks, and no-color-safe glyph fallbacks |
+| Ratatui renderer | Render header, sidebar, preview, input, footer, help, search/modal overlays, inline flash labels, and loading states from pure state using semantic theme tokens, built-in palette themes, compact harness marks, and no-color-safe glyph fallbacks |
 | tmux adapter | Discover sessions/windows/panes, capture pane output, focus panes, send input, rename windows, create windows, and kill panes |
 | Harness integrations | Detect supported harness families, translate compatibility signals for Claude, Codex, Pi, Gemini CLI, and OpenCode, and overlay native signals for Claude, Codex, and Pi when available |
 | Pull request service | Resolve pull request metadata for the selected workspace, and own browser-open and clipboard-copy seams with graceful degradation |
 | Notification service | Apply pure suppression and cooldown policy, build dispatcher order from typed config, dispatch best-effort notifications with backend fallback, and surface observable decisions |
 | System stats service | Capture a lightweight local CPU and memory pressure snapshot for the header without turning Foreman into a telemetry system |
-| Logging + telemetry | Persist structured run logs, latest-run pointer, retention cleanup, and header-level system stats |
+| Logging + telemetry | Persist structured run logs, latest-run pointer, retention cleanup, header-level system stats, and timing lines for startup-cache load/write behavior |
 
 ### Primary Data Flows
 

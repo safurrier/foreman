@@ -193,6 +193,8 @@ export default function (pi: ExtensionAPI) {{
 
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman");
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
+    fixture.wait_for_alt_capture(&dashboard_pane, "alpha");
+    fixture.wait_for_alt_capture(&dashboard_pane, "beta");
 
     fixture.send_keys(&dashboard_pane, &["j", "j"]);
     fixture.wait_for_alt_capture(&dashboard_pane, "Compose ->");
@@ -209,6 +211,8 @@ export default function (pi: ExtensionAPI) {{
         &pane_id,
         "PROMPT:Run `sleep 1` using bash, then reply with exactly OK.",
     );
+    fixture.send_keys(&dashboard_pane, &["j", "j"]);
+    fixture.wait_for_alt_capture(&dashboard_pane, "beta / foreman / foreman");
 
     wait_for_file_contents(&trace_file, "agent-start");
     wait_for_file_contents(&trace_file, "agent-end");

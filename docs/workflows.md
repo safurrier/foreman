@@ -148,9 +148,14 @@ For local lag triage, `foreman --debug` now emits timing lines for:
 - `render_frame`
 - `inventory_tmux`
 - `inventory_native`
+- `startup_cache_load`
+- `startup_cache_write`
 
 When `inventory_tmux` looks expensive, check whether the line shows high
 `captures=` counts or whether cached preview reuse has dropped unexpectedly.
+When popup startup still feels slow, compare `startup_cache_load` timing with
+the first `inventory_tmux` line to see whether the cache was used and whether
+cache writes are staying rare.
 
 Those logs land in the active `latest.log` file under the configured Foreman log
 directory and are the first place to check before chasing tmux itself.
@@ -163,7 +168,7 @@ That split is intentional:
 
 The release gauntlet expands that proof into three coherent compiled-binary
 journeys:
-- startup, discovery, theme, help, and harness filtering
+- loading-first startup, discovery, theme, help, and harness filtering
 - startup, discovery, theme, scrollable help, and harness filtering
 - compose, focus, search, flash, sort, rename, spawn, and kill
 - PR state, notification policy, graceful degradation, and operator-alert logging

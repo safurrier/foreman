@@ -1,0 +1,6 @@
+slug: startup-loading-flash-hint
+branch: feat/add-foreman-spec
+created: 2026-04-22
+pr: 1
+status: complete
+source: startup-latency-and-blocking-flash-overlay

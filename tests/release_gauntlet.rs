@@ -309,10 +309,22 @@ fn release_action_gauntlet_proves_search_flash_sort_and_pane_operations() {
     harness
         .fixture()
         .wait_for_alt_capture(&dashboard, "theme=catppuccin");
+    harness
+        .fixture()
+        .wait_for_alt_capture(&dashboard, "alphasess");
+    harness
+        .fixture()
+        .wait_for_alt_capture(&dashboard, "betasess");
+    harness
+        .fixture()
+        .wait_for_alt_capture(&dashboard, "gammasess");
 
     harness.fixture().send_keys(&dashboard, &["/"]);
     send_text(harness.fixture(), &dashboard, "betawork");
     harness.fixture().send_keys(&dashboard, &["Enter", "i"]);
+    harness
+        .fixture()
+        .wait_for_alt_capture(&dashboard, "Compose for π betawork");
     send_text(harness.fixture(), &dashboard, "search");
     harness.fixture().send_keys(&dashboard, &["Enter"]);
     harness
@@ -328,6 +340,9 @@ fn release_action_gauntlet_proves_search_flash_sort_and_pane_operations() {
     harness
         .fixture()
         .wait_for_alt_capture(&dashboard, "Foreman | NORMAL");
+    harness
+        .fixture()
+        .wait_for_alt_capture(&dashboard, "Compose -> π betawork");
     harness.fixture().send_keys(&dashboard, &["i"]);
     send_text(harness.fixture(), &dashboard, "stillbeta");
     harness.fixture().send_keys(&dashboard, &["Enter"]);
@@ -350,7 +365,9 @@ fn release_action_gauntlet_proves_search_flash_sort_and_pane_operations() {
     let gamma_label =
         harness.flash_label_for_target(&SelectionTarget::Pane(gamma.pane_id.clone().into()));
     harness.fixture().send_keys(&dashboard, &["s"]);
-    harness.fixture().wait_for_alt_capture(&dashboard, "Flash");
+    harness
+        .fixture()
+        .wait_for_alt_capture(&dashboard, "Flash inline");
     send_text(harness.fixture(), &dashboard, &gamma_label);
     harness.fixture().send_keys(&dashboard, &["i"]);
     send_text(harness.fixture(), &dashboard, "flashjump");
@@ -362,10 +379,12 @@ fn release_action_gauntlet_proves_search_flash_sort_and_pane_operations() {
     let alpha_aux_label =
         harness.flash_label_for_target(&SelectionTarget::Pane(alpha_aux.pane_id.clone().into()));
     harness.fixture().send_keys(&dashboard, &["S"]);
-    harness.fixture().wait_for_alt_capture(&dashboard, "Flash");
     harness
         .fixture()
-        .wait_for_alt_capture(&dashboard, "Mode: jump+focus");
+        .wait_for_alt_capture(&dashboard, "Flash inline");
+    harness
+        .fixture()
+        .wait_for_alt_capture(&dashboard, "mode jump+focus");
     send_text(harness.fixture(), &dashboard, &alpha_aux_label);
     harness
         .fixture()
@@ -589,7 +608,7 @@ active_profile = "all"
         r#"{"status":"working","activity_score":120}"#,
     );
     harness.wait_for_log_occurrence_count(refresh_marker, complete_refresh_count + 1);
-    thread::sleep(Duration::from_millis(350));
+    thread::sleep(Duration::from_millis(650));
     harness.write_native_signal(
         &alpha.pane_id,
         r#"{"status":"needs_attention","activity_score":90}"#,
@@ -607,7 +626,7 @@ active_profile = "all"
         r#"{"status":"working","activity_score":120}"#,
     );
     harness.wait_for_log_occurrence_count(refresh_marker, attention_refresh_count + 1);
-    thread::sleep(Duration::from_millis(350));
+    thread::sleep(Duration::from_millis(650));
     harness.write_native_signal(
         &alpha.pane_id,
         r#"{"status":"needs_attention","activity_score":90}"#,

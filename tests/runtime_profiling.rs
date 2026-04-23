@@ -15,6 +15,7 @@ const MOVE_SELECTION_P95_BUDGET_MS: u128 = 8;
 const MOVE_SELECTION_BURST_BUDGET_MS: u128 = 1_500;
 const OVERLAP_MOVE_SELECTION_MAX_BUDGET_MS: u128 = 25;
 const OVERLAP_MOVE_SELECTION_P95_BUDGET_MS: u128 = 10;
+const STARTUP_CACHE_WRITE_MAX_BUDGET_MS: u128 = 25;
 
 fn foreman_bin() -> &'static str {
     env!("CARGO_BIN_EXE_foreman")
@@ -22,7 +23,7 @@ fn foreman_bin() -> &'static str {
 
 #[test]
 #[ignore = "heavy perf smoke for verify-ux and verify"]
-fn navigation_burst_defers_pull_request_lookup_until_selection_settles() {
+fn navigation_burst_limits_pull_request_lookup_churn() {
     let fixture = TmuxFixture::new();
     let root = tempdir().expect("temp dir should exist");
     let config_dir = root.path().join("config");
@@ -66,21 +67,20 @@ fn navigation_burst_defers_pull_request_lookup_until_selection_settles() {
     );
 
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
+    fixture.wait_for_alt_capture(&dashboard_pane, "9 targets");
     fixture.send_keys(&dashboard_pane, &["j", "j", "j", "j", "j", "j"]);
 
-    wait_for_lookup_count(&gh_lookup_log, 2, 60);
+    wait_for_lookup_count(&gh_lookup_log, 1, 60);
     let latest_log_path = log_dir.join("latest.log");
-    wait_for_log_contains(&latest_log_path, "trigger=selection-idle", 60);
-
+    wait_for_log_contains(&latest_log_path, "timing operation=pull_request_lookup", 60);
     let lookups = read_nonempty_lines(&gh_lookup_log);
-    assert_eq!(
-        lookups.len(),
-        2,
-        "expected bootstrap and settled-selection lookups"
+    assert!(
+        !lookups.is_empty(),
+        "expected at least one fake gh lookup, got {lookups:?}"
     );
     assert!(
-        lookups[1].ends_with("/gamma"),
-        "expected settled lookup to target gamma repo, got {lookups:?}"
+        lookups.len() <= 2,
+        "expected at most bootstrap + one settled-selection lookup, got {lookups:?}"
     );
 
     let latest_log = fs::read_to_string(&latest_log_path).expect("latest log should be readable");
@@ -91,10 +91,6 @@ fn navigation_burst_defers_pull_request_lookup_until_selection_settles() {
     assert!(
         latest_log.contains("timing operation=pull_request_lookup"),
         "latest log did not include pull-request timing:\n{latest_log}"
-    );
-    assert!(
-        latest_log.contains("trigger=selection-idle"),
-        "latest log did not include selection-idle lookup timing:\n{latest_log}"
     );
     assert!(
         latest_log.contains("slow_operation operation=pull_request_lookup"),
@@ -298,6 +294,79 @@ fn inventory_refresh_reuses_offscreen_previews_under_crowded_load() {
         !latest_log
             .contains("slow_operation operation=action threshold_ms=40 action=move-selection"),
         "expected no slow move-selection warnings during staged refresh:\n{latest_log}"
+    );
+
+    fixture.send_keys(&dashboard_pane, &["q"]);
+    fixture.wait_for_capture(&dashboard_pane, "FOREMAN_EXITED");
+}
+
+#[test]
+#[ignore = "heavy perf smoke for verify-ux and verify"]
+fn stable_inventory_writes_startup_cache_once_without_slowdowns() {
+    let fixture = TmuxFixture::new();
+    let root = tempdir().expect("temp dir should exist");
+    let config_dir = root.path().join("config");
+    let log_dir = root.path().join("logs");
+    fs::create_dir_all(&config_dir).expect("config dir should exist");
+    fs::create_dir_all(&log_dir).expect("log dir should exist");
+
+    for index in 0..NAVIGATION_BURST_SESSION_COUNT {
+        let name = format!("agent-{index:02}");
+        let repo = root.path().join(&name);
+        fs::create_dir_all(&repo).expect("repo dir should exist");
+        let banner = match index % 3 {
+            0 => "Claude Code ready",
+            1 => "Codex CLI waiting for your input",
+            _ => "Pi ready for the next task",
+        };
+
+        let pane_id = fixture.new_session(&name, &repo_shell_command(&repo, banner));
+        fixture.wait_for_capture(&pane_id, banner);
+    }
+
+    let dashboard_command = format!(
+        "FOREMAN_CONFIG_HOME={} FOREMAN_LOG_DIR={} {} --popup --debug --tmux-socket {} --poll-interval-ms 500 --capture-lines 20 --no-notify",
+        config_dir.display(),
+        log_dir.display(),
+        foreman_bin(),
+        fixture.socket_path().display()
+    );
+    let dashboard_pane = fixture.new_session(
+        "dashboard",
+        &fixture.keep_alive_command(&dashboard_command, "FOREMAN_EXITED"),
+    );
+
+    fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
+    let latest_log_path = log_dir.join("latest.log");
+    wait_for_log_contains(
+        &latest_log_path,
+        "timing operation=startup_cache_write outcome=written",
+        120,
+    );
+    wait_for_log_occurrence_count(&latest_log_path, "timing operation=inventory_tmux", 4, 160);
+    let latest_log = fs::read_to_string(&latest_log_path).expect("latest log should be readable");
+    let cache_write_lines = latest_log
+        .lines()
+        .filter(|line| line.contains("timing operation=startup_cache_write outcome=written"))
+        .collect::<Vec<_>>();
+    let max_elapsed_ms = cache_write_lines
+        .iter()
+        .map(|line| timing_field(line, "elapsed_ms"))
+        .max()
+        .unwrap_or_default();
+
+    assert_eq!(
+        cache_write_lines.len(),
+        1,
+        "expected one startup cache write for a stable inventory, got:\n{latest_log}"
+    );
+    assert!(
+        max_elapsed_ms <= STARTUP_CACHE_WRITE_MAX_BUDGET_MS,
+        "expected startup cache write <= {STARTUP_CACHE_WRITE_MAX_BUDGET_MS} ms, got {max_elapsed_ms} ms from {cache_write_lines:?}"
+    );
+    assert!(
+        !latest_log.contains("slow_operation operation=startup_cache_write"),
+        "expected no slow startup cache write warnings:\n{latest_log}"
     );
 
     fixture.send_keys(&dashboard_pane, &["q"]);

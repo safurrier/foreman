@@ -107,6 +107,8 @@ active_profile = "completion-only"
 
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman");
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
+    fixture.wait_for_alt_capture(&dashboard_pane, "▾ beta");
+    fixture.wait_for_alt_capture(&dashboard_pane, "▾ alpha");
     fixture.send_keys(&dashboard_pane, &["j", "j", "j"]);
     fixture.wait_for_alt_capture(&dashboard_pane, "› ▾ alpha");
 
@@ -279,6 +281,8 @@ active_profile = "completion-only"
 
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman");
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
+    fixture.wait_for_alt_capture(&dashboard_pane, "▾ alpha");
+    fixture.wait_for_alt_capture(&dashboard_pane, "▾ beta");
 
     fixture.send_keys(&dashboard_pane, &["j", "j"]);
     fixture.wait_for_alt_capture(&dashboard_pane, "Compose ->");

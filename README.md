@@ -119,7 +119,7 @@ Common dashboard keys:
 - `Enter` sends in compose mode and acts on the selected row in normal mode
 - `/` starts search
 - `o` cycles `recent->status` and `attention->recent`
-- `s` starts flash jump
+- `s` starts flash jump with inline labels; `S` also focuses tmux after the jump
 - `h` cycles only the visible harness families, then returns to `all`
 - `H` / `P` reveal non-agent sessions or panes
 - `t` cycles the active theme
@@ -144,6 +144,8 @@ Useful timing lines:
 - `timing operation=render_frame ...`
 - `timing operation=inventory_tmux ...`
 - `timing operation=inventory_native ...`
+- `timing operation=startup_cache_load ...`
+- `timing operation=startup_cache_write ...`
 
 `inventory_tmux` now also shows how many panes were freshly captured vs reused
 from cached previews on that refresh, which is the first thing to check if
@@ -167,9 +169,14 @@ Contributor docs:
 - `foreman --config-path` and `foreman --init-config` are live.
 - `foreman --debug` enables debug-level run logging without changing the normal
   interactive startup path.
-- Normal startup bootstraps config, logging, tmux inventory, native Claude,
-  Codex, and Pi overlays, Gemini CLI and OpenCode compatibility detection, and
-  header-level system stats.
+- Normal startup paints immediately with a loading state, then fills tmux
+  inventory asynchronously and prioritizes visible/selected preview capture on
+  the next refresh.
+- Popup startup can also render from a fresh tmux-socket-scoped startup cache,
+  clearly marked as `cached ... ago`, before live tmux refresh replaces it.
+- Interactive startup still resolves native Claude, Codex, and Pi overlays,
+  Gemini CLI and OpenCode compatibility detection, and header-level system
+  stats once the first inventory refresh lands.
 - Config now controls notification cooldowns, backend order, startup profile,
   and per-harness native-vs-compatibility preference.
 - `foreman-claude-hook` bridges official Claude Code hook events into Foreman's

@@ -32,8 +32,6 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState, theme_name: ThemeName) {
         render_modal(frame, state, &theme, layout_mode);
     } else if state.mode == Mode::Search {
         render_search_overlay(frame, state, &theme, layout_mode);
-    } else if state.mode == Mode::FlashNavigate {
-        render_flash_overlay(frame, state, &theme, layout_mode);
     }
 }
 
@@ -102,6 +100,9 @@ fn render_header(
         .pull_request_compact_label()
         .unwrap_or_else(|| "pr=NONE".to_string());
     let alert = state.operator_alert_label().unwrap_or_default();
+    let startup_cache = state
+        .startup_cache_age_ms
+        .map(|age_ms| format!("cached {}", humanize_age_ms(age_ms)));
     let theme_label = format!("theme={}", theme_name.label());
     let alert_suffix = if alert.is_empty() {
         String::new()
@@ -110,10 +111,14 @@ fn render_header(
     };
     let content = match layout_mode {
         LayoutMode::Compact => format!(
-            "Foreman | {} | {} | {} targets | {} | {}{}",
+            "Foreman | {} | {} | {} targets{} | {} | {}{}",
             state.mode_label(),
             state.system_stats_label(),
             visible_count,
+            startup_cache
+                .as_ref()
+                .map(|label| format!(" | {label}"))
+                .unwrap_or_default(),
             pull_request,
             state.notifications_label(),
             if alert.is_empty() {
@@ -123,10 +128,14 @@ fn render_header(
             }
         ),
         LayoutMode::Medium => format!(
-            "Foreman | {} | {} | {} targets | {} | {} | {}",
+            "Foreman | {} | {} | {} targets{} | {} | {} | {}",
             state.mode_label(),
             state.system_stats_label(),
             visible_count,
+            startup_cache
+                .as_ref()
+                .map(|label| format!(" | {label}"))
+                .unwrap_or_default(),
             state.filter_label(),
             pull_request,
             if alert.is_empty() {
@@ -136,11 +145,15 @@ fn render_header(
             }
         ),
         LayoutMode::Wide => format!(
-            "Foreman | {} | {} | {} | {} targets | {} | {} | {} | {} | {}{}",
+            "Foreman | {} | {} | {} | {} targets{} | {} | {} | {} | {} | {}{}",
             state.mode_label(),
             state.focus_label(),
             state.system_stats_label(),
             visible_count,
+            startup_cache
+                .as_ref()
+                .map(|label| format!(" | {label}"))
+                .unwrap_or_default(),
             state.sort_label(),
             state.filter_label(),
             pull_request,
@@ -379,50 +392,6 @@ fn render_search_overlay(
     frame.render_widget(overlay, popup);
 }
 
-fn render_flash_overlay(
-    frame: &mut Frame<'_>,
-    state: &AppState,
-    theme: &Theme,
-    layout_mode: LayoutMode,
-) {
-    let popup = overlay_rect(frame.area(), layout_mode, 64, 9);
-    frame.render_widget(Clear, popup);
-    let (mode_name, typed) = state
-        .flash
-        .as_ref()
-        .map(|flash| {
-            let mode_name = match flash.kind {
-                crate::app::FlashNavigateKind::Jump => "jump",
-                crate::app::FlashNavigateKind::JumpAndFocus => "jump+focus",
-            };
-            let typed = if flash.draft.text.is_empty() {
-                "<empty>".to_string()
-            } else {
-                flash.draft.text.clone()
-            };
-            (mode_name, typed)
-        })
-        .unwrap_or(("jump", "<empty>".to_string()));
-    let overlay = Paragraph::new(Text::from(vec![
-        section_line("Flash", theme),
-        plain_line(""),
-        plain_line(format!("Mode: {mode_name}")),
-        plain_line(format!("Typed: {typed}")),
-        plain_line(format!("Labels: {}", state.flash_targets().len())),
-        plain_line(""),
-        muted_line("Type a visible label. Esc cancels.", theme),
-    ]))
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title("Flash")
-            .border_style(theme.warning_border),
-    )
-    .wrap(Wrap { trim: false })
-    .style(theme.base);
-    frame.render_widget(overlay, popup);
-}
-
 fn render_modal(frame: &mut Frame<'_>, state: &AppState, theme: &Theme, layout_mode: LayoutMode) {
     let Some(modal) = state.modal.as_ref() else {
         return;
@@ -517,6 +486,15 @@ fn sidebar_placeholder_text(state: &AppState, theme: &Theme) -> Option<Text<'sta
             Text::from(vec![
                 plain_line("No matches."),
                 muted_line("Esc restores the previous selection.", theme),
+            ])
+        } else if state.startup_loading {
+            Text::from(vec![
+                section_line("Loading tmux inventory", theme),
+                plain_line(""),
+                muted_line(
+                    "Foreman is drawing immediately and backfilling sessions, panes, and previews in the background.",
+                    theme,
+                ),
             ])
         } else {
             Text::from(vec![plain_line("No panes discovered yet.")])
@@ -673,6 +651,21 @@ fn preview_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Tex
         }
     }
 
+    if state.startup_loading && state.inventory.sessions.is_empty() {
+        return Text::from(vec![
+            section_line("Loading tmux inventory", theme),
+            plain_line(""),
+            muted_line(
+                "Sessions and panes will appear after the first background refresh.",
+                theme,
+            ),
+            muted_line(
+                "Visible and selected previews are captured first after the initial paint.",
+                theme,
+            ),
+        ]);
+    }
+
     let mut lines = Vec::new();
 
     if let Some(alert) = &state.operator_alert {
@@ -686,6 +679,23 @@ fn preview_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Tex
             Span::styled(alert.source.label(), theme.muted),
         ]));
         lines.push(plain_line(alert.message.clone()));
+        lines.push(plain_line(""));
+    }
+
+    if let Some(age_ms) = state.startup_cache_age_ms {
+        lines.push(section_line("Startup", theme));
+        lines.push(plain_line(format!(
+            "Cached snapshot: {}",
+            humanize_age_ms(age_ms)
+        )));
+        lines.push(muted_line(
+            if state.startup_loading {
+                "Showing the last snapshot while live tmux inventory refreshes in the background."
+            } else {
+                "Still showing the cached snapshot because live tmux has not replaced it yet."
+            },
+            theme,
+        ));
         lines.push(plain_line(""));
     }
 
@@ -875,6 +885,18 @@ fn input_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Text<
         })
         .unwrap_or_else(|| "selected pane".to_string());
 
+    if state.startup_loading && state.inventory.sessions.is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            "Loading tmux inventory before compose is available.",
+            theme.emphasis,
+        )]));
+        lines.push(muted_line(
+            "Foreman will enable compose as soon as the first refresh resolves actionable panes.",
+            theme,
+        ));
+        return Text::from(lines);
+    }
+
     if state.mode == Mode::Input {
         lines.push(Line::from(vec![Span::styled(
             format!("Compose for {target_label}"),
@@ -955,7 +977,25 @@ fn footer_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Text
     let lines = match state.mode {
         Mode::Input => vec![format!("Compose: Enter send{sep}Ctrl+J newline{sep}Esc cancel")],
         Mode::Search => vec![format!("Search: type filter{sep}Enter use match{sep}Esc restore")],
-        Mode::FlashNavigate => vec![format!("Flash: type label{sep}Esc cancel")],
+        Mode::FlashNavigate => {
+            let mode_name = state
+                .flash
+                .as_ref()
+                .map(|flash| match flash.kind {
+                    crate::app::FlashNavigateKind::Jump => "jump",
+                    crate::app::FlashNavigateKind::JumpAndFocus => "jump+focus",
+                })
+                .unwrap_or("jump");
+            let typed = state
+                .flash
+                .as_ref()
+                .map(|flash| flash.draft.text.as_str())
+                .filter(|typed| !typed.is_empty())
+                .unwrap_or("type label");
+            vec![format!(
+                "Flash inline: {typed}{sep}mode {mode_name}{sep}labels stay visible in the list{sep}Esc cancel"
+            )]
+        }
         Mode::Rename => vec![format!("Rename: Enter apply{sep}Esc cancel")],
         Mode::Spawn => vec![format!("Spawn: Enter create{sep}Esc cancel")],
         Mode::ConfirmKill => vec![format!("Kill: Enter or y confirm{sep}Esc or n cancel")],
@@ -1050,6 +1090,7 @@ fn help_lines(state: &AppState, theme: &Theme) -> Vec<Line<'static>> {
         plain_line(""),
         section_line("Find", theme),
         muted_line("/ filters the list. s jumps. S jumps and focuses.", theme),
+        muted_line("Flash labels render inline; there is no blocking popup.", theme),
         muted_line(
             "p opens PR detail. O opens in browser. Y copies URL.",
             theme,
@@ -1357,6 +1398,7 @@ fn status_source_line(theme: &Theme, pane: &Pane) -> Line<'static> {
 
 fn preview_source_line(theme: &Theme, pane: &Pane) -> Line<'static> {
     let style = match pane.preview_provenance {
+        crate::app::PreviewProvenance::PendingCapture => theme.warning_border,
         crate::app::PreviewProvenance::CaptureFailed => theme.error,
         crate::app::PreviewProvenance::Captured | crate::app::PreviewProvenance::ReusedCached => {
             theme.muted
@@ -1366,6 +1408,16 @@ fn preview_source_line(theme: &Theme, pane: &Pane) -> Line<'static> {
         Span::styled("Preview source: ", theme.muted),
         Span::styled(pane.preview_provenance.label(), style),
     ])
+}
+
+fn humanize_age_ms(age_ms: u64) -> String {
+    if age_ms < 1_000 {
+        "<1s ago".to_string()
+    } else if age_ms < 60_000 {
+        format!("{}s ago", age_ms / 1_000)
+    } else {
+        format!("{}m ago", age_ms / 60_000)
+    }
 }
 
 fn footer_title(state: &AppState, theme: &Theme) -> String {
@@ -1658,6 +1710,33 @@ mod tests {
     }
 
     #[test]
+    fn render_shows_loading_state_before_first_inventory_refresh() {
+        let state = AppState {
+            startup_loading: true,
+            ..AppState::default()
+        };
+        let output = render_to_string(&state);
+
+        assert!(output.contains("Loading tmux inventory"));
+        assert!(output.contains("drawing immediately"));
+        assert!(output.contains("before compose is available"));
+    }
+
+    #[test]
+    fn render_surfaces_cached_startup_provenance() {
+        let mut state = sample_state();
+        state.startup_loading = true;
+        state.startup_cache_age_ms = Some(4_200);
+
+        let output = render_to_string(&state);
+
+        assert!(output.contains("cached 4s ago"));
+        assert!(output.contains("Cached snapshot: 4s ago"));
+        assert!(output.contains("Showing the last snapshot"));
+        assert!(output.contains("background"));
+    }
+
+    #[test]
     fn render_displays_help_overlay_with_extended_command_surface() {
         let mut state = sample_state();
         state.mode = Mode::Help;
@@ -1845,7 +1924,8 @@ mod tests {
         ));
         let output = render_to_string(&state);
 
-        assert!(output.contains("Flash"));
+        assert!(output.contains("Flash inline"));
+        assert!(output.contains("labels stay visible in the list"));
         assert!(output.contains("[aa]"));
         assert!(output.contains("[ab]"));
     }

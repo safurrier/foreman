@@ -82,7 +82,7 @@ impl RunLogger {
         self.write_line(
             "INFO",
             &format!(
-                "bootstrap_complete config={} poll_interval_ms={} capture_lines={} popup={} pr_monitoring_enabled={} pr_poll_interval_ms={} notifications_enabled={} notification_cooldown_ticks={} notification_profile={} notification_backends={} claude_integration_preference={} codex_integration_preference={} pi_integration_preference={} log_verbosity={} tmux_socket={}",
+                "bootstrap_complete config={} poll_interval_ms={} capture_lines={} popup={} pr_monitoring_enabled={} pr_poll_interval_ms={} notifications_enabled={} notification_cooldown_ticks={} notification_profile={} notification_backends={} claude_integration_preference={} codex_integration_preference={} pi_integration_preference={} log_verbosity={} tmux_socket={} startup_cache_dir={}",
                 runtime.config_file.display(),
                 runtime.poll_interval_ms,
                 runtime.capture_lines,
@@ -106,7 +106,8 @@ impl RunLogger {
                     .tmux_socket
                     .as_deref()
                     .map(|path| path.display().to_string())
-                    .unwrap_or_else(|| "default".to_string())
+                    .unwrap_or_else(|| "default".to_string()),
+                runtime.startup_cache_dir.display(),
             ),
         )
     }
@@ -115,13 +116,15 @@ impl RunLogger {
         self.write_line(
             "INFO",
             &format!(
-                "inventory_loaded sessions={} windows={} panes={} visible_sessions={} visible_windows={} visible_panes={} startup_error={}",
+                "inventory_loaded sessions={} windows={} panes={} visible_sessions={} visible_windows={} visible_panes={} startup_loading={} startup_cached={} startup_error={}",
                 summary.total_sessions,
                 summary.total_windows,
                 summary.total_panes,
                 summary.visible_sessions,
                 summary.visible_windows,
                 summary.visible_panes,
+                summary.startup_loading,
+                summary.startup_cache_age_ms.is_some(),
                 summary.startup_error.is_some()
             ),
         )
@@ -389,6 +392,7 @@ mod tests {
         RuntimeConfig {
             config_file: Path::new("/tmp/config.toml").to_path_buf(),
             log_dir: log_dir.to_path_buf(),
+            startup_cache_dir: log_dir.join("../cache"),
             tmux_socket: None,
             claude_native_dir: None,
             codex_native_dir: None,
@@ -489,6 +493,7 @@ mod tests {
         assert!(contents.contains("codex_integration_preference=auto"));
         assert!(contents.contains("pi_integration_preference=auto"));
         assert!(contents.contains("log_verbosity=info"));
+        assert!(contents.contains("startup_cache_dir="));
     }
 
     #[test]
@@ -555,6 +560,8 @@ mod tests {
                 visible_sessions: 2,
                 visible_windows: 2,
                 visible_panes: 2,
+                startup_loading: false,
+                startup_cache_age_ms: Some(1_500),
                 startup_error: None,
             })
             .expect("inventory log should succeed");
@@ -564,6 +571,7 @@ mod tests {
         assert!(contents.contains("inventory_loaded"));
         assert!(contents.contains("visible_sessions=2"));
         assert!(contents.contains("visible_panes=2"));
+        assert!(contents.contains("startup_cached=true"));
     }
 
     #[test]

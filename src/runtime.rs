@@ -20,6 +20,7 @@ use crate::services::notifications::{
 use crate::services::pull_requests::{
     PullRequestLookup, PullRequestService, SystemPullRequestBackend,
 };
+use crate::services::startup_cache::{current_time_ms, write_startup_cache};
 use crate::services::system_stats::{SysinfoSystemStatsBackend, SystemStatsService};
 use crate::ui::render::{render, sidebar_viewport_rows_for_area};
 use crossterm::cursor::{Hide, Show};
@@ -44,7 +45,9 @@ const SLOW_RENDER_FRAME_MS: u128 = 33;
 const SLOW_ACTION_MS: u128 = 40;
 const SLOW_INVENTORY_REFRESH_MS: u128 = 200;
 const SLOW_PULL_REQUEST_LOOKUP_MS: u128 = 75;
+const SLOW_STARTUP_CACHE_WRITE_MS: u128 = 20;
 const OFFSCREEN_PREVIEW_REFRESH_BATCH: usize = 4;
+const STARTUP_CACHE_WRITE_INTERVAL_MS: u64 = 5_000;
 
 pub(crate) fn run(prepared: PreparedBootstrap) -> Result<(), RuntimeError> {
     let _terminal_guard = TerminalGuard::enter()?;
@@ -91,6 +94,7 @@ struct DashboardRuntime {
     offscreen_capture_cursor: usize,
     inventory_refresh: InventoryRefreshWorker,
     notification_policy_epoch: u64,
+    startup_cache: StartupCacheTracker,
 }
 
 #[derive(Debug, Clone)]
@@ -105,6 +109,11 @@ struct InventoryRefreshWorker {
     next_generation: u64,
     in_flight_generation: Option<u64>,
     rerun_requested: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct StartupCacheTracker {
+    last_written_at_ms: Option<u64>,
 }
 
 enum InventoryRefreshCommand {
@@ -147,6 +156,9 @@ impl DashboardRuntime {
     fn new(prepared: PreparedBootstrap) -> Self {
         let tmux = TmuxAdapter::new(SystemTmuxBackend::new(prepared.runtime.tmux_socket.clone()));
         let inventory_refresh = spawn_inventory_refresh_worker(prepared.runtime.clone());
+        let startup_cache = StartupCacheTracker {
+            last_written_at_ms: prepared.startup_cache_generated_at_ms,
+        };
 
         Self {
             tmux,
@@ -158,6 +170,7 @@ impl DashboardRuntime {
             offscreen_capture_cursor: 0,
             inventory_refresh,
             notification_policy_epoch: 0,
+            startup_cache,
             runtime: prepared.runtime,
             logger: prepared.logger,
             state: prepared.state,
@@ -170,6 +183,7 @@ impl DashboardRuntime {
     ) -> Result<(), RuntimeError> {
         let poll_interval = Duration::from_millis(self.runtime.poll_interval_ms.max(1));
         let mut last_inventory_refresh = Instant::now();
+        let mut initial_inventory_requested = false;
         let initial_size = terminal.size()?;
 
         self.logger.info("dashboard_started")?;
@@ -184,7 +198,9 @@ impl DashboardRuntime {
         ))?;
 
         loop {
-            self.drain_inventory_refresh_results()?;
+            if initial_inventory_requested {
+                self.drain_inventory_refresh_results()?;
+            }
             let current_size = terminal.size()?;
             let sidebar_rows = sidebar_viewport_rows_for_area(Rect {
                 x: 0,
@@ -227,6 +243,15 @@ impl DashboardRuntime {
                     self.state.sidebar_viewport_rows,
                 ),
             )?;
+
+            if !initial_inventory_requested {
+                self.request_inventory_refresh()?;
+                self.refresh_system_stats()?;
+                last_inventory_refresh = Instant::now();
+                initial_inventory_requested = true;
+                self.drain_inventory_refresh_results()?;
+                continue;
+            }
 
             let timeout = self
                 .next_wait_timeout(poll_interval.saturating_sub(last_inventory_refresh.elapsed()));
@@ -461,6 +486,10 @@ impl DashboardRuntime {
         let (inventory, tmux_metrics, native_timing, claude_native, codex_native, pi_native) =
             payload;
         let outcome = "loaded";
+        let was_startup_loading = self.state.startup_loading;
+        let should_prime_priority_previews = was_startup_loading && !inventory.sessions.is_empty();
+        self.apply_runtime_action(Action::SetStartupLoading(false))?;
+        self.apply_runtime_action(Action::SetStartupCacheAge(None))?;
         self.apply_runtime_action(Action::SetStartupError(None))?;
         self.clear_alert_source(OperatorAlertSource::Tmux)?;
         self.apply_runtime_action(Action::ReplaceInventory(inventory))?;
@@ -515,6 +544,7 @@ impl DashboardRuntime {
         for warning in &pi_native.warnings {
             self.logger.log_pi_native_warning(warning)?;
         }
+        self.maybe_write_startup_cache()?;
         self.refresh_runtime_diagnostics(&claude_native, &codex_native, &pi_native)?;
 
         self.maybe_refresh_selected_pull_request(false, "inventory-refresh")?;
@@ -528,6 +558,9 @@ impl DashboardRuntime {
             elapsed_ms,
             &format!("outcome={outcome} elapsed_ms={elapsed_ms}"),
         )?;
+        if should_prime_priority_previews {
+            self.request_inventory_refresh()?;
+        }
         Ok(())
     }
 
@@ -536,6 +569,7 @@ impl DashboardRuntime {
         error_message: String,
         elapsed_ms: u128,
     ) -> Result<(), RuntimeError> {
+        self.apply_runtime_action(Action::SetStartupLoading(false))?;
         self.apply_runtime_action(Action::SetStartupError(Some(error_message.clone())))?;
         self.logger.log_tmux_error(&error_message)?;
         self.record_alert(
@@ -613,6 +647,8 @@ impl DashboardRuntime {
         InventoryLoadPolicy {
             priority_panes,
             deferred_panes,
+            capture_unseen_panes: false,
+            capture_empty_previews: false,
         }
     }
 
@@ -920,6 +956,61 @@ impl DashboardRuntime {
             ),
             _ => String::new(),
         }
+    }
+
+    fn maybe_write_startup_cache(&mut self) -> Result<(), RuntimeError> {
+        if self.state.inventory.sessions.is_empty() {
+            return Ok(());
+        }
+        if self.state.visible_target_count() == 0 {
+            return Ok(());
+        }
+
+        let now_ms = current_time_ms();
+        let write_recently =
+            self.startup_cache
+                .last_written_at_ms
+                .is_some_and(|last_write_at_ms| {
+                    now_ms.saturating_sub(last_write_at_ms) < STARTUP_CACHE_WRITE_INTERVAL_MS
+                });
+        if write_recently {
+            return Ok(());
+        }
+
+        let write_started = Instant::now();
+        match write_startup_cache(&self.runtime, &self.state.inventory) {
+            Ok(receipt) => {
+                let elapsed_ms = write_started.elapsed().as_millis();
+                self.logger.log_timing(
+                    "startup_cache_write",
+                    &format!(
+                        "outcome=written elapsed_ms={elapsed_ms} bytes={} sessions={} panes={} path={}",
+                        receipt.bytes_written,
+                        self.state.inventory.session_count(),
+                        self.state.inventory.pane_count(),
+                        receipt.path.display(),
+                    ),
+                )?;
+                self.maybe_log_slow_operation(
+                    "startup_cache_write",
+                    SLOW_STARTUP_CACHE_WRITE_MS,
+                    elapsed_ms,
+                    &format!(
+                        "outcome=written elapsed_ms={elapsed_ms} bytes={} sessions={} panes={}",
+                        receipt.bytes_written,
+                        self.state.inventory.session_count(),
+                        self.state.inventory.pane_count(),
+                    ),
+                )?;
+                self.startup_cache.last_written_at_ms = Some(receipt.generated_at_ms);
+            }
+            Err(error) => {
+                self.logger
+                    .info(&format!("startup_cache_write_failed error={error}"))?;
+            }
+        }
+
+        Ok(())
     }
 }
 

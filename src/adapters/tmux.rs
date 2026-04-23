@@ -90,10 +90,23 @@ pub struct InventoryLoadMetrics {
     pub total_ms: u128,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InventoryLoadPolicy {
     pub priority_panes: BTreeSet<PaneId>,
     pub deferred_panes: BTreeSet<PaneId>,
+    pub capture_unseen_panes: bool,
+    pub capture_empty_previews: bool,
+}
+
+impl Default for InventoryLoadPolicy {
+    fn default() -> Self {
+        Self {
+            priority_panes: BTreeSet::new(),
+            deferred_panes: BTreeSet::new(),
+            capture_unseen_panes: true,
+            capture_empty_previews: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -207,12 +220,30 @@ impl<B: TmuxBackend> TmuxAdapter<B> {
                     }
                     None => {
                         metrics.reused_preview_count += 1;
-                        (
-                            previous_pane
-                                .map(|pane| pane.preview.clone())
-                                .unwrap_or_default(),
-                            PreviewProvenance::ReusedCached,
-                        )
+                        match previous_pane {
+                            Some(previous_pane) => {
+                                let preview_provenance = match previous_pane.preview_provenance {
+                                    PreviewProvenance::PendingCapture
+                                        if previous_pane.preview.is_empty() =>
+                                    {
+                                        PreviewProvenance::PendingCapture
+                                    }
+                                    PreviewProvenance::CaptureFailed
+                                        if previous_pane.preview.is_empty() =>
+                                    {
+                                        PreviewProvenance::CaptureFailed
+                                    }
+                                    PreviewProvenance::Captured
+                                    | PreviewProvenance::PendingCapture
+                                    | PreviewProvenance::ReusedCached
+                                    | PreviewProvenance::CaptureFailed => {
+                                        PreviewProvenance::ReusedCached
+                                    }
+                                };
+                                (previous_pane.preview.clone(), preview_provenance)
+                            }
+                            None => (String::new(), PreviewProvenance::PendingCapture),
+                        }
                     }
                 };
             let pane_title = record.pane_title.clone();
@@ -301,20 +332,24 @@ fn preview_resolution(
     record: &TmuxPaneRecord,
     policy: &InventoryLoadPolicy,
 ) -> Option<CaptureReason> {
-    let Some(previous_pane) = previous_pane else {
-        return Some(CaptureReason::Forced);
-    };
-
-    if pane_metadata_changed(previous_pane, record) || previous_pane.preview.is_empty() {
-        return Some(CaptureReason::Forced);
-    }
-
     if policy.priority_panes.contains(&record.pane_id) {
         return Some(CaptureReason::Priority);
     }
 
     if policy.deferred_panes.contains(&record.pane_id) {
         return Some(CaptureReason::Deferred);
+    }
+
+    let Some(previous_pane) = previous_pane else {
+        return policy.capture_unseen_panes.then_some(CaptureReason::Forced);
+    };
+
+    if pane_metadata_changed(previous_pane, record) {
+        return Some(CaptureReason::Forced);
+    }
+
+    if previous_pane.preview.is_empty() && policy.capture_empty_previews {
+        return Some(CaptureReason::Forced);
     }
 
     None
@@ -599,8 +634,8 @@ mod tests {
     };
     use crate::app::{
         fixtures::{inventory, PaneBuilder},
-        AgentStatus, AppState, PaneId, PreviewProvenance, SelectionTarget, SessionBuilder,
-        SessionId, WindowBuilder, WindowId,
+        AgentStatus, AppState, Inventory, PaneId, PreviewProvenance, SelectionTarget,
+        SessionBuilder, SessionId, WindowBuilder, WindowId,
     };
     use std::cell::RefCell;
     use std::collections::{BTreeMap, BTreeSet};
@@ -990,6 +1025,7 @@ mod tests {
         let policy = InventoryLoadPolicy {
             priority_panes: BTreeSet::from([PaneId::new("%1")]),
             deferred_panes: BTreeSet::new(),
+            ..InventoryLoadPolicy::default()
         };
         let (inventory, metrics) = TmuxAdapter::new(backend)
             .load_inventory_profiled_with_policy(40, Some(&previous_inventory), &policy)
@@ -1053,6 +1089,40 @@ mod tests {
         assert_eq!(pane.preview, "plain shell");
         assert_eq!(pane.preview_provenance, PreviewProvenance::Captured);
         assert!(pane.agent.is_none());
+    }
+
+    #[test]
+    fn load_inventory_profiled_allows_startup_lazy_preview_capture() {
+        let backend = FakeTmuxBackend {
+            panes: vec![pane_record(
+                "$1",
+                "alpha",
+                "@1",
+                "agents",
+                "%1",
+                "alpha-main",
+                Some("claude"),
+            )],
+            ..FakeTmuxBackend::default()
+        }
+        .with_capture("%1", Ok("Claude Code ready"));
+
+        let policy = InventoryLoadPolicy {
+            capture_unseen_panes: false,
+            capture_empty_previews: false,
+            ..InventoryLoadPolicy::default()
+        };
+        let (inventory, metrics) = TmuxAdapter::new(backend)
+            .load_inventory_profiled_with_policy(40, Some(&Inventory::default()), &policy)
+            .expect("inventory should load");
+
+        let pane = inventory
+            .pane(&PaneId::new("%1"))
+            .expect("pane should exist");
+        assert_eq!(metrics.capture_count, 0);
+        assert_eq!(metrics.reused_preview_count, 1);
+        assert_eq!(pane.preview, "");
+        assert_eq!(pane.preview_provenance, PreviewProvenance::PendingCapture);
     }
 
     #[test]

@@ -92,6 +92,7 @@ impl PathEnvironment {
 pub struct AppPaths {
     pub config_file: PathBuf,
     pub log_dir: PathBuf,
+    pub startup_cache_dir: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -252,6 +253,7 @@ impl LogVerbosity {
 pub struct RuntimeConfig {
     pub config_file: PathBuf,
     pub log_dir: PathBuf,
+    pub startup_cache_dir: PathBuf,
     pub tmux_socket: Option<PathBuf>,
     pub claude_native_dir: Option<PathBuf>,
     pub codex_native_dir: Option<PathBuf>,
@@ -294,6 +296,7 @@ impl RuntimeConfig {
         Self {
             config_file: paths.config_file,
             log_dir: paths.log_dir,
+            startup_cache_dir: paths.startup_cache_dir,
             tmux_socket: cli.tmux_socket.clone(),
             claude_native_dir,
             codex_native_dir,
@@ -355,9 +358,12 @@ pub fn resolve_paths_with_env(
         None => resolve_log_dir(env)?,
     };
 
+    let startup_cache_dir = default_startup_cache_dir(&log_dir);
+
     Ok(AppPaths {
         config_file,
         log_dir,
+        startup_cache_dir,
     })
 }
 
@@ -394,6 +400,11 @@ pub fn default_codex_native_dir(log_dir: &Path) -> PathBuf {
 
 pub fn default_pi_native_dir(log_dir: &Path) -> PathBuf {
     default_native_dir(log_dir, "pi-native")
+}
+
+pub fn default_startup_cache_dir(log_dir: &Path) -> PathBuf {
+    let state_dir = log_dir.parent().unwrap_or(log_dir);
+    state_dir.join("cache")
 }
 
 fn default_native_dir(log_dir: &Path, leaf: &str) -> PathBuf {
@@ -557,6 +568,7 @@ mod tests {
             super::AppPaths {
                 config_file: Path::new("/tmp/config.toml").to_path_buf(),
                 log_dir: Path::new("/tmp/logs").to_path_buf(),
+                startup_cache_dir: super::default_startup_cache_dir(Path::new("/tmp/logs")),
             },
             AppConfig::default(),
             &cli,
@@ -576,6 +588,10 @@ mod tests {
         assert_eq!(
             runtime.pi_native_dir,
             Some(default_pi_native_dir(Path::new("/tmp/logs")))
+        );
+        assert_eq!(
+            runtime.startup_cache_dir,
+            super::default_startup_cache_dir(Path::new("/tmp/logs"))
         );
         assert_eq!(runtime.log_verbosity, super::LogVerbosity::Debug);
         assert!(runtime.popup);
