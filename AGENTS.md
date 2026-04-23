@@ -73,6 +73,10 @@ CI mirrors `mise run ci` for the fast gate. Pull requests also run
 - **DO** promote durable workflow lessons out of `.ai/plans/*` into `docs/` or
   `AGENTS.md`. **NOT** treat historical plan logs as canonical truth.
   **BECAUSE** plan artifacts are evidence for a slice, not long-term onboarding.
+- **DO** commit structured `.ai/plans/` and `.ai/validation/` paths that the
+  workflow depends on. **NOT** commit `.ai/handoffs/`, `.ai/research/`, or
+  plan-local `artifacts/` scratch. **BECAUSE** only the structured plan and
+  validation roots are intended as durable repo context.
 - **DO** check the active Docker context when `mise run verify` fails in the
   Docker phase. **NOT** assume the Rust app regressed first. **BECAUSE** the
   common failure mode here has been local Colima or Docker runtime state.

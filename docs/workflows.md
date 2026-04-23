@@ -28,6 +28,33 @@ files current while you work:
 
 Use `status: complete`, not `completed`.
 
+## `.ai` Policy
+
+Foreman keeps a narrow set of `.ai/` paths in git on purpose.
+
+Commit these:
+
+- `.ai/plans/AGENTS.md`, `_templates/`, and `_example/`
+- completed slice plan directories under `.ai/plans/`
+- stable validation roots under `.ai/validation/`
+
+Do not commit these:
+
+- `.ai/handoffs/`
+- `.ai/research/`
+- plan-local `artifacts/` folders under `.ai/plans/**/artifacts/`
+- ad hoc scratch dumps or temporary debug files under `.ai/`
+
+Why:
+
+- `.ai/plans/` is structured working memory and evidence for a slice
+- `.ai/validation/` is consumed by CI and release workflows as stable proof
+- handoffs, research notes, and local artifacts are useful while exploring, but
+  they are not canonical repo context
+
+If a scratch note becomes durable, promote it into `docs/`, `AGENTS.md`, or a
+real plan directory and then delete the scratch copy.
+
 ## Validation Ladder
 
 Foreman works best when every slice names its dominant validation layer up

@@ -60,3 +60,10 @@ mise run verify-native
 
 See `_example/` for a complete reference plan showing the progression from
 planned through completion with realistic entries.
+
+## What Belongs Here
+
+- Commit structured plan files under `.ai/plans/<slug>/`
+- Keep stable validation outputs under `.ai/validation/`
+- Do not create committed scratch under `.ai/handoffs/`, `.ai/research/`, or
+  `.ai/plans/<slug>/artifacts/`

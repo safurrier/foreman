@@ -38,6 +38,7 @@ durable implementation boundaries live in [`architecture.md`](architecture.md).
 | `src/services/` | Notifications, PRs, logging, and system stats |
 | `tests/` | Unit, contract, tmux smoke, runtime smoke, and opt-in real harness E2E |
 | `.ai/plans/` | Task-local specs, logs, validation history, and retrospectives |
+| `.ai/validation/` | Stable UX and release evidence consumed by CI and release workflows |
 
 ## Daily Loop
 
@@ -53,6 +54,9 @@ durable implementation boundaries live in [`architecture.md`](architecture.md).
 ## Where Lessons Live
 
 - `.ai/plans/*` is working memory and evidence for a slice.
+- `.ai/validation/*` is stable review and release proof.
+- `.ai/handoffs/*` and `.ai/research/*` are scratch by default and should not
+  become canonical repo context.
 - `docs/*.md` is durable onboarding and reference material.
 - `AGENTS.md` is the short steering file future sessions should read first.
 
