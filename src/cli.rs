@@ -25,7 +25,7 @@ use std::time::Instant;
 const CLI_ABOUT: &str = "Foreman - watch and control AI coding agents running in tmux.";
 const CLI_LONG_ABOUT: &str = "Foreman is a keyboard-first dashboard for AI coding agents running in tmux.\n\nUse when: you want one operator surface for Claude Code, Codex, Pi, Gemini, or OpenCode panes.\nDon't use to: inspect a plain tmux tree with no agent workflow.";
 const CLI_AFTER_HELP: &str = "First-time setup:\n  foreman --setup --user --project\n  foreman --doctor\n  foreman\n\nPreview setup changes:\n  foreman --setup --user --project --dry-run\n\nScoped installs:\n  foreman --setup --user\n  foreman --setup --project --codex --repo /path/to/repo\n\nAnother repo:\n  foreman --setup --project --repo /path/to/repo\n  foreman --doctor --repo /path/to/repo";
-pub(crate) const STARTUP_CACHE_MAX_AGE_MS: u64 = 15_000;
+pub(crate) const STARTUP_CACHE_MAX_AGE_MS: u64 = 5 * 60_000;
 
 #[derive(Debug, Parser, Clone)]
 #[command(

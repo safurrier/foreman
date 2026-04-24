@@ -39,6 +39,18 @@ pub enum Action {
     SetStartupCacheAge(Option<u64>),
     SetStartupError(Option<String>),
     SetOperatorAlert(Option<OperatorAlert>),
+    RestoreFailedInput {
+        pane_id: PaneId,
+        text: String,
+    },
+    RestoreFailedRename {
+        window_id: WindowId,
+        name: String,
+    },
+    RestoreFailedSpawn {
+        session_id: SessionId,
+        command: String,
+    },
     ToggleNotificationsMuted,
     CycleNotificationProfile,
     TogglePullRequestDetail,
@@ -48,6 +60,9 @@ pub enum Action {
     RequestQuit,
     SetFocus(Focus),
     SetSidebarViewportRows(u16),
+    ScrollPreviewBy(i16),
+    ScrollPreviewToStart,
+    ScrollPreviewToEnd,
     ScrollHelpBy(i16),
     ScrollHelpToStart,
     ScrollHelpToEnd,
@@ -92,6 +107,9 @@ impl Action {
             Self::SetStartupCacheAge(_) => "set-startup-cache-age",
             Self::SetStartupError(_) => "set-startup-error",
             Self::SetOperatorAlert(_) => "set-operator-alert",
+            Self::RestoreFailedInput { .. } => "restore-failed-input",
+            Self::RestoreFailedRename { .. } => "restore-failed-rename",
+            Self::RestoreFailedSpawn { .. } => "restore-failed-spawn",
             Self::ToggleNotificationsMuted => "toggle-notifications-muted",
             Self::CycleNotificationProfile => "cycle-notification-profile",
             Self::TogglePullRequestDetail => "toggle-pull-request-detail",
@@ -101,6 +119,9 @@ impl Action {
             Self::RequestQuit => "request-quit",
             Self::SetFocus(_) => "set-focus",
             Self::SetSidebarViewportRows(_) => "set-sidebar-viewport-rows",
+            Self::ScrollPreviewBy(_) => "scroll-preview-by",
+            Self::ScrollPreviewToStart => "scroll-preview-to-start",
+            Self::ScrollPreviewToEnd => "scroll-preview-to-end",
             Self::ScrollHelpBy(_) => "scroll-help-by",
             Self::ScrollHelpToStart => "scroll-help-to-start",
             Self::ScrollHelpToEnd => "scroll-help-to-end",
@@ -196,6 +217,12 @@ pub fn action_for_command(state: &AppState, command: Command) -> Action {
                 Action::RequestMode(Mode::Help)
             }
         }
+        Command::PreviewScrollUp => Action::ScrollPreviewBy(-1),
+        Command::PreviewScrollDown => Action::ScrollPreviewBy(1),
+        Command::PreviewPageUp => Action::ScrollPreviewBy(-8),
+        Command::PreviewPageDown => Action::ScrollPreviewBy(8),
+        Command::PreviewTop => Action::ScrollPreviewToStart,
+        Command::PreviewBottom => Action::ScrollPreviewToEnd,
         Command::Search => Action::BeginSearch,
         Command::FlashNavigate => Action::BeginFlash {
             kind: FlashNavigateKind::Jump,
@@ -235,8 +262,8 @@ pub fn action_for_command(state: &AppState, command: Command) -> Action {
         Command::ToggleNonAgentPanes => Action::ToggleShowNonAgentPanes,
         Command::CycleHarnessFilter => Action::CycleHarnessFilter,
         Command::CycleSortMode => Action::SetSortMode(match state.sort_mode {
-            SortMode::RecentActivity => SortMode::AttentionFirst,
-            SortMode::AttentionFirst => SortMode::RecentActivity,
+            SortMode::Stable => SortMode::AttentionFirst,
+            SortMode::AttentionFirst => SortMode::Stable,
         }),
         Command::CycleTheme => Action::CycleTheme,
         Command::HelpScrollUp

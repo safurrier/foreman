@@ -54,6 +54,8 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
                 state.mode = mode;
                 if mode == Mode::Input {
                     state.focus = Focus::Input;
+                } else if mode == Mode::PreviewScroll {
+                    state.focus = Focus::Preview;
                 } else if mode == Mode::Help {
                     state.help_scroll = 0;
                 }
@@ -110,6 +112,31 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
         }
         Action::SetOperatorAlert(alert) => {
             state.operator_alert = alert;
+        }
+        Action::RestoreFailedInput { pane_id, text } => {
+            if state.inventory.pane(&pane_id).is_some() {
+                state.selection = Some(SelectionTarget::Pane(pane_id));
+            }
+            state.mode = Mode::Input;
+            state.focus = Focus::Input;
+            state.input_draft = crate::app::TextDraft::from_text(text);
+            state.reconcile_sidebar_scroll();
+            reconcile_pull_request_detail(state);
+        }
+        Action::RestoreFailedRename { window_id, name } => {
+            if state.inventory.window(&window_id).is_some() {
+                state.mode = Mode::Rename;
+                state.modal = Some(ModalState::rename_window(window_id, name));
+            }
+        }
+        Action::RestoreFailedSpawn {
+            session_id,
+            command,
+        } => {
+            if state.inventory.contains_session(&session_id) {
+                state.mode = Mode::Spawn;
+                state.modal = Some(ModalState::spawn_window_with_command(session_id, command));
+            }
         }
         Action::ToggleNotificationsMuted => {
             state.notifications.muted = !state.notifications.muted;
@@ -203,9 +230,40 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
         }
         Action::SetFocus(focus) => {
             state.focus = focus;
+            if focus == Focus::Preview {
+                state.mode = Mode::PreviewScroll;
+            } else if state.mode == Mode::PreviewScroll {
+                state.mode = Mode::Normal;
+            }
         }
         Action::SetSidebarViewportRows(rows) => {
             state.set_sidebar_viewport_rows(rows as usize);
+        }
+        Action::ScrollPreviewBy(delta) => {
+            if state.focus == Focus::Preview || state.mode == Mode::PreviewScroll {
+                state.mode = Mode::PreviewScroll;
+                state.focus = Focus::Preview;
+                if delta.is_negative() {
+                    state.preview_scroll =
+                        state.preview_scroll.saturating_sub(delta.unsigned_abs());
+                } else {
+                    state.preview_scroll = state.preview_scroll.saturating_add(delta as u16);
+                }
+            }
+        }
+        Action::ScrollPreviewToStart => {
+            if state.focus == Focus::Preview || state.mode == Mode::PreviewScroll {
+                state.mode = Mode::PreviewScroll;
+                state.focus = Focus::Preview;
+                state.preview_scroll = 0;
+            }
+        }
+        Action::ScrollPreviewToEnd => {
+            if state.focus == Focus::Preview || state.mode == Mode::PreviewScroll {
+                state.mode = Mode::PreviewScroll;
+                state.focus = Focus::Preview;
+                state.preview_scroll = u16::MAX;
+            }
         }
         Action::ScrollHelpBy(delta) => {
             if state.mode == Mode::Help {
@@ -234,6 +292,7 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             {
                 state.selection = Some(target);
                 state.focus = Focus::Sidebar;
+                state.preview_scroll = 0;
                 state.reconcile_sidebar_scroll();
                 reconcile_pull_request_detail(state);
             }
@@ -261,6 +320,7 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             };
 
             state.selection = Some(visible_targets[next_index].target.clone());
+            state.preview_scroll = 0;
             state.reconcile_sidebar_scroll();
             reconcile_pull_request_detail(state);
         }
@@ -286,9 +346,20 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             }
         }
         Action::CommitSearchSelection => {
-            let selected = state.selection.clone();
+            let selected = state
+                .selected_visible_entry()
+                .map(|entry| entry.target.clone())
+                .or_else(|| {
+                    state
+                        .visible_target_entries()
+                        .first()
+                        .map(|entry| entry.target.clone())
+                })
+                .or_else(|| state.selection.clone());
             state.mode = Mode::Normal;
             state.search = None;
+            state.selection = selected.clone();
+            state.preview_scroll = 0;
             state.rebuild_visible_state();
 
             match selected {
@@ -304,7 +375,15 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
                         close_after: state.popup_mode,
                     }];
                 }
-                Some(SelectionTarget::Window(_)) | None => {}
+                Some(SelectionTarget::Window(_)) => {
+                    if let Some(pane_id) = state.selected_actionable_pane_id() {
+                        return vec![Effect::FocusPane {
+                            pane_id,
+                            close_after: state.popup_mode,
+                        }];
+                    }
+                }
+                None => {}
             }
         }
         Action::OpenRenameModal {
@@ -517,7 +596,7 @@ fn finish_flash_selection(state: &mut AppState, target: SelectionTarget) -> Vec<
     state.selection = Some(target.clone());
 
     if kind == FlashNavigateKind::JumpAndFocus {
-        if let SelectionTarget::Pane(pane_id) = target {
+        if let Some(pane_id) = state.selected_actionable_pane_id() {
             return vec![Effect::FocusPane {
                 pane_id,
                 close_after: state.popup_mode,
@@ -685,12 +764,18 @@ fn notification_effects_for_refresh(
         .notifications
         .cooldowns
         .retain(|key, _| state.inventory.pane(&key.pane_id).is_some());
+    let selected_pane_id = state.selected_actionable_pane_id();
+    let notification_selected_pane_id = if state.popup_mode {
+        None
+    } else {
+        selected_pane_id.as_ref()
+    };
 
     let decisions = evaluate_inventory_notifications(
         previous_inventory,
         &state.inventory,
         NotificationPolicyContext {
-            selected_pane_id: state.selected_actionable_pane_id().as_ref(),
+            selected_pane_id: notification_selected_pane_id,
             muted: state.notifications.muted,
             profile: state.notifications.profile,
             refresh_tick: state.notifications.refresh_tick,
@@ -1026,6 +1111,25 @@ mod tests {
     }
 
     #[test]
+    fn preview_scroll_actions_are_reducer_owned_and_reset_on_selection_change() {
+        let mut state = AppState::with_inventory(sample_inventory());
+        state.focus = Focus::Preview;
+
+        reduce(&mut state, Action::ScrollPreviewBy(3));
+        assert_eq!(state.mode, Mode::PreviewScroll);
+        assert_eq!(state.preview_scroll, 3);
+
+        reduce(&mut state, Action::ScrollPreviewBy(-1));
+        assert_eq!(state.preview_scroll, 2);
+
+        reduce(&mut state, Action::ScrollPreviewToEnd);
+        assert_eq!(state.preview_scroll, u16::MAX);
+
+        reduce(&mut state, Action::MoveSelection(SelectionDirection::Next));
+        assert_eq!(state.preview_scroll, 0);
+    }
+
+    #[test]
     fn help_scroll_actions_are_reducer_owned_and_clamp() {
         let mut state = AppState::with_inventory(sample_inventory());
         state.mode = Mode::Help;
@@ -1131,6 +1235,29 @@ mod tests {
     }
 
     #[test]
+    fn failed_input_send_restores_compose_draft() {
+        let mut state = AppState::with_inventory(sample_inventory());
+        state.mode = Mode::Normal;
+        state.input_draft.clear();
+
+        reduce(
+            &mut state,
+            Action::RestoreFailedInput {
+                pane_id: "alpha:claude".into(),
+                text: "please retry".to_string(),
+            },
+        );
+
+        assert_eq!(state.mode, Mode::Input);
+        assert_eq!(state.focus, Focus::Input);
+        assert_eq!(state.input_draft.text, "please retry");
+        assert_eq!(
+            state.selection,
+            Some(SelectionTarget::Pane("alpha:claude".into()))
+        );
+    }
+
+    #[test]
     fn backspace_respects_utf8_boundaries() {
         let mut state = AppState::with_inventory(sample_inventory());
         state.selection = Some(SelectionTarget::Pane("alpha:claude".into()));
@@ -1182,6 +1309,28 @@ mod tests {
     }
 
     #[test]
+    fn failed_rename_restores_modal_draft() {
+        let mut state = AppState::with_inventory(sample_inventory());
+
+        reduce(
+            &mut state,
+            Action::RestoreFailedRename {
+                window_id: "alpha:agents".into(),
+                name: "agents-renamed".to_string(),
+            },
+        );
+
+        assert_eq!(state.mode, Mode::Rename);
+        assert_eq!(
+            state.modal,
+            Some(ModalState::rename_window(
+                "alpha:agents".into(),
+                "agents-renamed"
+            ))
+        );
+    }
+
+    #[test]
     fn spawn_mode_targets_selected_session_and_emits_command() {
         let mut state = AppState::with_inventory(sample_inventory());
         state.selection = Some(SelectionTarget::Pane("alpha:claude".into()));
@@ -1207,6 +1356,28 @@ mod tests {
         );
         assert_eq!(state.mode, Mode::Normal);
         assert_eq!(state.modal, None);
+    }
+
+    #[test]
+    fn failed_spawn_restores_modal_draft() {
+        let mut state = AppState::with_inventory(sample_inventory());
+
+        reduce(
+            &mut state,
+            Action::RestoreFailedSpawn {
+                session_id: "alpha".into(),
+                command: "claude --dangerously-skip-permissions".to_string(),
+            },
+        );
+
+        assert_eq!(state.mode, Mode::Spawn);
+        assert_eq!(
+            state.modal,
+            Some(ModalState::spawn_window_with_command(
+                "alpha".into(),
+                "claude --dangerously-skip-permissions"
+            ))
+        );
     }
 
     #[test]
@@ -1336,6 +1507,26 @@ mod tests {
     }
 
     #[test]
+    fn search_commit_resets_preview_scroll() {
+        let mut state = AppState::with_inventory(sample_inventory());
+        state.selection = Some(SelectionTarget::Pane("alpha:claude".into()));
+        state.preview_scroll = 42;
+
+        reduce(&mut state, Action::BeginSearch);
+        for ch in "codex".chars() {
+            reduce(&mut state, Action::EditDraft(DraftEdit::InsertChar(ch)));
+        }
+
+        reduce(&mut state, Action::CommitSearchSelection);
+
+        assert_eq!(state.preview_scroll, 0);
+        assert_eq!(
+            state.selection,
+            Some(SelectionTarget::Pane("beta:codex".into()))
+        );
+    }
+
+    #[test]
     fn search_commit_focuses_selected_pane() {
         let mut state = AppState::with_inventory(sample_inventory());
         state.selection = Some(SelectionTarget::Pane("alpha:claude".into()));
@@ -1353,6 +1544,27 @@ mod tests {
                 pane_id: "beta:codex".into(),
                 close_after: false,
             }]
+        );
+        assert_eq!(state.mode, Mode::Normal);
+        assert_eq!(state.search, None);
+    }
+
+    #[test]
+    fn search_commit_selects_matching_session_header() {
+        let mut state = AppState::with_inventory(sample_inventory());
+        state.selection = Some(SelectionTarget::Session("alpha".into()));
+
+        reduce(&mut state, Action::BeginSearch);
+        for ch in "beta".chars() {
+            reduce(&mut state, Action::EditDraft(DraftEdit::InsertChar(ch)));
+        }
+
+        let effects = reduce(&mut state, Action::CommitSearchSelection);
+
+        assert!(effects.is_empty());
+        assert_eq!(
+            state.selection,
+            Some(SelectionTarget::Session("beta".into()))
         );
         assert_eq!(state.mode, Mode::Normal);
         assert_eq!(state.search, None);
@@ -1409,6 +1621,36 @@ mod tests {
             effects,
             vec![super::Effect::FocusPane {
                 pane_id: "alpha:claude".into(),
+                close_after: false,
+            }]
+        );
+        assert_eq!(state.mode, Mode::Normal);
+        assert_eq!(state.flash, None);
+    }
+
+    #[test]
+    fn flash_jump_and_focus_resolves_session_to_actionable_pane() {
+        let mut state = AppState::with_inventory(sample_inventory());
+
+        reduce(
+            &mut state,
+            Action::BeginFlash {
+                kind: FlashNavigateKind::JumpAndFocus,
+            },
+        );
+        let label = state
+            .flash_label_for_target(&SelectionTarget::Session("beta".into()))
+            .expect("flash label should exist");
+
+        let mut effects = Vec::new();
+        for ch in label.chars() {
+            effects = reduce(&mut state, Action::EditDraft(DraftEdit::InsertChar(ch)));
+        }
+
+        assert_eq!(
+            effects,
+            vec![super::Effect::FocusPane {
+                pane_id: "beta:codex".into(),
                 close_after: false,
             }]
         );
@@ -1761,6 +2003,38 @@ mod tests {
             super::Effect::LogNotificationDecision { decision }
                 if decision.request.is_none()
         ));
+    }
+
+    #[test]
+    fn popup_mode_does_not_suppress_selected_pane_notifications() {
+        let initial_inventory = inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:agents").pane(
+                PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
+                    .working_dir("/tmp/alpha")
+                    .status(AgentStatus::Working),
+            ),
+        )]);
+        let refreshed_inventory = inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:agents").pane(
+                PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
+                    .working_dir("/tmp/alpha")
+                    .status(AgentStatus::Idle),
+            ),
+        )]);
+
+        let mut state = AppState::with_inventory(initial_inventory);
+        state.popup_mode = true;
+        state.selection = Some(SelectionTarget::Pane("alpha:claude".into()));
+        let first_effects = reduce(
+            &mut state,
+            Action::ReplaceInventory(refreshed_inventory.clone()),
+        );
+        assert!(first_effects.is_empty());
+
+        let effects = reduce(&mut state, Action::ReplaceInventory(refreshed_inventory));
+
+        assert_eq!(effects.len(), 2);
+        assert!(matches!(effects[0], super::Effect::Notify { .. }));
     }
 
     #[test]

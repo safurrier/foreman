@@ -229,9 +229,9 @@ yet expose a stable contract.
 **R16. Sorting**
 
 - The dashboard provides at least two sidebar sort modes:
-- `recent -> status`
+- `stable`
 - `attention -> recent`
-- `recent -> status` sorts by most recent activity first, then by status rank.
+- `stable` keeps the common monitoring view from reordering rows due to volatile status changes.
 - `attention -> recent` sorts by status rank first, then by most recent activity.
 - Changing sort mode preserves the current logical selection whenever possible.
 
@@ -249,7 +249,7 @@ yet expose a stable contract.
 
 - When notifications are enabled, Foreman notifies when a working agent becomes complete or returns to a ready state.
 - When notifications are enabled, Foreman notifies when an agent enters a `needs attention` state.
-- Notifications are suppressed when the operator is already looking at the relevant pane or already focused on that agent in the dashboard.
+- Notifications are suppressed when the operator is already looking at the relevant pane or already focused on that agent in the dashboard, except popup mode may still notify for the selected pane because the dashboard is transient.
 - Per-agent cooldowns reduce noise.
 - Runtime muting and unmuting are supported.
 - Runtime notification-profile switching is supported.
@@ -545,7 +545,7 @@ mise run ci
 
 **A15. Sorting**
 
-- Given the dashboard is running, cycling sort mode reorders the sidebar by the selected preset (`recent -> status` or `attention -> recent`) and preserves the current logical selection where possible.
+- Given the dashboard is running, cycling sort mode reorders the sidebar by the selected preset (`stable` or `attention -> recent`) and preserves the current logical selection where possible.
 
 **A16. Pull request awareness**
 

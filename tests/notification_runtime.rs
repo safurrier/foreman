@@ -109,7 +109,7 @@ active_profile = "completion-only"
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
     fixture.wait_for_alt_capture(&dashboard_pane, "▾ beta");
     fixture.wait_for_alt_capture(&dashboard_pane, "▾ alpha");
-    fixture.send_keys(&dashboard_pane, &["j", "j", "j"]);
+    fixture.send_keys(&dashboard_pane, &["/", "a", "l", "p", "h", "a", "Enter"]);
     fixture.wait_for_alt_capture(&dashboard_pane, "› ▾ alpha");
 
     write_atomic(

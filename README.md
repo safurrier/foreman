@@ -118,7 +118,7 @@ Common dashboard keys:
 - `f` jumps tmux to the actionable pane
 - `Enter` sends in compose mode and acts on the selected row in normal mode
 - `/` starts search
-- `o` cycles `recent->status` and `attention->recent`
+- `o` cycles `stable` and `attention->recent`
 - `s` starts flash jump with inline labels; `S` also focuses tmux after the jump
 - `h` cycles only the visible harness families, then returns to `all`
 - `H` / `P` reveal non-agent sessions or panes

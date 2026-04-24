@@ -268,12 +268,21 @@ fn render_preview(
     theme: &Theme,
     layout_mode: LayoutMode,
 ) {
-    let preview = Paragraph::new(preview_text(state, theme, layout_mode))
+    let text = preview_text(state, theme, layout_mode);
+    let content_height = area.height.saturating_sub(2).max(1);
+    let max_scroll = text
+        .lines
+        .len()
+        .saturating_sub(content_height as usize)
+        .min(u16::MAX as usize) as u16;
+    let scroll = state.preview_scroll.min(max_scroll);
+    let preview = Paragraph::new(text)
         .block(focused_block(
             "Details",
             state.focus == Focus::Preview,
             theme,
         ))
+        .scroll((scroll, 0))
         .wrap(Wrap { trim: false })
         .style(theme.base);
     frame.render_widget(preview, area);
@@ -1102,7 +1111,7 @@ fn help_lines(state: &AppState, theme: &Theme) -> Vec<Line<'static>> {
             theme,
         ),
         muted_line(
-            "o cycles recent->status and attention->recent. t themes. m mutes. n changes notification profile.",
+            "o cycles stable and attention->recent. t themes. m mutes. n changes notification profile.",
             theme,
         ),
         plain_line(""),
@@ -1466,9 +1475,9 @@ fn normal_footer_lines(state: &AppState, theme: &Theme, layout_mode: LayoutMode)
         }
         Focus::Preview => {
             let primary = if state.selected_actionable_pane().is_some() {
-                format!("Details: inspect target pane{sep}f jump tmux{sep}i compose")
+                format!("Details: j/k scroll{sep}f jump tmux{sep}i compose")
             } else {
-                format!("Details: inspect selection{sep}Tab sidebar{sep}Help ?")
+                format!("Details: j/k scroll{sep}Tab sidebar{sep}Help ?")
             };
             let pr_actions = if state.selected_pull_request().is_some() {
                 format!("PR p{sep}Open O{sep}Copy Y")
@@ -1478,7 +1487,7 @@ fn normal_footer_lines(state: &AppState, theme: &Theme, layout_mode: LayoutMode)
             match layout_mode {
                 LayoutMode::Compact => {
                     vec![format!(
-                        "Details: inspect target{sep}f tmux{sep}p PR{sep}Help ?"
+                        "Details: j/k scroll{sep}f tmux{sep}p PR{sep}Help ?"
                     )]
                 }
                 LayoutMode::Medium | LayoutMode::Wide => {
@@ -1845,8 +1854,8 @@ mod tests {
     fn render_surfaces_compound_sort_labels() {
         let mut state = sample_state();
         let recent_output = render_to_string(&state);
-        assert!(recent_output.contains("View: recent->status"));
-        assert!(recent_output.contains("Sort recent->status"));
+        assert!(recent_output.contains("View: stable"));
+        assert!(recent_output.contains("Sort stable"));
 
         state.sort_mode = crate::app::SortMode::AttentionFirst;
         state.rebuild_visible_state();
@@ -1884,6 +1893,16 @@ mod tests {
         assert!(output.contains("Confirm Kill"));
         assert!(output.contains("alpha:claude"));
         assert!(output.contains("Enter or y confirms"));
+    }
+
+    #[test]
+    fn render_preview_clamps_large_scroll_offsets() {
+        let mut state = sample_state();
+        state.focus = Focus::Preview;
+        state.preview_scroll = u16::MAX;
+        let output = render_to_string_at(&state, ThemeName::Catppuccin, 100, 20);
+
+        assert!(output.contains("Applying patch"));
     }
 
     #[test]
@@ -1958,7 +1977,7 @@ mod tests {
         assert!(output.contains("Keys • Sidebar") || output.contains("Keys | Sidebar"));
         assert!(output.contains("Sidebar: j/k move"));
         assert!(output.contains("Enter use row"));
-        assert!(output.contains("Sort recent->status"));
+        assert!(output.contains("Sort stable"));
         assert!(output.contains("Find / s S"));
         assert!(output.contains("Help ?"));
     }

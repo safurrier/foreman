@@ -1147,13 +1147,15 @@ mod tests {
                     "alpha-helper",
                     Some("zsh"),
                 ),
+                pane_record("$1", "alpha", "@1", "agents", "%4", "notes", Some("nvim")),
                 pane_record("$2", "notes", "@2", "notes", "%3", "notes", Some("zsh")),
             ],
             ..FakeTmuxBackend::default()
         }
         .with_capture("%1", Ok("Claude Code ready"))
         .with_capture("%2", Ok("plain shell"))
-        .with_capture("%3", Ok("plain shell"));
+        .with_capture("%3", Ok("plain shell"))
+        .with_capture("%4", Ok("Claude Code ready from stale editor buffer"));
 
         let state = AppState::with_inventory(
             TmuxAdapter::new(backend)
@@ -1163,6 +1165,9 @@ mod tests {
 
         let summary = state.inventory_summary();
         assert_eq!(summary.visible_sessions, 1);
+        assert!(!state
+            .visible_targets()
+            .contains(&crate::app::SelectionTarget::Pane("%4".into())));
         assert_eq!(summary.visible_panes, 1);
         assert_eq!(
             state.selection,

@@ -48,6 +48,7 @@ const SLOW_PULL_REQUEST_LOOKUP_MS: u128 = 75;
 const SLOW_STARTUP_CACHE_WRITE_MS: u128 = 20;
 const OFFSCREEN_PREVIEW_REFRESH_BATCH: usize = 4;
 const STARTUP_CACHE_WRITE_INTERVAL_MS: u64 = 5_000;
+const PULL_REQUEST_LOOKUP_RESULT_POLL_MS: u64 = 50;
 
 pub(crate) fn run(prepared: PreparedBootstrap) -> Result<(), RuntimeError> {
     let _terminal_guard = TerminalGuard::enter()?;
@@ -87,6 +88,7 @@ struct DashboardRuntime {
     state: AppState,
     tmux: TmuxAdapter<SystemTmuxBackend>,
     pull_requests: PullRequestService<SystemPullRequestBackend>,
+    pull_request_lookup: PullRequestLookupWorker,
     notifications: NotificationDispatcher,
     system_stats: SystemStatsService<SysinfoSystemStatsBackend>,
     last_pull_request_lookup: BTreeMap<PathBuf, Instant>,
@@ -101,6 +103,32 @@ struct DashboardRuntime {
 struct PendingPullRequestLookup {
     workspace_path: PathBuf,
     due_at: Instant,
+}
+
+struct PullRequestLookupWorker {
+    request_tx: Sender<PullRequestLookupCommand>,
+    result_rx: Receiver<PullRequestLookupResult>,
+    next_generation: u64,
+    in_flight_generation: Option<u64>,
+}
+
+enum PullRequestLookupCommand {
+    Lookup(PullRequestLookupRequest),
+    Shutdown,
+}
+
+struct PullRequestLookupRequest {
+    generation: u64,
+    workspace_path: PathBuf,
+    trigger: &'static str,
+}
+
+struct PullRequestLookupResult {
+    generation: u64,
+    workspace_path: PathBuf,
+    trigger: &'static str,
+    elapsed_ms: u128,
+    lookup: PullRequestLookup,
 }
 
 struct InventoryRefreshWorker {
@@ -156,6 +184,7 @@ impl DashboardRuntime {
     fn new(prepared: PreparedBootstrap) -> Self {
         let tmux = TmuxAdapter::new(SystemTmuxBackend::new(prepared.runtime.tmux_socket.clone()));
         let inventory_refresh = spawn_inventory_refresh_worker(prepared.runtime.clone());
+        let pull_request_lookup = spawn_pull_request_lookup_worker();
         let startup_cache = StartupCacheTracker {
             last_written_at_ms: prepared.startup_cache_generated_at_ms,
         };
@@ -163,6 +192,7 @@ impl DashboardRuntime {
         Self {
             tmux,
             pull_requests: PullRequestService::new(SystemPullRequestBackend::new()),
+            pull_request_lookup,
             notifications: build_notification_dispatcher(&prepared.runtime.notification_backends),
             system_stats: SystemStatsService::new(SysinfoSystemStatsBackend::new()),
             last_pull_request_lookup: BTreeMap::new(),
@@ -201,6 +231,7 @@ impl DashboardRuntime {
             if initial_inventory_requested {
                 self.drain_inventory_refresh_results()?;
             }
+            self.drain_pull_request_lookup_results()?;
             let current_size = terminal.size()?;
             let sidebar_rows = sidebar_viewport_rows_for_area(Rect {
                 x: 0,
@@ -286,6 +317,7 @@ impl DashboardRuntime {
             }
 
             self.run_pending_pull_request_refresh()?;
+            self.drain_pull_request_lookup_results()?;
 
             if last_inventory_refresh.elapsed() >= poll_interval {
                 self.request_inventory_refresh()?;
@@ -382,6 +414,10 @@ impl DashboardRuntime {
                             self.clear_alert_source(OperatorAlertSource::Tmux)?;
                         }
                         Err(error) => {
+                            self.apply_runtime_action(Action::RestoreFailedInput {
+                                pane_id,
+                                text,
+                            })?;
                             self.record_alert(
                                 OperatorAlertSource::Tmux,
                                 OperatorAlertLevel::Warn,
@@ -397,6 +433,10 @@ impl DashboardRuntime {
                             self.request_inventory_refresh()?;
                         }
                         Err(error) => {
+                            self.apply_runtime_action(Action::RestoreFailedRename {
+                                window_id,
+                                name,
+                            })?;
                             self.record_alert(
                                 OperatorAlertSource::Tmux,
                                 OperatorAlertLevel::Warn,
@@ -414,6 +454,10 @@ impl DashboardRuntime {
                         self.request_inventory_refresh()?;
                     }
                     Err(error) => {
+                        self.apply_runtime_action(Action::RestoreFailedSpawn {
+                            session_id,
+                            command,
+                        })?;
                         self.record_alert(
                             OperatorAlertSource::Tmux,
                             OperatorAlertLevel::Warn,
@@ -737,17 +781,69 @@ impl DashboardRuntime {
             return Ok(());
         }
 
-        let lookup_started = Instant::now();
-        let lookup = match self.pull_requests.lookup(&workspace_path) {
-            Ok(lookup) => lookup,
-            Err(error) => PullRequestLookup::Unavailable {
-                message: error.to_string(),
-            },
-        };
+        self.request_pull_request_lookup(workspace_path, trigger)
+    }
+
+    fn request_pull_request_lookup(
+        &mut self,
+        workspace_path: PathBuf,
+        trigger: &'static str,
+    ) -> Result<(), RuntimeError> {
+        if self.pull_request_lookup.in_flight_generation.is_some() {
+            self.pending_pull_request_lookup = Some(PendingPullRequestLookup {
+                workspace_path,
+                due_at: Instant::now()
+                    + Duration::from_millis(SELECTION_PULL_REQUEST_LOOKUP_DEBOUNCE_MS),
+            });
+            return Ok(());
+        }
+
+        let generation = self.pull_request_lookup.next_generation;
+        self.pull_request_lookup.next_generation += 1;
+        self.pull_request_lookup.in_flight_generation = Some(generation);
+        self.pull_request_lookup
+            .request_tx
+            .send(PullRequestLookupCommand::Lookup(PullRequestLookupRequest {
+                generation,
+                workspace_path,
+                trigger,
+            }))
+            .map_err(|error| io::Error::new(io::ErrorKind::BrokenPipe, error.to_string()))?;
+
+        Ok(())
+    }
+
+    fn drain_pull_request_lookup_results(&mut self) -> Result<(), RuntimeError> {
+        loop {
+            match self.pull_request_lookup.result_rx.try_recv() {
+                Ok(result) => self.apply_pull_request_lookup_result(result)?,
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => break,
+            }
+        }
+
+        Ok(())
+    }
+
+    fn apply_pull_request_lookup_result(
+        &mut self,
+        result: PullRequestLookupResult,
+    ) -> Result<(), RuntimeError> {
+        if self.pull_request_lookup.in_flight_generation != Some(result.generation) {
+            return Ok(());
+        }
+
+        self.pull_request_lookup.in_flight_generation = None;
+        let PullRequestLookupResult {
+            workspace_path,
+            trigger,
+            elapsed_ms,
+            lookup,
+            ..
+        } = result;
 
         self.last_pull_request_lookup
             .insert(workspace_path.clone(), Instant::now());
-        let elapsed_ms = lookup_started.elapsed().as_millis();
         self.logger.log_timing(
             "pull_request_lookup",
             &format!(
@@ -860,7 +956,14 @@ impl DashboardRuntime {
             .as_ref()
             .map(|pending| pending.due_at.saturating_duration_since(Instant::now()))
             .unwrap_or(inventory_timeout);
-        inventory_timeout.min(pending_timeout)
+        let lookup_result_timeout = if self.pull_request_lookup.in_flight_generation.is_some() {
+            Duration::from_millis(PULL_REQUEST_LOOKUP_RESULT_POLL_MS)
+        } else {
+            inventory_timeout
+        };
+        inventory_timeout
+            .min(pending_timeout)
+            .min(lookup_result_timeout)
     }
 
     fn schedule_selected_pull_request_refresh(&mut self, previous_workspace: Option<PathBuf>) {
@@ -1020,6 +1123,12 @@ impl Drop for InventoryRefreshWorker {
     }
 }
 
+impl Drop for PullRequestLookupWorker {
+    fn drop(&mut self) {
+        let _ = self.request_tx.send(PullRequestLookupCommand::Shutdown);
+    }
+}
+
 fn rotating_capture_batch(
     pane_ids: &[crate::app::PaneId],
     cursor: &mut usize,
@@ -1075,6 +1184,46 @@ fn spawn_inventory_refresh_worker(runtime: crate::config::RuntimeConfig) -> Inve
         next_generation: 0,
         in_flight_generation: None,
         rerun_requested: false,
+    }
+}
+
+fn spawn_pull_request_lookup_worker() -> PullRequestLookupWorker {
+    let (request_tx, request_rx) = mpsc::channel::<PullRequestLookupCommand>();
+    let (result_tx, result_rx) = mpsc::channel::<PullRequestLookupResult>();
+
+    thread::Builder::new()
+        .name("foreman-pull-request-lookup".to_string())
+        .spawn(move || {
+            let pull_requests = PullRequestService::new(SystemPullRequestBackend::new());
+            while let Ok(command) = request_rx.recv() {
+                match command {
+                    PullRequestLookupCommand::Lookup(request) => {
+                        let lookup_started = Instant::now();
+                        let lookup = match pull_requests.lookup(&request.workspace_path) {
+                            Ok(lookup) => lookup,
+                            Err(error) => PullRequestLookup::Unavailable {
+                                message: error.to_string(),
+                            },
+                        };
+                        let _ = result_tx.send(PullRequestLookupResult {
+                            generation: request.generation,
+                            workspace_path: request.workspace_path,
+                            trigger: request.trigger,
+                            elapsed_ms: lookup_started.elapsed().as_millis(),
+                            lookup,
+                        });
+                    }
+                    PullRequestLookupCommand::Shutdown => break,
+                }
+            }
+        })
+        .expect("pull request lookup worker should spawn");
+
+    PullRequestLookupWorker {
+        request_tx,
+        result_rx,
+        next_generation: 0,
+        in_flight_generation: None,
     }
 }
 

@@ -21,6 +21,12 @@ pub enum Command {
     SubmitDraft,
     Confirm,
     ToggleHelp,
+    PreviewScrollUp,
+    PreviewScrollDown,
+    PreviewPageUp,
+    PreviewPageDown,
+    PreviewTop,
+    PreviewBottom,
     HelpScrollUp,
     HelpScrollDown,
     HelpPageUp,
@@ -70,42 +76,94 @@ pub fn map_key_event(key: KeyEvent, focus: Focus, mode: Mode) -> Option<Command>
             Some(Command::FocusPreview)
         }
         (_, _, KeyCode::Char('3'), modifiers) if modifiers.is_empty() => Some(Command::FocusInput),
+        (Mode::Normal | Mode::PreviewScroll, Focus::Preview, KeyCode::Up, _)
+        | (
+            Mode::Normal | Mode::PreviewScroll,
+            Focus::Preview,
+            KeyCode::Char('k'),
+            KeyModifiers::NONE,
+        ) => Some(Command::PreviewScrollUp),
+        (Mode::Normal | Mode::PreviewScroll, Focus::Preview, KeyCode::Down, _)
+        | (
+            Mode::Normal | Mode::PreviewScroll,
+            Focus::Preview,
+            KeyCode::Char('j'),
+            KeyModifiers::NONE,
+        ) => Some(Command::PreviewScrollDown),
+        (Mode::Normal | Mode::PreviewScroll, Focus::Preview, KeyCode::PageUp, _) => {
+            Some(Command::PreviewPageUp)
+        }
+        (Mode::Normal | Mode::PreviewScroll, Focus::Preview, KeyCode::PageDown, _) => {
+            Some(Command::PreviewPageDown)
+        }
+        (Mode::Normal | Mode::PreviewScroll, Focus::Preview, KeyCode::Home, _) => {
+            Some(Command::PreviewTop)
+        }
+        (Mode::Normal | Mode::PreviewScroll, Focus::Preview, KeyCode::End, _) => {
+            Some(Command::PreviewBottom)
+        }
         (_, _, KeyCode::Up, _) | (_, _, KeyCode::Char('k'), KeyModifiers::NONE) => {
             Some(Command::NavigateUp)
         }
         (_, _, KeyCode::Down, _) | (_, _, KeyCode::Char('j'), KeyModifiers::NONE) => {
             Some(Command::NavigateDown)
         }
-        (Mode::Normal, Focus::Input, KeyCode::Enter, _) => Some(Command::StartInput),
-        (Mode::Normal, _, KeyCode::Char('i'), KeyModifiers::NONE) => Some(Command::StartInput),
-        (Mode::Normal, _, KeyCode::Enter, _) => Some(Command::Select),
-        (Mode::Normal, _, KeyCode::Char('f'), KeyModifiers::NONE) => {
+        (Mode::Normal | Mode::PreviewScroll, Focus::Input, KeyCode::Enter, _) => {
+            Some(Command::StartInput)
+        }
+        (Mode::Normal | Mode::PreviewScroll, _, KeyCode::Char('i'), KeyModifiers::NONE) => {
+            Some(Command::StartInput)
+        }
+        (Mode::Normal | Mode::PreviewScroll, _, KeyCode::Enter, _) => Some(Command::Select),
+        (Mode::Normal | Mode::PreviewScroll, _, KeyCode::Char('f'), KeyModifiers::NONE) => {
             Some(Command::FocusSelectedPane)
         }
-        (Mode::Normal, _, KeyCode::Char('x'), KeyModifiers::NONE) => Some(Command::RequestKill),
-        (Mode::Normal, _, KeyCode::Char('/'), KeyModifiers::NONE) => Some(Command::Search),
-        (Mode::Normal, _, KeyCode::Char('s'), KeyModifiers::NONE) => Some(Command::FlashNavigate),
-        (Mode::Normal, _, KeyCode::Char('S'), _) => Some(Command::FlashNavigateFocus),
-        (Mode::Normal, _, KeyCode::Char('p'), KeyModifiers::NONE) => {
+        (Mode::Normal | Mode::PreviewScroll, _, KeyCode::Char('x'), KeyModifiers::NONE) => {
+            Some(Command::RequestKill)
+        }
+        (Mode::Normal | Mode::PreviewScroll, _, KeyCode::Char('/'), KeyModifiers::NONE) => {
+            Some(Command::Search)
+        }
+        (Mode::Normal | Mode::PreviewScroll, _, KeyCode::Char('s'), KeyModifiers::NONE) => {
+            Some(Command::FlashNavigate)
+        }
+        (Mode::Normal | Mode::PreviewScroll, _, KeyCode::Char('S'), _) => {
+            Some(Command::FlashNavigateFocus)
+        }
+        (Mode::Normal | Mode::PreviewScroll, _, KeyCode::Char('p'), KeyModifiers::NONE) => {
             Some(Command::TogglePullRequestDetail)
         }
-        (Mode::Normal, _, KeyCode::Char('m'), KeyModifiers::NONE) => {
+        (Mode::Normal | Mode::PreviewScroll, _, KeyCode::Char('m'), KeyModifiers::NONE) => {
             Some(Command::ToggleNotificationsMuted)
         }
-        (Mode::Normal, _, KeyCode::Char('n'), KeyModifiers::NONE) => {
+        (Mode::Normal | Mode::PreviewScroll, _, KeyCode::Char('n'), KeyModifiers::NONE) => {
             Some(Command::CycleNotificationProfile)
         }
-        (Mode::Normal, _, KeyCode::Char('O'), _) => Some(Command::OpenPullRequest),
-        (Mode::Normal, _, KeyCode::Char('Y'), _) => Some(Command::CopyPullRequestUrl),
-        (Mode::Normal, _, KeyCode::Char('R'), _) => Some(Command::RenameWindow),
-        (Mode::Normal, _, KeyCode::Char('N'), _) => Some(Command::SpawnAgent),
-        (Mode::Normal, _, KeyCode::Char('H'), _) => Some(Command::ToggleNonAgentSessions),
-        (Mode::Normal, _, KeyCode::Char('P'), _) => Some(Command::ToggleNonAgentPanes),
-        (Mode::Normal, _, KeyCode::Char('h'), KeyModifiers::NONE) => {
+        (Mode::Normal | Mode::PreviewScroll, _, KeyCode::Char('O'), _) => {
+            Some(Command::OpenPullRequest)
+        }
+        (Mode::Normal | Mode::PreviewScroll, _, KeyCode::Char('Y'), _) => {
+            Some(Command::CopyPullRequestUrl)
+        }
+        (Mode::Normal | Mode::PreviewScroll, _, KeyCode::Char('R'), _) => {
+            Some(Command::RenameWindow)
+        }
+        (Mode::Normal | Mode::PreviewScroll, _, KeyCode::Char('N'), _) => Some(Command::SpawnAgent),
+        (Mode::Normal | Mode::PreviewScroll, _, KeyCode::Char('H'), _) => {
+            Some(Command::ToggleNonAgentSessions)
+        }
+        (Mode::Normal | Mode::PreviewScroll, _, KeyCode::Char('P'), _) => {
+            Some(Command::ToggleNonAgentPanes)
+        }
+        (Mode::Normal | Mode::PreviewScroll, _, KeyCode::Char('h'), KeyModifiers::NONE) => {
             Some(Command::CycleHarnessFilter)
         }
-        (Mode::Normal, _, KeyCode::Char('o'), KeyModifiers::NONE) => Some(Command::CycleSortMode),
-        (Mode::Normal, _, KeyCode::Char('t'), KeyModifiers::NONE) => Some(Command::CycleTheme),
+        (Mode::Normal | Mode::PreviewScroll, _, KeyCode::Char('o'), KeyModifiers::NONE) => {
+            Some(Command::CycleSortMode)
+        }
+        (Mode::Normal | Mode::PreviewScroll, _, KeyCode::Char('t'), KeyModifiers::NONE) => {
+            Some(Command::CycleTheme)
+        }
         _ => None,
     }
 }
@@ -292,6 +350,41 @@ mod tests {
             map_key_event(key(KeyCode::Char('h')), Focus::Sidebar, Mode::Normal),
             Some(Command::CycleHarnessFilter)
         );
+    }
+
+    #[test]
+    fn preview_focus_maps_navigation_to_preview_scroll() {
+        assert_eq!(
+            map_key_event(key(KeyCode::Char('j')), Focus::Preview, Mode::PreviewScroll),
+            Some(Command::PreviewScrollDown)
+        );
+        assert_eq!(
+            map_key_event(key(KeyCode::Char('k')), Focus::Preview, Mode::PreviewScroll),
+            Some(Command::PreviewScrollUp)
+        );
+        assert_eq!(
+            map_key_event(key(KeyCode::PageDown), Focus::Preview, Mode::Normal),
+            Some(Command::PreviewPageDown)
+        );
+    }
+
+    #[test]
+    fn preview_scroll_mode_keeps_normal_shortcuts_available() {
+        let cases = vec![
+            (KeyCode::Char('i'), Command::StartInput),
+            (KeyCode::Enter, Command::Select),
+            (KeyCode::Char('f'), Command::FocusSelectedPane),
+            (KeyCode::Char('/'), Command::Search),
+            (KeyCode::Char('p'), Command::TogglePullRequestDetail),
+            (KeyCode::Char('m'), Command::ToggleNotificationsMuted),
+        ];
+
+        for (key_code, command) in cases {
+            assert_eq!(
+                map_key_event(key(key_code), Focus::Preview, Mode::PreviewScroll),
+                Some(command)
+            );
+        }
     }
 
     #[test]

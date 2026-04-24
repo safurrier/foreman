@@ -99,21 +99,21 @@ impl Focus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SortMode {
     #[default]
-    RecentActivity,
+    Stable,
     AttentionFirst,
 }
 
 impl SortMode {
     pub fn label(self) -> &'static str {
         match self {
-            Self::RecentActivity => "recent->status",
+            Self::Stable => "stable",
             Self::AttentionFirst => "attention->recent",
         }
     }
 
     pub fn help_label(self) -> &'static str {
         match self {
-            Self::RecentActivity => "recent first, then status",
+            Self::Stable => "stable by name",
             Self::AttentionFirst => "attention first, then recent",
         }
     }
@@ -1057,6 +1057,13 @@ impl ModalState {
         }
     }
 
+    pub fn spawn_window_with_command(session_id: SessionId, command: impl Into<String>) -> Self {
+        Self::SpawnWindow {
+            session_id,
+            draft: TextDraft::from_text(command),
+        }
+    }
+
     pub fn confirm_kill(pane_id: PaneId) -> Self {
         Self::ConfirmKill { pane_id }
     }
@@ -1083,6 +1090,7 @@ pub struct AppState {
     pub focus: Focus,
     pub mode: Mode,
     pub help_scroll: u16,
+    pub preview_scroll: u16,
     pub sidebar_scroll: usize,
     pub sidebar_viewport_rows: usize,
     pub popup_mode: bool,
@@ -1128,6 +1136,7 @@ impl Default for AppState {
             focus: Focus::default(),
             mode: Mode::default(),
             help_scroll: 0,
+            preview_scroll: 0,
             sidebar_scroll: 0,
             sidebar_viewport_rows: 0,
             popup_mode: false,
@@ -1818,11 +1827,9 @@ impl AppState {
 
 fn session_cmp(left: &Session, right: &Session, sort_mode: SortMode) -> Ordering {
     match sort_mode {
-        SortMode::RecentActivity => right
-            .recent_activity()
-            .cmp(&left.recent_activity())
-            .then_with(|| left.attention_rank().cmp(&right.attention_rank()))
-            .then_with(|| left.name.cmp(&right.name))
+        SortMode::Stable => left
+            .name
+            .cmp(&right.name)
             .then_with(|| left.id.as_str().cmp(right.id.as_str())),
         SortMode::AttentionFirst => left
             .attention_rank()
@@ -1835,11 +1842,9 @@ fn session_cmp(left: &Session, right: &Session, sort_mode: SortMode) -> Ordering
 
 fn window_cmp(left: &Window, right: &Window, sort_mode: SortMode) -> Ordering {
     match sort_mode {
-        SortMode::RecentActivity => right
-            .recent_activity()
-            .cmp(&left.recent_activity())
-            .then_with(|| left.attention_rank().cmp(&right.attention_rank()))
-            .then_with(|| left.name.cmp(&right.name))
+        SortMode::Stable => left
+            .name
+            .cmp(&right.name)
             .then_with(|| left.id.as_str().cmp(right.id.as_str())),
         SortMode::AttentionFirst => left
             .attention_rank()
@@ -1852,11 +1857,9 @@ fn window_cmp(left: &Window, right: &Window, sort_mode: SortMode) -> Ordering {
 
 fn pane_cmp(left: &Pane, right: &Pane, sort_mode: SortMode) -> Ordering {
     match sort_mode {
-        SortMode::RecentActivity => right
-            .recent_activity()
-            .cmp(&left.recent_activity())
-            .then_with(|| left.attention_rank().cmp(&right.attention_rank()))
-            .then_with(|| left.title.cmp(&right.title))
+        SortMode::Stable => left
+            .title
+            .cmp(&right.title)
             .then_with(|| left.id.as_str().cmp(right.id.as_str())),
         SortMode::AttentionFirst => left
             .attention_rank()
@@ -1978,31 +1981,31 @@ mod tests {
     }
 
     #[test]
-    fn recent_sort_uses_attention_rank_as_tiebreaker() {
+    fn stable_sort_stays_stable_across_status_changes() {
         let inventory = inventory([SessionBuilder::new("alpha").window(
             WindowBuilder::new("alpha:0")
                 .name("agents")
                 .pane(
-                    PaneBuilder::agent("alpha:error", HarnessKind::ClaudeCode)
-                        .title("error")
+                    PaneBuilder::agent("alpha:zeta", HarnessKind::ClaudeCode)
+                        .title("zeta")
                         .status(AgentStatus::Error)
-                        .activity_score(10),
+                        .activity_score(100),
                 )
                 .pane(
-                    PaneBuilder::agent("alpha:idle", HarnessKind::ClaudeCode)
-                        .title("idle")
+                    PaneBuilder::agent("alpha:alpha", HarnessKind::ClaudeCode)
+                        .title("alpha")
                         .status(AgentStatus::Idle)
-                        .activity_score(10),
+                        .activity_score(1),
                 ),
         )]);
 
         let window = inventory
             .window(&"alpha:0".into())
             .expect("window should exist");
-        let panes = window.visible_panes(&Default::default(), SortMode::RecentActivity);
+        let panes = window.visible_panes(&Default::default(), SortMode::Stable);
 
-        assert_eq!(panes[0].id.as_str(), "alpha:error");
-        assert_eq!(panes[1].id.as_str(), "alpha:idle");
+        assert_eq!(panes[0].id.as_str(), "alpha:alpha");
+        assert_eq!(panes[1].id.as_str(), "alpha:zeta");
     }
 
     #[test]
