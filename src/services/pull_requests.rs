@@ -2,7 +2,11 @@ use serde::Deserialize;
 use std::fmt;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Output, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
+
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PullRequestStatus {
@@ -48,6 +52,7 @@ pub enum PullRequestError {
     Io(std::io::Error),
     Unavailable(String),
     CommandFailed { command: String, stderr: String },
+    CommandTimedOut { command: String, timeout_ms: u128 },
     Parse(String),
 }
 
@@ -57,6 +62,10 @@ impl fmt::Display for PullRequestError {
             Self::Io(error) => write!(f, "{error}"),
             Self::Unavailable(message) => write!(f, "{message}"),
             Self::CommandFailed { command, stderr } => write!(f, "{command}: {stderr}"),
+            Self::CommandTimedOut {
+                command,
+                timeout_ms,
+            } => write!(f, "{command}: timed out after {timeout_ms} ms"),
             Self::Parse(message) => write!(f, "{message}"),
         }
     }
@@ -283,13 +292,15 @@ fn run_command(
     }
     scrub_repo_context(&mut command);
 
-    let output = command.output()?;
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let rendered = render_command(program, args);
+    let output = wait_with_timeout(command.spawn()?, rendered.clone(), COMMAND_TIMEOUT)?;
     if output.status.success() {
         return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
     }
 
     Err(PullRequestError::CommandFailed {
-        command: render_command(program, args),
+        command: rendered,
         stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
     })
 }
@@ -322,16 +333,26 @@ fn run_fallback_commands(
             command.current_dir(current_dir);
         }
 
-        match command.output() {
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        let rendered = render_command(candidate.program, candidate.args);
+        let child = match command.spawn() {
+            Ok(child) => child,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                last_error = Some(PullRequestError::Io(error));
+                continue;
+            }
+        };
+
+        match wait_with_timeout(child, rendered.clone(), COMMAND_TIMEOUT) {
             Ok(output) if output.status.success() => return Ok(()),
             Ok(output) => {
                 last_error = Some(PullRequestError::CommandFailed {
-                    command: render_command(candidate.program, candidate.args),
+                    command: rendered,
                     stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
                 });
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => last_error = Some(PullRequestError::Io(error)),
+            Err(error) => last_error = Some(error),
         }
     }
 
@@ -351,6 +372,7 @@ fn run_fallback_commands_with_input(
         let mut command = Command::new(candidate.program);
         command.args(candidate.args);
         command.stdin(Stdio::piped());
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
         if let Some(current_dir) = current_dir {
             command.current_dir(current_dir);
         }
@@ -368,21 +390,46 @@ fn run_fallback_commands_with_input(
             stdin.write_all(input.as_bytes())?;
         }
 
-        match child.wait_with_output() {
+        let rendered = render_command(candidate.program, candidate.args);
+        match wait_with_timeout(child, rendered.clone(), COMMAND_TIMEOUT) {
             Ok(output) if output.status.success() => return Ok(()),
             Ok(output) => {
                 last_error = Some(PullRequestError::CommandFailed {
-                    command: render_command(candidate.program, candidate.args),
+                    command: rendered,
                     stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
                 });
             }
-            Err(error) => last_error = Some(PullRequestError::Io(error)),
+            Err(error) => last_error = Some(error),
         }
     }
 
     Err(last_error.unwrap_or_else(|| {
         PullRequestError::Unavailable("no clipboard backend is available".to_string())
     }))
+}
+
+fn wait_with_timeout(
+    mut child: Child,
+    command: String,
+    timeout: Duration,
+) -> Result<Output, PullRequestError> {
+    let started = Instant::now();
+    loop {
+        if child.try_wait()?.is_some() {
+            return child.wait_with_output().map_err(PullRequestError::Io);
+        }
+
+        if started.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(PullRequestError::CommandTimedOut {
+                command,
+                timeout_ms: timeout.as_millis(),
+            });
+        }
+
+        thread::sleep(Duration::from_millis(10));
+    }
 }
 
 fn render_command(program: &str, args: &[&str]) -> String {
@@ -417,12 +464,14 @@ fn is_unavailable_pull_request_message(message: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        PullRequestBackend, PullRequestData, PullRequestLookup, PullRequestService,
-        PullRequestStatus, SystemPullRequestBackend,
+        wait_with_timeout, PullRequestBackend, PullRequestData, PullRequestError,
+        PullRequestLookup, PullRequestService, PullRequestStatus, SystemPullRequestBackend,
     };
     use std::cell::RefCell;
     use std::path::{Path, PathBuf};
+    use std::process::{Command, Stdio};
     use std::rc::Rc;
+    use std::time::Duration;
     use tempfile::Builder;
 
     #[derive(Debug, Clone)]
@@ -537,5 +586,20 @@ mod tests {
             .expect("non-repository paths should fail soft");
 
         assert_eq!(lookup, PullRequestLookup::Missing);
+    }
+
+    #[test]
+    fn command_wait_times_out_slow_processes() {
+        let mut command = Command::new("sh");
+        command
+            .args(["-c", "sleep 1"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let child = command.spawn().expect("sleep command should spawn");
+
+        let error = wait_with_timeout(child, "sh -c sleep 1".to_string(), Duration::from_millis(1))
+            .expect_err("slow command should time out");
+
+        assert!(matches!(error, PullRequestError::CommandTimedOut { .. }));
     }
 }

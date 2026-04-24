@@ -35,6 +35,7 @@ const WORKING_STATUS_DEBOUNCE_POLLS: u8 = 2;
 const SHELL_COMMANDS: &[&str] = &[
     "ash", "bash", "csh", "dash", "fish", "ksh", "nu", "pwsh", "sh", "tcsh", "xonsh", "zsh",
 ];
+const EDITOR_COMMANDS: &[&str] = &["emacs", "hx", "nano", "nvim", "vi", "vim"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CompatibilityObservation<'a> {
@@ -188,7 +189,7 @@ pub fn recognize_harness(
         return None;
     }
 
-    if is_shell_surface(observation) {
+    if is_shell_surface(observation) || is_editor_surface(observation) {
         return None;
     }
 
@@ -313,6 +314,11 @@ fn is_shell_surface(observation: CompatibilityObservation<'_>) -> bool {
         .is_some_and(|command| SHELL_COMMANDS.contains(&command))
 }
 
+fn is_editor_surface(observation: CompatibilityObservation<'_>) -> bool {
+    foreground_command_basename(observation.current_command)
+        .is_some_and(|command| EDITOR_COMMANDS.contains(&command))
+}
+
 fn foreground_command_basename(current_command: Option<&str>) -> Option<&str> {
     current_command
         .and_then(|command| command.split_whitespace().next())
@@ -430,6 +436,22 @@ mod tests {
     }
 
     #[test]
+    fn returns_none_for_editor_panes_with_stale_harness_breadcrumbs() {
+        assert_eq!(
+            recognize_harness(Some("nvim"), "notes", "Claude Code ready for the next task",),
+            None
+        );
+        assert_eq!(
+            recognize_harness(
+                Some("/usr/bin/vim"),
+                "scratch",
+                "Codex CLI waiting for your input",
+            ),
+            None
+        );
+    }
+
+    #[test]
     fn compatibility_snapshot_maps_supported_harness_statuses() {
         let claude = compatibility_snapshot(observation(
             Some("claude"),
@@ -479,6 +501,16 @@ mod tests {
         assert!(compatibility_snapshot(observation(
             Some("zsh"),
             "claude",
+            "Claude Code is thinking about the next patch",
+        ))
+        .is_none());
+    }
+
+    #[test]
+    fn compatibility_snapshot_drops_editor_panes_with_stale_harness_text() {
+        assert!(compatibility_snapshot(observation(
+            Some("nvim"),
+            "notes",
             "Claude Code is thinking about the next patch",
         ))
         .is_none());

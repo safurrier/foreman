@@ -319,7 +319,7 @@ fn interactive_binary_footer_tracks_focus_and_help_explains_provenance() {
 
     fixture.send_keys(&dashboard_pane, &["2"]);
     fixture.wait_for_alt_capture(&dashboard_pane, "Keys • Details");
-    fixture.wait_for_alt_capture(&dashboard_pane, "Details: inspect target pane");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Details: j/k scroll");
 
     fixture.send_keys(&dashboard_pane, &["3"]);
     fixture.wait_for_alt_capture(&dashboard_pane, "Keys • Compose");
@@ -559,6 +559,7 @@ fn interactive_binary_popup_focus_action_switches_cross_session_target() {
     fixture.resize_window("dashboard", 180, 48);
 
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
+    fixture.wait_for_alt_capture(&dashboard_pane, "▾ beta");
     fixture.send_keys(&dashboard_pane, &["/"]);
     send_text(&fixture, &dashboard_pane, "beta");
     fixture.send_keys(&dashboard_pane, &["Enter"]);
