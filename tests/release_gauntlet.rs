@@ -145,7 +145,7 @@ fn release_startup_navigation_gauntlet_proves_discovery_filters_and_help() {
     harness.fixture().send_keys(&dashboard, &["j"]);
     harness
         .fixture()
-        .wait_for_alt_capture(&dashboard, "Target pane:");
+        .wait_for_alt_capture(&dashboard, "Target: ✦ alphawork");
     harness.fixture().send_keys(&dashboard, &["f"]);
     harness
         .fixture()
@@ -534,7 +534,7 @@ active_profile = "all"
         .wait_for_alt_capture(&dashboard, "claudesess");
     harness
         .fixture()
-        .wait_for_alt_capture(&dashboard, "Target pane: ~ ✦ alphawork");
+        .wait_for_alt_capture(&dashboard, "Target: ✦ alphawork");
     harness.wait_for_log_contains("run_started");
     harness.wait_for_log_contains("pull_request_lookup workspace=");
     harness
