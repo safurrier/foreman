@@ -262,6 +262,28 @@ impl LogVerbosity {
     }
 }
 
+#[derive(Debug, Serialize)]
+struct DefaultConfigTemplate {
+    monitoring: MonitoringConfig,
+    notifications: NotificationConfig,
+    logging: LoggingConfig,
+    pull_requests: PullRequestConfig,
+    integrations: IntegrationConfig,
+}
+
+impl Default for DefaultConfigTemplate {
+    fn default() -> Self {
+        let config = AppConfig::default();
+        Self {
+            monitoring: config.monitoring,
+            notifications: config.notifications,
+            logging: config.logging,
+            pull_requests: config.pull_requests,
+            integrations: config.integrations,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeConfig {
     pub config_file: PathBuf,
@@ -425,7 +447,8 @@ pub fn write_default_config(path: &Path) -> Result<(), ConfigError> {
 }
 
 pub fn default_config_toml() -> String {
-    toml::to_string_pretty(&AppConfig::default()).expect("default config should serialize")
+    toml::to_string_pretty(&DefaultConfigTemplate::default())
+        .expect("default config should serialize")
 }
 
 pub fn default_claude_native_dir(log_dir: &Path) -> PathBuf {
@@ -499,10 +522,10 @@ fn resolve_log_dir(env: &PathEnvironment) -> Result<PathBuf, ConfigError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        default_claude_native_dir, default_codex_native_dir, default_pi_native_dir, load_config,
-        resolve_paths_with_env, write_default_config, AppConfig, ConfigError,
-        IntegrationPreference, LoggingConfig, NotificationBackendName, NotificationConfig,
-        PathEnvironment, PullRequestConfig, RuntimeConfig, UiConfig,
+        default_claude_native_dir, default_codex_native_dir, default_config_toml,
+        default_pi_native_dir, load_config, resolve_paths_with_env, write_default_config,
+        AppConfig, ConfigError, IntegrationPreference, LoggingConfig, NotificationBackendName,
+        NotificationConfig, PathEnvironment, PullRequestConfig, RuntimeConfig, UiConfig,
         DEFAULT_NOTIFICATION_COOLDOWN_TICKS, DEFAULT_STARTUP_CACHE_MAX_AGE_MS,
     };
     use crate::app::{NotificationProfile, SortMode};
@@ -572,7 +595,13 @@ mod tests {
         assert_eq!(parsed.logging, LoggingConfig::default());
         assert_eq!(parsed.notifications, NotificationConfig::default());
         assert_eq!(parsed.pull_requests, PullRequestConfig::default());
+        let contents = std::fs::read_to_string(&config_path).expect("config should be readable");
+        assert!(!contents.contains("[ui]"));
+
         assert_eq!(parsed.ui, UiConfig::default());
+        let loaded = load_config(&config_path).expect("config should load");
+        assert!(!loaded.ui_sources.theme);
+        assert!(!loaded.ui_sources.default_sort);
         assert_eq!(
             parsed.integrations.claude_code.mode,
             IntegrationPreference::Auto
@@ -582,6 +611,16 @@ mod tests {
             IntegrationPreference::Auto
         );
         assert_eq!(parsed.integrations.pi.mode, IntegrationPreference::Auto);
+    }
+
+    #[test]
+    fn default_config_toml_leaves_ui_preferences_unconfigured() {
+        let contents = default_config_toml();
+
+        assert!(!contents.contains("[ui]"));
+
+        let parsed: AppConfig = toml::from_str(&contents).expect("default config should parse");
+        assert_eq!(parsed.ui, UiConfig::default());
     }
 
     #[test]

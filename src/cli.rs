@@ -268,6 +268,7 @@ pub(crate) struct PreparedBootstrap {
     pub pi_native: PiNativeOverlaySummary,
     pub startup_cache_generated_at_ms: Option<u64>,
     pub pending_selection_restore: Option<SelectionTarget>,
+    pub persistent_runtime_diagnostics: Vec<DoctorFinding>,
 }
 
 impl PreparedBootstrap {
@@ -793,6 +794,9 @@ pub(crate) fn prepare_bootstrap(
             .map_err(ConfigError::Io)?;
     }
 
+    let persistent_runtime_diagnostics =
+        ui_preferences_error_diagnostics(&runtime, ui_preferences_error.as_deref());
+
     Ok(PreparedBootstrap {
         runtime,
         logger,
@@ -802,6 +806,7 @@ pub(crate) fn prepare_bootstrap(
         pi_native,
         startup_cache_generated_at_ms: None,
         pending_selection_restore: ui_preferences.selection.clone(),
+        persistent_runtime_diagnostics,
     })
 }
 
@@ -947,6 +952,9 @@ fn prepare_runtime_bootstrap(
     apply_runtime_state_defaults(&mut state, &runtime, &ui_preferences);
     apply_ui_preferences_error_to_state(&mut state, &runtime, ui_preferences_error.as_deref());
 
+    let persistent_runtime_diagnostics =
+        ui_preferences_error_diagnostics(&runtime, ui_preferences_error.as_deref());
+
     Ok(PreparedBootstrap {
         runtime,
         logger,
@@ -956,6 +964,7 @@ fn prepare_runtime_bootstrap(
         pi_native: PiNativeOverlaySummary::default(),
         startup_cache_generated_at_ms,
         pending_selection_restore: ui_preferences.selection.clone(),
+        persistent_runtime_diagnostics,
     })
 }
 
@@ -1022,27 +1031,36 @@ fn apply_ui_preferences_error_to_state(
     runtime: &RuntimeConfig,
     error: Option<&str>,
 ) {
-    let Some(error) = error else {
+    let diagnostics = ui_preferences_error_diagnostics(runtime, error);
+    let Some(finding) = diagnostics.first() else {
         return;
+    };
+    state.operator_alert = Some(OperatorAlert::new(
+        OperatorAlertSource::Diagnostics,
+        OperatorAlertLevel::Warn,
+        finding.summary.clone(),
+    ));
+    state.runtime_diagnostics.extend(diagnostics);
+}
+
+fn ui_preferences_error_diagnostics(
+    runtime: &RuntimeConfig,
+    error: Option<&str>,
+) -> Vec<DoctorFinding> {
+    let Some(error) = error else {
+        return Vec::new();
     };
     let message = format!(
         "UI preferences at {} could not be loaded: {error}",
         runtime.ui_preferences_file.display()
     );
-    state.operator_alert = Some(OperatorAlert::new(
-        OperatorAlertSource::Diagnostics,
-        OperatorAlertLevel::Warn,
-        message.clone(),
-    ));
-    state.runtime_diagnostics.push(
-        DoctorFinding::new(
-            "ui-preferences-load-failed",
-            DoctorSeverity::Warn,
-            DoctorArea::Runtime,
-            message,
-        )
-        .with_next_step("Run foreman --reset-ui-state to remove the persisted UI state file"),
-    );
+    vec![DoctorFinding::new(
+        "ui-preferences-load-failed",
+        DoctorSeverity::Warn,
+        DoctorArea::Runtime,
+        message,
+    )
+    .with_next_step("Run foreman --reset-ui-state to remove the persisted UI state file")]
 }
 
 fn start_run_logger(runtime: &RuntimeConfig) -> Result<RunLogger, ConfigError> {
@@ -1375,6 +1393,71 @@ default_sort = "attention-recent"
             Some(SelectionTarget::Pane("alpha:claude".into()))
         );
         assert!(prepared.startup_cache_generated_at_ms.is_some());
+    }
+
+    #[test]
+    fn generated_default_config_allows_persisted_theme_and_sort() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let config_file = temp_dir.path().join("config.toml");
+        let log_dir = temp_dir.path().join("logs");
+        crate::config::write_default_config(&config_file).expect("config should be written");
+        let cli = Cli::parse_from([
+            "foreman",
+            "--popup",
+            "--config-file",
+            config_file.to_str().expect("utf-8 path"),
+            "--log-dir",
+            log_dir.to_str().expect("utf-8 path"),
+        ]);
+        let paths =
+            resolve_paths(Some(&config_file), Some(&log_dir)).expect("paths should resolve");
+        save_ui_preferences(
+            &paths.ui_preferences_file,
+            &PersistedUiPreferences {
+                sort_mode: Some(SortMode::AttentionFirst),
+                theme: Some(ThemeName::Dracula),
+                ..PersistedUiPreferences::default()
+            },
+        )
+        .expect("ui preferences should save");
+
+        let prepared = prepare_runtime_bootstrap(&cli, paths).expect("bootstrap should succeed");
+
+        assert_eq!(prepared.runtime.theme, ThemeName::Dracula);
+        assert_eq!(prepared.state.sort_mode, SortMode::AttentionFirst);
+    }
+
+    #[test]
+    fn invalid_ui_state_adds_persistent_runtime_diagnostic() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let config_file = temp_dir.path().join("config.toml");
+        let log_dir = temp_dir.path().join("logs");
+        let cli = Cli::parse_from([
+            "foreman",
+            "--popup",
+            "--config-file",
+            config_file.to_str().expect("utf-8 path"),
+            "--log-dir",
+            log_dir.to_str().expect("utf-8 path"),
+        ]);
+        let paths =
+            resolve_paths(Some(&config_file), Some(&log_dir)).expect("paths should resolve");
+        std::fs::create_dir_all(paths.ui_preferences_file.parent().expect("parent exists"))
+            .expect("ui state parent should exist");
+        std::fs::write(&paths.ui_preferences_file, "{invalid-json")
+            .expect("ui state should be writable");
+
+        let prepared = prepare_runtime_bootstrap(&cli, paths).expect("bootstrap should succeed");
+
+        assert!(prepared
+            .persistent_runtime_diagnostics
+            .iter()
+            .any(|finding| finding.id == "ui-preferences-load-failed"));
+        assert!(prepared
+            .state
+            .runtime_diagnostics
+            .iter()
+            .any(|finding| finding.id == "ui-preferences-load-failed"));
     }
 
     #[test]
