@@ -37,6 +37,7 @@ pub enum Command {
     FlashNavigate,
     FlashNavigateFocus,
     TogglePullRequestDetail,
+    RefreshPullRequest,
     OpenPullRequest,
     CopyPullRequestUrl,
     ToggleNotificationsMuted,
@@ -57,7 +58,11 @@ pub fn map_key_event(key: KeyEvent, focus: Focus, mode: Mode) -> Option<Command>
     }
 
     if key.code == KeyCode::Esc {
-        return Some(Command::Cancel);
+        return Some(if mode == Mode::Normal {
+            Command::Quit
+        } else {
+            Command::Cancel
+        });
     }
 
     if let Some(command) = map_modal_key_event(key, mode) {
@@ -132,6 +137,9 @@ pub fn map_key_event(key: KeyEvent, focus: Focus, mode: Mode) -> Option<Command>
         }
         (Mode::Normal | Mode::PreviewScroll, _, KeyCode::Char('p'), KeyModifiers::NONE) => {
             Some(Command::TogglePullRequestDetail)
+        }
+        (Mode::Normal | Mode::PreviewScroll, _, KeyCode::Char('r'), KeyModifiers::CONTROL) => {
+            Some(Command::RefreshPullRequest)
         }
         (Mode::Normal | Mode::PreviewScroll, _, KeyCode::Char('m'), KeyModifiers::NONE) => {
             Some(Command::ToggleNotificationsMuted)
@@ -277,6 +285,26 @@ mod tests {
     }
 
     #[test]
+    fn esc_quits_only_from_normal_mode() {
+        assert_eq!(
+            map_key_event(key(KeyCode::Esc), Focus::Sidebar, Mode::Normal),
+            Some(Command::Quit)
+        );
+        assert_eq!(
+            map_key_event(key(KeyCode::Esc), Focus::Input, Mode::Input),
+            Some(Command::Cancel)
+        );
+        assert_eq!(
+            map_key_event(key(KeyCode::Esc), Focus::Preview, Mode::PreviewScroll),
+            Some(Command::Cancel)
+        );
+        assert_eq!(
+            map_key_event(key(KeyCode::Esc), Focus::Sidebar, Mode::Search),
+            Some(Command::Cancel)
+        );
+    }
+
+    #[test]
     fn input_mode_does_not_steal_regular_typing() {
         assert_eq!(
             map_key_event(key(KeyCode::Char('q')), Focus::Input, Mode::Input),
@@ -385,6 +413,14 @@ mod tests {
                 Some(command)
             );
         }
+        assert_eq!(
+            map_key_event(
+                ctrl_key(KeyCode::Char('r')),
+                Focus::Preview,
+                Mode::PreviewScroll
+            ),
+            Some(Command::RefreshPullRequest)
+        );
     }
 
     #[test]
@@ -519,12 +555,6 @@ mod tests {
     fn advertised_normal_mode_keybinds_map_to_expected_commands() {
         let cases = vec![
             (
-                key(KeyCode::Esc),
-                Focus::Sidebar,
-                Mode::Normal,
-                Command::Cancel,
-            ),
-            (
                 key(KeyCode::Tab),
                 Focus::Sidebar,
                 Mode::Normal,
@@ -544,6 +574,12 @@ mod tests {
             ),
             (
                 key(KeyCode::Char('q')),
+                Focus::Sidebar,
+                Mode::Normal,
+                Command::Quit,
+            ),
+            (
+                key(KeyCode::Esc),
                 Focus::Sidebar,
                 Mode::Normal,
                 Command::Quit,
@@ -649,6 +685,12 @@ mod tests {
                 Focus::Sidebar,
                 Mode::Normal,
                 Command::TogglePullRequestDetail,
+            ),
+            (
+                ctrl_key(KeyCode::Char('r')),
+                Focus::Sidebar,
+                Mode::Normal,
+                Command::RefreshPullRequest,
             ),
             (
                 key(KeyCode::Char('m')),

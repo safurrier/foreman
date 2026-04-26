@@ -491,26 +491,60 @@ fn sidebar_placeholder_text(state: &AppState, theme: &Theme) -> Option<Text<'sta
 
     let visible_entries = state.visible_target_entries();
     if visible_entries.is_empty() {
-        return Some(if state.mode == Mode::Search {
-            Text::from(vec![
-                plain_line("No matches."),
-                muted_line("Esc restores the previous selection.", theme),
-            ])
-        } else if state.startup_loading {
-            Text::from(vec![
-                section_line("Loading tmux inventory", theme),
-                plain_line(""),
-                muted_line(
-                    "Foreman is drawing immediately and backfilling sessions, panes, and previews in the background.",
-                    theme,
-                ),
-            ])
-        } else {
-            Text::from(vec![plain_line("No panes discovered yet.")])
-        });
+        return Some(empty_sidebar_text(state, theme));
     }
 
     None
+}
+
+fn empty_sidebar_text(state: &AppState, theme: &Theme) -> Text<'static> {
+    if state.mode == Mode::Search {
+        return Text::from(vec![
+            section_line("No search matches", theme),
+            muted_line(
+                "Edit the query, or Esc to restore the previous selection.",
+                theme,
+            ),
+        ]);
+    }
+
+    if state.startup_loading {
+        return Text::from(vec![
+            section_line("Loading tmux inventory", theme),
+            muted_line(
+                "Foreman is drawing immediately and backfilling sessions, panes, and previews in the background.",
+                theme,
+            ),
+            muted_line("If this persists, run foreman --doctor.", theme),
+        ]);
+    }
+
+    if state.inventory.pane_count() > 0 {
+        return Text::from(vec![
+            section_line("No visible agents", theme),
+            muted_line(
+                format!(
+                    "Current view is {} with {} filters.",
+                    state.sort_label(),
+                    state.filter_label()
+                ),
+                theme,
+            ),
+            muted_line(
+                "Try h to cycle harnesses, H to show sessions, or P to show panes.",
+                theme,
+            ),
+        ]);
+    }
+
+    Text::from(vec![
+        section_line("No tmux panes discovered", theme),
+        muted_line("Start an agent in tmux, then refresh Foreman.", theme),
+        muted_line(
+            "Next: run foreman --doctor for setup and hook diagnostics.",
+            theme,
+        ),
+    ])
 }
 
 fn sidebar_line(state: &AppState, theme: &Theme, entry: &VisibleTargetEntry) -> Line<'static> {
@@ -656,6 +690,10 @@ fn preview_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Tex
                 section_line("tmux unavailable", theme),
                 plain_line(""),
                 plain_line(error.clone()),
+                muted_line(
+                    "Next: start tmux, check $TMUX, or run foreman --doctor.",
+                    theme,
+                ),
             ]);
         }
     }
@@ -670,6 +708,10 @@ fn preview_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Tex
             ),
             muted_line(
                 "Visible and selected previews are captured first after the initial paint.",
+                theme,
+            ),
+            muted_line(
+                "Next: wait for refresh, or run foreman --doctor if this stays empty.",
                 theme,
             ),
         ]);
@@ -697,6 +739,9 @@ fn preview_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Tex
             "Cached snapshot: {}",
             humanize_age_ms(age_ms)
         )));
+        if let Some(path) = &state.startup_cache_path {
+            lines.push(muted_line(format!("Cache file: {}", path.display()), theme));
+        }
         lines.push(muted_line(
             if state.startup_loading {
                 "Showing the last snapshot while live tmux inventory refreshes in the background."
@@ -708,13 +753,63 @@ fn preview_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Tex
         lines.push(plain_line(""));
     }
 
+    let recent_event_lines = recent_event_lines(state, theme);
+    if !recent_event_lines.is_empty() {
+        lines.extend(recent_event_lines);
+        lines.push(plain_line(""));
+    }
+
+    let summary_lines = selected_target_summary_lines(state, theme, layout_mode);
+    if !summary_lines.is_empty() {
+        lines.extend(summary_lines);
+        lines.push(plain_line(""));
+    }
+
+    let setup_lines = diagnostic_lines(state, theme);
+    if !setup_lines.is_empty() {
+        lines.push(plain_line(""));
+        lines.extend(setup_lines);
+    }
+
+    lines.push(plain_line(match activity_digest_label(state) {
+        Some(activity) => format!(
+            "View: {} {} {} {} {}",
+            state.sort_label(),
+            theme.glyphs.separator,
+            state.filter_label(),
+            theme.glyphs.separator,
+            activity
+        ),
+        None => format!(
+            "View: {} {} {}",
+            state.sort_label(),
+            theme.glyphs.separator,
+            state.filter_label()
+        ),
+    }));
+    lines.push(plain_line(format!(
+        "Notifications: {}",
+        if state.notifications.muted {
+            "muted".to_string()
+        } else {
+            state.notifications.profile.label().to_ascii_lowercase()
+        }
+    )));
+    if let Some(status) = &state.notifications.last_status {
+        lines.push(plain_line(format!("Notice: {status}")));
+    }
+    lines.push(plain_line(format!(
+        "PR panel: {}",
+        state.selected_pull_request_panel_label()
+    )));
+
+    lines.extend(pull_request_lines(state, theme));
+
     match state.selection.as_ref() {
         Some(SelectionTarget::Pane(pane_id)) => {
             if let Some(pane) = state.inventory.pane(pane_id) {
                 let status = pane.agent.as_ref().map(|agent| agent.status);
-                if let Some(breadcrumb) = state.selection_breadcrumb() {
-                    lines.push(Line::from(vec![Span::styled(breadcrumb, theme.emphasis)]));
-                }
+                lines.push(section_line("Pane details", theme));
                 lines.push(Line::from(vec![
                     Span::styled(
                         format!("{} ", status_symbol(theme, status, pane.is_agent())),
@@ -733,19 +828,13 @@ fn preview_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Tex
                 lines.push(status_source_line(theme, pane));
                 lines.push(preview_source_line(theme, pane));
                 lines.push(plain_line(format!("Pane title: {}", pane.title)));
-                lines.push(muted_line(
-                    "f jumps tmux here. i composes here. x kill.",
-                    theme,
-                ));
             } else {
                 lines.push(plain_line("Selected pane is no longer available."));
             }
         }
         Some(SelectionTarget::Window(window_id)) => {
             if let Some(window) = state.inventory.window(window_id) {
-                if let Some(breadcrumb) = state.selection_breadcrumb() {
-                    lines.push(Line::from(vec![Span::styled(breadcrumb, theme.emphasis)]));
-                }
+                lines.push(section_line("Window details", theme));
                 let cached_visible_panes =
                     state
                         .selected_visible_entry()
@@ -764,19 +853,13 @@ fn preview_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Tex
                         .len())
                 )));
                 lines.extend(actionable_target_lines(state, theme));
-                lines.push(muted_line(
-                    "Enter or f jumps tmux to the target pane. i composes there.",
-                    theme,
-                ));
             } else {
                 lines.push(plain_line("Selected window is no longer available."));
             }
         }
         Some(SelectionTarget::Session(session_id)) => {
             if let Some(session) = state.inventory.session(session_id) {
-                if let Some(breadcrumb) = state.selection_breadcrumb() {
-                    lines.push(Line::from(vec![Span::styled(breadcrumb, theme.emphasis)]));
-                }
+                lines.push(section_line("Session details", theme));
                 let cached_counts =
                     state
                         .selected_visible_entry()
@@ -812,10 +895,6 @@ fn preview_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Tex
                     })
                 )));
                 lines.extend(actionable_target_lines(state, theme));
-                lines.push(muted_line(
-                    "Enter collapses. f jumps tmux to the target pane. i composes there.",
-                    theme,
-                ));
             } else {
                 lines.push(plain_line("Selected session is no longer available."));
             }
@@ -826,43 +905,6 @@ fn preview_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Tex
             ));
         }
     }
-
-    if let Some(workspace_path) = state.selected_workspace_path() {
-        lines.push(plain_line(format!(
-            "Workspace: {}",
-            workspace_path.display()
-        )));
-    }
-
-    let setup_lines = diagnostic_lines(state, theme);
-    if !setup_lines.is_empty() {
-        lines.push(plain_line(""));
-        lines.extend(setup_lines);
-    }
-
-    lines.push(plain_line(format!(
-        "View: {} {} {}",
-        state.sort_label(),
-        theme.glyphs.separator,
-        state.filter_label()
-    )));
-    lines.push(plain_line(format!(
-        "Notifications: {}",
-        if state.notifications.muted {
-            "muted".to_string()
-        } else {
-            state.notifications.profile.label().to_ascii_lowercase()
-        }
-    )));
-    if let Some(status) = &state.notifications.last_status {
-        lines.push(plain_line(format!("Notice: {status}")));
-    }
-    lines.push(plain_line(format!(
-        "PR panel: {}",
-        state.selected_pull_request_panel_label()
-    )));
-
-    lines.extend(pull_request_lines(state, theme));
 
     if let Some(SelectionTarget::Pane(pane_id)) = state.selection.as_ref() {
         if let Some(pane) = state.inventory.pane(pane_id) {
@@ -1179,10 +1221,26 @@ fn help_hint_line(
 fn pull_request_lines(state: &AppState, theme: &Theme) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
 
+    if state.selected_pull_request_refreshing() {
+        lines.push(muted_line(
+            "PR: refreshing now; results update when the lookup finishes.",
+            theme,
+        ));
+    }
+
     match state.selected_pull_request_lookup() {
-        Some(PullRequestLookup::Unknown) => lines.push(plain_line("PR: checking")),
-        Some(PullRequestLookup::Missing) => lines.push(plain_line("PR: no open pull request")),
-        Some(PullRequestLookup::Unavailable { .. }) => lines.push(plain_line("PR: unavailable")),
+        Some(PullRequestLookup::Unknown) => lines.push(muted_line(
+            "PR: checking in the background; detail opens when a branch match is found.",
+            theme,
+        )),
+        Some(PullRequestLookup::Missing) => lines.push(muted_line(
+            "PR: no open pull request for this workspace.",
+            theme,
+        )),
+        Some(PullRequestLookup::Unavailable { message }) => {
+            lines.push(plain_line("PR: unavailable"));
+            lines.push(muted_line(format!("Reason: {message}"), theme));
+        }
         Some(PullRequestLookup::Available(pull_request)) => {
             lines.push(Line::from(vec![
                 Span::styled(
@@ -1213,6 +1271,61 @@ fn pull_request_lines(state: &AppState, theme: &Theme) -> Vec<Line<'static>> {
     }
 
     lines
+}
+
+fn activity_digest_label(state: &AppState) -> Option<String> {
+    let mut total = 0usize;
+    let mut working = 0usize;
+    let mut attention = 0usize;
+    let mut idle = 0usize;
+    let mut error = 0usize;
+    let mut native = 0usize;
+    let mut compatibility = 0usize;
+
+    for session in &state.inventory.sessions {
+        for window in session.visible_windows(&state.filters, state.sort_mode) {
+            for pane in window.visible_panes(&state.filters, state.sort_mode) {
+                let Some(agent) = pane.agent.as_ref() else {
+                    continue;
+                };
+                total += 1;
+                match agent.status {
+                    AgentStatus::Working => working += 1,
+                    AgentStatus::NeedsAttention => attention += 1,
+                    AgentStatus::Idle => idle += 1,
+                    AgentStatus::Error => error += 1,
+                    AgentStatus::Unknown => {}
+                }
+                match agent.integration_mode {
+                    crate::app::IntegrationMode::Native => native += 1,
+                    crate::app::IntegrationMode::Compatibility => compatibility += 1,
+                }
+            }
+        }
+    }
+
+    (total > 0).then(|| {
+        format!("Act {total}: {working}w/{attention}a/{error}e/{idle}i {native}N/{compatibility}C")
+    })
+}
+
+fn recent_event_lines(state: &AppState, theme: &Theme) -> Vec<Line<'static>> {
+    let mut events = Vec::new();
+    if let Some(status) = &state.notifications.last_status {
+        events.push(format!("notify: {status}"));
+    }
+    if state.selected_pull_request_refreshing() {
+        events.push("PR refresh in progress".to_string());
+    }
+
+    if events.is_empty() {
+        return Vec::new();
+    }
+
+    vec![Line::from(vec![
+        Span::styled("Recent: ", theme.muted),
+        Span::styled(events.join(" · "), theme.base),
+    ])]
 }
 
 fn diagnostic_lines(state: &AppState, theme: &Theme) -> Vec<Line<'static>> {
@@ -1363,6 +1476,83 @@ fn render_harness_marks(theme: &Theme, summary: &SidebarHarnessSummary) -> Strin
     marks.concat()
 }
 
+fn selected_target_summary_lines(
+    state: &AppState,
+    theme: &Theme,
+    layout_mode: LayoutMode,
+) -> Vec<Line<'static>> {
+    let Some(selection) = state.selection.as_ref() else {
+        return Vec::new();
+    };
+
+    let mut lines = vec![section_line("Selected", theme)];
+    let selection_label = state
+        .selection_breadcrumb()
+        .unwrap_or_else(|| match selection {
+            SelectionTarget::Session(session_id) => format!("session {}", session_id.as_str()),
+            SelectionTarget::Window(window_id) => format!("window {}", window_id.as_str()),
+            SelectionTarget::Pane(pane_id) => format!("pane {}", pane_id.as_str()),
+        });
+    lines.push(Line::from(vec![Span::styled(
+        selection_label,
+        theme.emphasis,
+    )]));
+
+    let Some(pane) = state.selected_actionable_pane() else {
+        lines.push(muted_line(
+            "No visible target pane is available under the current filters.",
+            theme,
+        ));
+        return lines;
+    };
+
+    let status = pane.agent.as_ref().map(|agent| agent.status);
+    let status_label = status.map(AgentStatus::label).unwrap_or("SHELL");
+    let source_label = pane
+        .agent
+        .as_ref()
+        .map(|agent| agent.integration_mode.source_label())
+        .unwrap_or("plain shell");
+    lines.push(Line::from(vec![
+        Span::styled("Status: ", theme.muted),
+        Span::styled(status_label, status_style(theme, status, pane.is_agent())),
+        Span::styled(format!(" {} ", theme.glyphs.separator), theme.muted),
+        Span::styled("Status source: ", theme.muted),
+        Span::styled(source_label, theme.base),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("Preview source: ", theme.muted),
+        Span::styled(pane.preview_provenance.label(), theme.base),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("Target: ", theme.muted),
+        Span::styled(
+            format!("{} ", pane_harness_badge(theme, Some(pane))),
+            theme.emphasis,
+        ),
+        Span::styled(pane.navigation_title(), theme.base),
+        Span::styled(format!(" {} ", theme.glyphs.separator), theme.muted),
+        Span::styled(pane.id.as_str().to_string(), theme.muted),
+    ]));
+
+    if layout_mode != LayoutMode::Compact {
+        if let Some(workspace_path) = state.selected_workspace_path() {
+            lines.push(Line::from(vec![
+                Span::styled("Workspace: ", theme.muted),
+                Span::styled(workspace_path.display().to_string(), theme.base),
+            ]));
+        }
+    }
+
+    let next = if matches!(selection, SelectionTarget::Pane(_)) {
+        "Next: f focus tmux · i compose · x kill"
+    } else {
+        "Next: Enter uses row · f focuses target · i compose"
+    };
+    lines.push(muted_line(next, theme));
+    lines
+}
+
 fn actionable_target_lines(state: &AppState, theme: &Theme) -> Vec<Line<'static>> {
     let Some(pane) = state.selected_actionable_pane() else {
         return Vec::new();
@@ -1480,14 +1670,14 @@ fn normal_footer_lines(state: &AppState, theme: &Theme, layout_mode: LayoutMode)
                 format!("Details: j/k scroll{sep}Tab sidebar{sep}Help ?")
             };
             let pr_actions = if state.selected_pull_request().is_some() {
-                format!("PR p{sep}Open O{sep}Copy Y")
+                format!("PR p{sep}Refresh Ctrl-R{sep}Open O{sep}Copy Y")
             } else {
-                "PR p".to_string()
+                "PR p / Ctrl-R".to_string()
             };
             match layout_mode {
                 LayoutMode::Compact => {
                     vec![format!(
-                        "Details: j/k scroll{sep}f tmux{sep}p PR{sep}Help ?"
+                        "Details: j/k scroll{sep}f tmux{sep}p/Ctrl-R PR{sep}Help ?"
                     )]
                 }
                 LayoutMode::Medium | LayoutMode::Wide => {
@@ -1736,11 +1926,13 @@ mod tests {
         let mut state = sample_state();
         state.startup_loading = true;
         state.startup_cache_age_ms = Some(4_200);
+        state.startup_cache_path = Some(PathBuf::from("/tmp/foreman/cache/default.json"));
 
         let output = render_to_string(&state);
 
         assert!(output.contains("cached 4s ago"));
         assert!(output.contains("Cached snapshot: 4s ago"));
+        assert!(output.contains("Cache file: /tmp/foreman/cache/default.json"));
         assert!(output.contains("Showing the last snapshot"));
         assert!(output.contains("background"));
     }
@@ -1796,10 +1988,13 @@ mod tests {
         state.selection = Some(SelectionTarget::Session("alpha".into()));
         let output = render_to_string(&state);
 
+        assert!(output.contains("Selected"));
+        assert!(output.contains("Status: WORKING"));
+        assert!(output.contains("Target:"));
+        assert!(output.contains("Next: Enter uses row"));
         assert!(output.contains("Target pane:"));
         assert!(output.contains("Status source: native hook"));
         assert!(output.contains("Preview source: captured"));
-        assert!(output.contains("f jumps tmux to the target pane"));
     }
 
     #[test]
@@ -1807,6 +2002,11 @@ mod tests {
         let state = sample_state();
         let output = render_to_string(&state);
 
+        assert!(output.contains("Selected"));
+        assert!(output.contains("Status: WORKING"));
+        assert!(output.contains("native hook"));
+        assert!(output.contains("Workspace: /tmp/alpha"));
+        assert!(output.contains("Next: f focus tmux"));
         assert!(output.contains("Status source: native hook"));
         assert!(output.contains("high confidence"));
         assert!(output.contains("Preview source: captured"));
@@ -1844,7 +2044,7 @@ mod tests {
         state.selection = Some(SelectionTarget::Pane("alpha:claude".into()));
         state.rebuild_visible_state();
 
-        let output = render_to_string(&state);
+        let output = render_to_string_at(&state, ThemeName::Catppuccin, 100, 40);
 
         assert!(output.contains("Preview source: capture failed"));
         assert!(output.contains("tmux capture failed on the latest refresh"));
@@ -2055,6 +2255,36 @@ mod tests {
         assert!(output.contains("pr=NONE"));
         assert!(output.contains("PR: no open pull request"));
         assert!(output.contains("PR panel: none"));
+    }
+
+    #[test]
+    fn render_shows_pull_request_refresh_feedback() {
+        let mut state = sample_state();
+        state.pull_request_refreshing_workspace = Some(PathBuf::from("/tmp/alpha"));
+        state
+            .pull_request_cache
+            .insert(PathBuf::from("/tmp/alpha"), PullRequestLookup::Unknown);
+
+        let output = render_to_string(&state);
+
+        assert!(output.contains("pr=REFRESHING"));
+        assert!(output.contains("PR: refreshing now"));
+    }
+
+    #[test]
+    fn render_explains_pull_request_unavailable_reason() {
+        let mut state = sample_state();
+        state.pull_request_cache.insert(
+            PathBuf::from("/tmp/alpha"),
+            PullRequestLookup::Unavailable {
+                message: "gh is not authenticated".to_string(),
+            },
+        );
+
+        let output = render_to_string(&state);
+
+        assert!(output.contains("PR: unavailable"));
+        assert!(output.contains("Reason: gh is not authenticated"));
     }
 
     #[test]

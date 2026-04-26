@@ -82,7 +82,7 @@ impl RunLogger {
         self.write_line(
             "INFO",
             &format!(
-                "bootstrap_complete config={} poll_interval_ms={} capture_lines={} popup={} pr_monitoring_enabled={} pr_poll_interval_ms={} notifications_enabled={} notification_cooldown_ticks={} notification_profile={} notification_backends={} claude_integration_preference={} codex_integration_preference={} pi_integration_preference={} log_verbosity={} tmux_socket={} startup_cache_dir={}",
+                "bootstrap_complete config={} poll_interval_ms={} capture_lines={} popup={} pr_monitoring_enabled={} pr_poll_interval_ms={} notifications_enabled={} notification_cooldown_ticks={} notification_profile={} notification_backends={} claude_integration_preference={} codex_integration_preference={} pi_integration_preference={} log_verbosity={} tmux_socket={} startup_cache_dir={} startup_cache_max_age_ms={} ui_preferences_file={} default_sort={}",
                 runtime.config_file.display(),
                 runtime.poll_interval_ms,
                 runtime.capture_lines,
@@ -108,6 +108,9 @@ impl RunLogger {
                     .map(|path| path.display().to_string())
                     .unwrap_or_else(|| "default".to_string()),
                 runtime.startup_cache_dir.display(),
+                runtime.startup_cache_max_age_ms,
+                runtime.ui_preferences_file.display(),
+                runtime.default_sort.config_label(),
             ),
         )
     }
@@ -116,7 +119,7 @@ impl RunLogger {
         self.write_line(
             "INFO",
             &format!(
-                "inventory_loaded sessions={} windows={} panes={} visible_sessions={} visible_windows={} visible_panes={} startup_loading={} startup_cached={} startup_error={}",
+                "inventory_loaded sessions={} windows={} panes={} visible_sessions={} visible_windows={} visible_panes={} startup_loading={} startup_cached={} startup_cache_path={} startup_error={}",
                 summary.total_sessions,
                 summary.total_windows,
                 summary.total_panes,
@@ -125,6 +128,11 @@ impl RunLogger {
                 summary.visible_panes,
                 summary.startup_loading,
                 summary.startup_cache_age_ms.is_some(),
+                summary
+                    .startup_cache_path
+                    .as_ref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "none".to_string()),
                 summary.startup_error.is_some()
             ),
         )
@@ -371,6 +379,7 @@ mod tests {
     use super::RunLogger;
     use crate::app::{
         InventorySummary, NotificationKind, OperatorAlert, OperatorAlertLevel, OperatorAlertSource,
+        SortMode,
     };
     use crate::config::{
         IntegrationPreference, LogVerbosity, NotificationBackendName, RuntimeConfig,
@@ -393,6 +402,7 @@ mod tests {
             config_file: Path::new("/tmp/config.toml").to_path_buf(),
             log_dir: log_dir.to_path_buf(),
             startup_cache_dir: log_dir.join("../cache"),
+            ui_preferences_file: log_dir.join("../ui-state.json"),
             tmux_socket: None,
             claude_native_dir: None,
             codex_native_dir: None,
@@ -400,6 +410,7 @@ mod tests {
             log_verbosity: LogVerbosity::Info,
             poll_interval_ms: 1_500,
             capture_lines: 40,
+            startup_cache_max_age_ms: crate::config::DEFAULT_STARTUP_CACHE_MAX_AGE_MS,
             popup: false,
             pull_request_monitoring_enabled: true,
             pull_request_poll_interval_ms: 30_000,
@@ -415,6 +426,9 @@ mod tests {
             pi_integration_preference: IntegrationPreference::Auto,
             log_retention: 2,
             theme: ThemeName::Catppuccin,
+            default_sort: SortMode::Stable,
+            ui_theme_configured: false,
+            ui_default_sort_configured: false,
         }
     }
 
@@ -494,6 +508,9 @@ mod tests {
         assert!(contents.contains("pi_integration_preference=auto"));
         assert!(contents.contains("log_verbosity=info"));
         assert!(contents.contains("startup_cache_dir="));
+        assert!(contents.contains("startup_cache_max_age_ms=300000"));
+        assert!(contents.contains("ui_preferences_file="));
+        assert!(contents.contains("default_sort=stable"));
     }
 
     #[test]
@@ -562,6 +579,7 @@ mod tests {
                 visible_panes: 2,
                 startup_loading: false,
                 startup_cache_age_ms: Some(1_500),
+                startup_cache_path: Some(temp_dir.path().join("cache/default.json")),
                 startup_error: None,
             })
             .expect("inventory log should succeed");
@@ -572,6 +590,7 @@ mod tests {
         assert!(contents.contains("visible_sessions=2"));
         assert!(contents.contains("visible_panes=2"));
         assert!(contents.contains("startup_cached=true"));
+        assert!(contents.contains("startup_cache_path="));
     }
 
     #[test]

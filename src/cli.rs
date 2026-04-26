@@ -1,14 +1,15 @@
 use crate::adapters::tmux::{InventoryLoadMetrics, SystemTmuxBackend, TmuxAdapter};
 use crate::app::{
     AppState, InventorySummary, OperatorAlert, OperatorAlertLevel, OperatorAlertSource,
+    SelectionTarget,
 };
 use crate::config::{
     load_config, resolve_paths, write_default_config, AppConfig, ConfigError, RuntimeConfig,
 };
 use crate::doctor::{
-    collect_report, primary_runtime_alert_finding, runtime_findings, DoctorFixMode, DoctorOptions,
-    DoctorReport, DoctorSeverity, RuntimeDoctorContext, SetupProviderSelection,
-    SetupScopeSelection,
+    collect_report, primary_runtime_alert_finding, runtime_findings, DoctorArea, DoctorFinding,
+    DoctorFixMode, DoctorOptions, DoctorReport, DoctorSeverity, RuntimeDoctorContext,
+    SetupProviderSelection, SetupScopeSelection,
 };
 use crate::integrations::{
     apply_configured_claude_signals, apply_configured_codex_signals, apply_configured_pi_signals,
@@ -17,6 +18,9 @@ use crate::integrations::{
 use crate::services::logging::{RunLogSummary, RunLogger};
 use crate::services::startup_cache::{load_startup_cache, StartupCacheLoadResult};
 use crate::services::system_stats::{SysinfoSystemStatsBackend, SystemStatsService};
+use crate::services::ui_preferences::{
+    apply_preferences_to_runtime, load_ui_preferences, reset_ui_preferences, PersistedUiPreferences,
+};
 use clap::Parser;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -24,8 +28,7 @@ use std::time::Instant;
 
 const CLI_ABOUT: &str = "Foreman - watch and control AI coding agents running in tmux.";
 const CLI_LONG_ABOUT: &str = "Foreman is a keyboard-first dashboard for AI coding agents running in tmux.\n\nUse when: you want one operator surface for Claude Code, Codex, Pi, Gemini, or OpenCode panes.\nDon't use to: inspect a plain tmux tree with no agent workflow.";
-const CLI_AFTER_HELP: &str = "First-time setup:\n  foreman --setup --user --project\n  foreman --doctor\n  foreman\n\nPreview setup changes:\n  foreman --setup --user --project --dry-run\n\nScoped installs:\n  foreman --setup --user\n  foreman --setup --project --codex --repo /path/to/repo\n\nAnother repo:\n  foreman --setup --project --repo /path/to/repo\n  foreman --doctor --repo /path/to/repo";
-pub(crate) const STARTUP_CACHE_MAX_AGE_MS: u64 = 5 * 60_000;
+const CLI_AFTER_HELP: &str = "First-time setup:\n  foreman --setup --user --project\n  foreman --doctor\n  foreman\n\nInspect resolved paths/config:\n  foreman --config-show\n\nPreview safe doctor fixes:\n  foreman --doctor --doctor-fix --doctor-dry-run\n\nPreview setup changes:\n  foreman --setup --user --project --dry-run\n\nScoped installs:\n  foreman --setup --user\n  foreman --setup --project --codex --repo /path/to/repo\n\nAnother repo:\n  foreman --setup --project --repo /path/to/repo\n  foreman --doctor --repo /path/to/repo";
 
 #[derive(Debug, Parser, Clone)]
 #[command(
@@ -38,7 +41,7 @@ pub(crate) const STARTUP_CACHE_MAX_AGE_MS: u64 = 5 * 60_000;
 pub struct Cli {
     #[arg(
         long,
-        conflicts_with_all = ["config_path", "init_config", "doctor"],
+        conflicts_with_all = ["config_path", "config_show", "init_config", "doctor"],
         help_heading = "Setup and Diagnosis",
         help = "Initialize Foreman config and apply safe hook/setup fixes. Defaults to project-level setup for the current repo, or user-level setup if no repo is detected."
     )]
@@ -94,7 +97,7 @@ pub struct Cli {
 
     #[arg(
         long,
-        conflicts_with_all = ["init_config", "doctor", "setup"],
+        conflicts_with_all = ["config_show", "init_config", "doctor", "setup"],
         help_heading = "Utilities",
         help = "Print the resolved config path and exit."
     )]
@@ -102,7 +105,15 @@ pub struct Cli {
 
     #[arg(
         long,
-        conflicts_with_all = ["config_path", "doctor", "setup"],
+        conflicts_with_all = ["config_path", "init_config", "doctor", "setup", "reset_ui_state"],
+        help_heading = "Utilities",
+        help = "Print resolved config, UI state, cache, and runtime values."
+    )]
+    pub config_show: bool,
+
+    #[arg(
+        long,
+        conflicts_with_all = ["config_path", "config_show", "doctor", "setup", "reset_ui_state"],
         help_heading = "Utilities",
         help = "Write the default config file if it does not exist, then exit."
     )]
@@ -110,7 +121,15 @@ pub struct Cli {
 
     #[arg(
         long,
-        conflicts_with_all = ["config_path", "init_config", "setup"],
+        conflicts_with_all = ["config_path", "config_show", "init_config", "doctor", "setup"],
+        help_heading = "Utilities",
+        help = "Remove persisted runtime UI choices such as sort, theme, filters, collapsed sessions, and selection."
+    )]
+    pub reset_ui_state: bool,
+
+    #[arg(
+        long,
+        conflicts_with_all = ["config_path", "config_show", "init_config", "setup", "reset_ui_state"],
         help_heading = "Setup and Diagnosis",
         help = "Inspect config, hook wiring, and live tmux fallback. Defaults to the current repo when the working directory looks like one."
     )]
@@ -132,10 +151,20 @@ pub struct Cli {
     )]
     pub doctor_strict: bool,
 
-    #[arg(long, requires = "doctor", hide = true)]
+    #[arg(
+        long,
+        requires = "doctor",
+        help_heading = "Setup and Diagnosis",
+        help = "Apply safe doctor fixes such as missing config files, native dirs, and hook wiring."
+    )]
     pub doctor_fix: bool,
 
-    #[arg(long, requires = "doctor_fix", hide = true)]
+    #[arg(
+        long,
+        requires = "doctor_fix",
+        help_heading = "Setup and Diagnosis",
+        help = "Preview safe doctor fixes without writing files."
+    )]
     pub doctor_dry_run: bool,
 
     #[arg(
@@ -211,9 +240,11 @@ pub struct Cli {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunOutcome {
     PrintedConfigPath(PathBuf),
+    PrintedConfigReadout(String),
     InitializedConfig(PathBuf),
     Doctor(Box<DoctorReport>),
     Setup(Box<DoctorReport>),
+    ResetUiState { path: PathBuf, removed: bool },
     Bootstrapped(Box<BootstrapSummary>),
 }
 
@@ -236,6 +267,8 @@ pub(crate) struct PreparedBootstrap {
     pub codex_native: CodexNativeOverlaySummary,
     pub pi_native: PiNativeOverlaySummary,
     pub startup_cache_generated_at_ms: Option<u64>,
+    pub pending_selection_restore: Option<SelectionTarget>,
+    pub persistent_runtime_diagnostics: Vec<DoctorFinding>,
 }
 
 impl PreparedBootstrap {
@@ -350,6 +383,12 @@ fn maybe_handle_utility_command(
         )));
     }
 
+    if cli.config_show {
+        let readout = config_readout(cli, paths)?;
+        println!("{readout}");
+        return Ok(Some(RunOutcome::PrintedConfigReadout(readout)));
+    }
+
     if cli.init_config {
         write_default_config(&paths.config_file)?;
         println!(
@@ -359,6 +398,25 @@ fn maybe_handle_utility_command(
         return Ok(Some(RunOutcome::InitializedConfig(
             paths.config_file.clone(),
         )));
+    }
+
+    if cli.reset_ui_state {
+        let removed = reset_ui_preferences(&paths.ui_preferences_file).map_err(ConfigError::Io)?;
+        if removed {
+            println!(
+                "Removed UI state at {}",
+                paths.ui_preferences_file.display()
+            );
+        } else {
+            println!(
+                "No persisted UI state found at {}",
+                paths.ui_preferences_file.display()
+            );
+        }
+        return Ok(Some(RunOutcome::ResetUiState {
+            path: paths.ui_preferences_file.clone(),
+            removed,
+        }));
     }
 
     if cli.setup {
@@ -452,6 +510,159 @@ fn maybe_handle_utility_command(
     Ok(None)
 }
 
+fn config_readout(cli: &Cli, paths: &crate::config::AppPaths) -> Result<String, RunError> {
+    let (file_config, config_parse_error) = load_repair_config(&paths.config_file)?;
+    let mut runtime = RuntimeConfig::from_sources(paths.clone(), file_config, cli);
+    let (ui_preferences, ui_preferences_error) = load_and_apply_ui_preferences(&mut runtime);
+    let config_status = if paths.config_file.exists() {
+        "present"
+    } else {
+        "missing"
+    };
+    let ui_status = if paths.ui_preferences_file.exists() {
+        if ui_preferences_error.is_some() {
+            "unreadable"
+        } else {
+            "present"
+        }
+    } else {
+        "missing"
+    };
+    let cache_status = match load_startup_cache(&runtime, runtime.startup_cache_max_age_ms) {
+        Ok(StartupCacheLoadResult::Loaded(cache)) => format!(
+            "loaded path={} age_ms={} sessions={} panes={}",
+            cache.path.display(),
+            cache.age_ms,
+            cache.inventory.session_count(),
+            cache.inventory.pane_count()
+        ),
+        Ok(StartupCacheLoadResult::Stale {
+            path,
+            age_ms,
+            inventory,
+        }) => {
+            format!(
+                "stale path={} age_ms={age_ms} sessions={} panes={}",
+                path.display(),
+                inventory.sessions,
+                inventory.panes
+            )
+        }
+        Ok(StartupCacheLoadResult::Missing { path }) => format!("missing path={}", path.display()),
+        Ok(StartupCacheLoadResult::Empty { path }) => format!("empty path={}", path.display()),
+        Ok(StartupCacheLoadResult::Invalid { path, reason }) => {
+            format!("invalid path={} reason={reason}", path.display())
+        }
+        Err(error) => format!("unavailable error={error}"),
+    };
+    let backends = runtime
+        .notification_backends
+        .iter()
+        .map(|backend| backend.label())
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let mut lines = vec![
+        "Foreman config".to_string(),
+        format!(
+            "  config_file: {} ({config_status})",
+            runtime.config_file.display()
+        ),
+        format!(
+            "  ui_state: {} ({ui_status})",
+            runtime.ui_preferences_file.display()
+        ),
+        format!("  log_dir: {}", runtime.log_dir.display()),
+        format!(
+            "  startup_cache_dir: {}",
+            runtime.startup_cache_dir.display()
+        ),
+        format!("  startup_cache: {cache_status}"),
+        format!(
+            "  sort: {}{}",
+            runtime.default_sort.config_label(),
+            if runtime.ui_default_sort_configured {
+                " (config)"
+            } else {
+                " (default or persisted)"
+            }
+        ),
+        format!(
+            "  theme: {}{}",
+            runtime.theme.label(),
+            if runtime.ui_theme_configured {
+                " (config)"
+            } else {
+                " (default or persisted)"
+            }
+        ),
+        format!(
+            "  ui_state_values: sort={} theme={} filters={} collapsed_sessions={} selection={}",
+            ui_preferences
+                .sort_mode
+                .map(|sort| sort.config_label())
+                .unwrap_or("unset"),
+            ui_preferences
+                .theme
+                .map(|theme| theme.label())
+                .unwrap_or("unset"),
+            ui_preferences.filters.is_some(),
+            ui_preferences.collapsed_sessions.len(),
+            ui_preferences.selection.is_some()
+        ),
+        format!(
+            "  polling: {}ms capture_lines={}",
+            runtime.poll_interval_ms, runtime.capture_lines
+        ),
+        format!(
+            "  notifications: enabled={} profile={} cooldown_ticks={} backends={}",
+            runtime.notifications_enabled,
+            runtime.notification_profile.label(),
+            runtime.notification_cooldown_ticks,
+            backends
+        ),
+        format!(
+            "  pull_requests: enabled={} poll_interval_ms={}",
+            runtime.pull_request_monitoring_enabled, runtime.pull_request_poll_interval_ms
+        ),
+        format!(
+            "  claude: mode={} native_dir={}",
+            runtime.claude_integration_preference.label(),
+            runtime
+                .claude_native_dir
+                .as_deref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "unset".to_string())
+        ),
+        format!(
+            "  codex: mode={} native_dir={}",
+            runtime.codex_integration_preference.label(),
+            runtime
+                .codex_native_dir
+                .as_deref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "unset".to_string())
+        ),
+        format!(
+            "  pi: mode={} native_dir={}",
+            runtime.pi_integration_preference.label(),
+            runtime
+                .pi_native_dir
+                .as_deref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "unset".to_string())
+        ),
+    ];
+    if let Some(error) = config_parse_error {
+        lines.push(format!("  config_parse_error: {error}"));
+    }
+    if let Some(error) = ui_preferences_error {
+        lines.push(format!("  ui_state_error: {error}"));
+    }
+    lines.push("  next: foreman --doctor --doctor-fix --doctor-dry-run".to_string());
+    Ok(lines.join("\n"))
+}
+
 fn load_repair_config(path: &Path) -> Result<(AppConfig, Option<String>), ConfigError> {
     match load_config(path) {
         Ok(config) => Ok((config, None)),
@@ -496,11 +707,15 @@ pub(crate) fn prepare_bootstrap(
     paths: crate::config::AppPaths,
 ) -> Result<PreparedBootstrap, RunError> {
     let file_config = load_config(&paths.config_file)?;
-    let runtime = RuntimeConfig::from_sources(paths, file_config, cli);
+    let mut runtime = RuntimeConfig::from_sources(paths, file_config, cli);
+    let (ui_preferences, ui_preferences_error) = load_and_apply_ui_preferences(&mut runtime);
 
     let mut logger = start_run_logger(&runtime)?;
-    let (state, tmux_metrics, native_timing, claude_native, codex_native, pi_native) =
+    log_ui_preferences_status(&mut logger, &runtime, ui_preferences_error.clone())?;
+    let (mut state, tmux_metrics, native_timing, claude_native, codex_native, pi_native) =
         bootstrap_state(&runtime);
+    apply_ui_preferences_to_state(&mut state, &runtime, &ui_preferences);
+    apply_ui_preferences_error_to_state(&mut state, &runtime, ui_preferences_error.as_deref());
     logger
             .log_timing(
                 "inventory_tmux",
@@ -579,6 +794,9 @@ pub(crate) fn prepare_bootstrap(
             .map_err(ConfigError::Io)?;
     }
 
+    let persistent_runtime_diagnostics =
+        ui_preferences_error_diagnostics(&runtime, ui_preferences_error.as_deref());
+
     Ok(PreparedBootstrap {
         runtime,
         logger,
@@ -587,6 +805,8 @@ pub(crate) fn prepare_bootstrap(
         codex_native,
         pi_native,
         startup_cache_generated_at_ms: None,
+        pending_selection_restore: ui_preferences.selection.clone(),
+        persistent_runtime_diagnostics,
     })
 }
 
@@ -595,14 +815,16 @@ fn prepare_runtime_bootstrap(
     paths: crate::config::AppPaths,
 ) -> Result<PreparedBootstrap, RunError> {
     let file_config = load_config(&paths.config_file)?;
-    let runtime = RuntimeConfig::from_sources(paths, file_config, cli);
+    let mut runtime = RuntimeConfig::from_sources(paths, file_config, cli);
+    let (ui_preferences, ui_preferences_error) = load_and_apply_ui_preferences(&mut runtime);
     let mut logger = start_run_logger(&runtime)?;
+    log_ui_preferences_status(&mut logger, &runtime, ui_preferences_error.clone())?;
     let system_stats = SystemStatsService::new(SysinfoSystemStatsBackend::new())
         .snapshot()
         .unwrap_or_default();
     let cache_load_started = Instant::now();
     let cache_result = if runtime.popup {
-        match load_startup_cache(&runtime, STARTUP_CACHE_MAX_AGE_MS) {
+        match load_startup_cache(&runtime, runtime.startup_cache_max_age_ms) {
             Ok(result) => Some(result),
             Err(error) => {
                 logger
@@ -634,6 +856,7 @@ fn prepare_runtime_bootstrap(
             state.system_stats = system_stats;
             state.startup_loading = true;
             state.startup_cache_age_ms = Some(cache.age_ms);
+            state.startup_cache_path = Some(cache.path);
             (state, Some(cache.generated_at_ms))
         }
         Some(StartupCacheLoadResult::Missing { path }) => {
@@ -656,7 +879,7 @@ fn prepare_runtime_bootstrap(
                 None,
             )
         }
-        Some(StartupCacheLoadResult::Stale { path, age_ms }) => {
+        Some(StartupCacheLoadResult::Stale { path, age_ms, .. }) => {
             logger
                 .log_timing(
                     "startup_cache_load",
@@ -726,9 +949,11 @@ fn prepare_runtime_bootstrap(
             None,
         ),
     };
-    state.notifications.muted = !runtime.notifications_enabled;
-    state.notifications.profile = runtime.notification_profile;
-    state.notifications.cooldown_ticks = runtime.notification_cooldown_ticks;
+    apply_runtime_state_defaults(&mut state, &runtime, &ui_preferences);
+    apply_ui_preferences_error_to_state(&mut state, &runtime, ui_preferences_error.as_deref());
+
+    let persistent_runtime_diagnostics =
+        ui_preferences_error_diagnostics(&runtime, ui_preferences_error.as_deref());
 
     Ok(PreparedBootstrap {
         runtime,
@@ -738,7 +963,104 @@ fn prepare_runtime_bootstrap(
         codex_native: CodexNativeOverlaySummary::default(),
         pi_native: PiNativeOverlaySummary::default(),
         startup_cache_generated_at_ms,
+        pending_selection_restore: ui_preferences.selection.clone(),
+        persistent_runtime_diagnostics,
     })
+}
+
+fn load_and_apply_ui_preferences(
+    runtime: &mut RuntimeConfig,
+) -> (PersistedUiPreferences, Option<String>) {
+    match load_ui_preferences(&runtime.ui_preferences_file) {
+        Ok(preferences) => {
+            apply_preferences_to_runtime(runtime, &preferences);
+            (preferences, None)
+        }
+        Err(error) => (PersistedUiPreferences::default(), Some(error.to_string())),
+    }
+}
+
+fn log_ui_preferences_status(
+    logger: &mut RunLogger,
+    runtime: &RuntimeConfig,
+    error: Option<String>,
+) -> Result<(), ConfigError> {
+    logger
+        .info(&format!(
+            "ui_preferences path={} default_sort={} theme={}",
+            runtime.ui_preferences_file.display(),
+            runtime.default_sort.config_label(),
+            runtime.theme.label(),
+        ))
+        .map_err(ConfigError::Io)?;
+    if let Some(error) = error {
+        logger
+            .info(&format!("ui_preferences_load_failed error={error}"))
+            .map_err(ConfigError::Io)?;
+    }
+    Ok(())
+}
+
+fn apply_runtime_state_defaults(
+    state: &mut AppState,
+    runtime: &RuntimeConfig,
+    ui_preferences: &PersistedUiPreferences,
+) {
+    state.popup_mode = runtime.popup;
+    state.sort_mode = runtime.default_sort;
+    state.notifications.muted = !runtime.notifications_enabled;
+    state.notifications.profile = runtime.notification_profile;
+    state.notifications.cooldown_ticks = runtime.notification_cooldown_ticks;
+    apply_ui_preferences_to_state(state, runtime, ui_preferences);
+}
+
+fn apply_ui_preferences_to_state(
+    state: &mut AppState,
+    runtime: &RuntimeConfig,
+    ui_preferences: &PersistedUiPreferences,
+) {
+    let mut state_preferences = ui_preferences.clone();
+    if runtime.ui_default_sort_configured {
+        state_preferences.sort_mode = None;
+    }
+    state_preferences.apply_to_state(state);
+}
+
+fn apply_ui_preferences_error_to_state(
+    state: &mut AppState,
+    runtime: &RuntimeConfig,
+    error: Option<&str>,
+) {
+    let diagnostics = ui_preferences_error_diagnostics(runtime, error);
+    let Some(finding) = diagnostics.first() else {
+        return;
+    };
+    state.operator_alert = Some(OperatorAlert::new(
+        OperatorAlertSource::Diagnostics,
+        OperatorAlertLevel::Warn,
+        finding.summary.clone(),
+    ));
+    state.runtime_diagnostics.extend(diagnostics);
+}
+
+fn ui_preferences_error_diagnostics(
+    runtime: &RuntimeConfig,
+    error: Option<&str>,
+) -> Vec<DoctorFinding> {
+    let Some(error) = error else {
+        return Vec::new();
+    };
+    let message = format!(
+        "UI preferences at {} could not be loaded: {error}",
+        runtime.ui_preferences_file.display()
+    );
+    vec![DoctorFinding::new(
+        "ui-preferences-load-failed",
+        DoctorSeverity::Warn,
+        DoctorArea::Runtime,
+        message,
+    )
+    .with_next_step("Run foreman --reset-ui-state to remove the persisted UI state file")]
 }
 
 fn start_run_logger(runtime: &RuntimeConfig) -> Result<RunLogger, ConfigError> {
@@ -799,9 +1121,7 @@ pub(crate) fn bootstrap_state(
                 system_stats,
                 ..AppState::with_inventory(inventory)
             };
-            state.notifications.muted = !runtime.notifications_enabled;
-            state.notifications.profile = runtime.notification_profile;
-            state.notifications.cooldown_ticks = runtime.notification_cooldown_ticks;
+            apply_runtime_state_defaults(&mut state, runtime, &PersistedUiPreferences::default());
             state.runtime_diagnostics = runtime_findings(&RuntimeDoctorContext {
                 runtime,
                 config_exists: runtime.config_file.exists(),
@@ -869,10 +1189,13 @@ pub(crate) fn bootstrap_state(
 mod tests {
     use super::{prepare_runtime_bootstrap, run, Cli, RunOutcome};
     use crate::app::{
-        inventory, HarnessKind, OperatorAlertSource, PaneBuilder, SessionBuilder, WindowBuilder,
+        inventory, HarnessKind, OperatorAlertSource, PaneBuilder, SelectionTarget, SessionBuilder,
+        SortMode, WindowBuilder,
     };
     use crate::config::resolve_paths;
     use crate::services::startup_cache::write_startup_cache;
+    use crate::services::ui_preferences::{save_ui_preferences, PersistedUiPreferences};
+    use crate::ui::theme::ThemeName;
     use clap::Parser;
     use tempfile::tempdir;
 
@@ -893,6 +1216,35 @@ mod tests {
         let outcome = run(cli).expect("run should succeed");
 
         assert!(matches!(outcome, RunOutcome::PrintedConfigPath(_)));
+    }
+
+    #[test]
+    fn run_prints_resolved_config_readout() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let cli = Cli::parse_from([
+            "foreman",
+            "--config-show",
+            "--config-file",
+            temp_dir
+                .path()
+                .join("custom.toml")
+                .to_str()
+                .expect("utf-8 path"),
+            "--log-dir",
+            temp_dir.path().join("logs").to_str().expect("utf-8 path"),
+        ]);
+
+        let outcome = run(cli).expect("run should succeed");
+
+        match outcome {
+            RunOutcome::PrintedConfigReadout(readout) => {
+                assert!(readout.contains("config_file:"));
+                assert!(readout.contains("ui_state:"));
+                assert!(readout.contains("startup_cache:"));
+                assert!(readout.contains("claude: mode="));
+            }
+            other => panic!("expected config readout, got {other:?}"),
+        }
     }
 
     #[test]
@@ -997,6 +1349,14 @@ mod tests {
             "--log-dir",
             log_dir.to_str().expect("utf-8 path"),
         ]);
+        std::fs::write(
+            &config_file,
+            r#"
+[ui]
+default_sort = "attention-recent"
+"#,
+        )
+        .expect("config should be writable");
         let paths =
             resolve_paths(Some(&config_file), Some(&log_dir)).expect("paths should resolve");
         let runtime = crate::config::RuntimeConfig::from_sources(
@@ -1012,6 +1372,14 @@ mod tests {
             ),
         )]);
         write_startup_cache(&runtime, &inventory).expect("cache write should succeed");
+        save_ui_preferences(
+            &paths.ui_preferences_file,
+            &PersistedUiPreferences {
+                selection: Some(SelectionTarget::Pane("alpha:claude".into())),
+                ..PersistedUiPreferences::default()
+            },
+        )
+        .expect("ui preferences should save");
 
         let prepared =
             prepare_runtime_bootstrap(&cli, paths).expect("runtime bootstrap should succeed");
@@ -1019,7 +1387,150 @@ mod tests {
         assert!(prepared.state.startup_loading);
         assert!(prepared.state.startup_cache_age_ms.is_some());
         assert_eq!(prepared.state.inventory, inventory);
+        assert_eq!(prepared.state.sort_mode, SortMode::AttentionFirst);
+        assert_eq!(
+            prepared.state.selection,
+            Some(SelectionTarget::Pane("alpha:claude".into()))
+        );
         assert!(prepared.startup_cache_generated_at_ms.is_some());
+    }
+
+    #[test]
+    fn generated_default_config_allows_persisted_theme_and_sort() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let config_file = temp_dir.path().join("config.toml");
+        let log_dir = temp_dir.path().join("logs");
+        crate::config::write_default_config(&config_file).expect("config should be written");
+        let cli = Cli::parse_from([
+            "foreman",
+            "--popup",
+            "--config-file",
+            config_file.to_str().expect("utf-8 path"),
+            "--log-dir",
+            log_dir.to_str().expect("utf-8 path"),
+        ]);
+        let paths =
+            resolve_paths(Some(&config_file), Some(&log_dir)).expect("paths should resolve");
+        save_ui_preferences(
+            &paths.ui_preferences_file,
+            &PersistedUiPreferences {
+                sort_mode: Some(SortMode::AttentionFirst),
+                theme: Some(ThemeName::Dracula),
+                ..PersistedUiPreferences::default()
+            },
+        )
+        .expect("ui preferences should save");
+
+        let prepared = prepare_runtime_bootstrap(&cli, paths).expect("bootstrap should succeed");
+
+        assert_eq!(prepared.runtime.theme, ThemeName::Dracula);
+        assert_eq!(prepared.state.sort_mode, SortMode::AttentionFirst);
+    }
+
+    #[test]
+    fn invalid_ui_state_adds_persistent_runtime_diagnostic() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let config_file = temp_dir.path().join("config.toml");
+        let log_dir = temp_dir.path().join("logs");
+        let cli = Cli::parse_from([
+            "foreman",
+            "--popup",
+            "--config-file",
+            config_file.to_str().expect("utf-8 path"),
+            "--log-dir",
+            log_dir.to_str().expect("utf-8 path"),
+        ]);
+        let paths =
+            resolve_paths(Some(&config_file), Some(&log_dir)).expect("paths should resolve");
+        std::fs::create_dir_all(paths.ui_preferences_file.parent().expect("parent exists"))
+            .expect("ui state parent should exist");
+        std::fs::write(&paths.ui_preferences_file, "{invalid-json")
+            .expect("ui state should be writable");
+
+        let prepared = prepare_runtime_bootstrap(&cli, paths).expect("bootstrap should succeed");
+
+        assert!(prepared
+            .persistent_runtime_diagnostics
+            .iter()
+            .any(|finding| finding.id == "ui-preferences-load-failed"));
+        assert!(prepared
+            .state
+            .runtime_diagnostics
+            .iter()
+            .any(|finding| finding.id == "ui-preferences-load-failed"));
+    }
+
+    #[test]
+    fn explicit_config_ui_keys_win_over_persisted_preferences() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let config_file = temp_dir.path().join("config.toml");
+        let log_dir = temp_dir.path().join("logs");
+        std::fs::write(
+            &config_file,
+            r#"
+[ui]
+theme = "catppuccin"
+default_sort = "stable"
+"#,
+        )
+        .expect("config should be writable");
+        let cli = Cli::parse_from([
+            "foreman",
+            "--popup",
+            "--config-file",
+            config_file.to_str().expect("utf-8 path"),
+            "--log-dir",
+            log_dir.to_str().expect("utf-8 path"),
+        ]);
+        let paths =
+            resolve_paths(Some(&config_file), Some(&log_dir)).expect("paths should resolve");
+        save_ui_preferences(
+            &paths.ui_preferences_file,
+            &PersistedUiPreferences {
+                sort_mode: Some(SortMode::AttentionFirst),
+                theme: Some(ThemeName::Dracula),
+                ..PersistedUiPreferences::default()
+            },
+        )
+        .expect("ui preferences should save");
+
+        let prepared = prepare_runtime_bootstrap(&cli, paths).expect("bootstrap should succeed");
+
+        assert_eq!(prepared.runtime.theme, ThemeName::Catppuccin);
+        assert_eq!(prepared.state.sort_mode, SortMode::Stable);
+    }
+
+    #[test]
+    fn reset_ui_state_removes_persisted_preferences_and_exits() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let config_file = temp_dir.path().join("config.toml");
+        let log_dir = temp_dir.path().join("logs");
+        let paths =
+            resolve_paths(Some(&config_file), Some(&log_dir)).expect("paths should resolve");
+        save_ui_preferences(
+            &paths.ui_preferences_file,
+            &PersistedUiPreferences::default(),
+        )
+        .expect("ui preferences should save");
+        let cli = Cli::parse_from([
+            "foreman",
+            "--reset-ui-state",
+            "--config-file",
+            config_file.to_str().expect("utf-8 path"),
+            "--log-dir",
+            log_dir.to_str().expect("utf-8 path"),
+        ]);
+
+        let outcome = run(cli).expect("run should succeed");
+
+        match outcome {
+            RunOutcome::ResetUiState { path, removed } => {
+                assert_eq!(path, paths.ui_preferences_file);
+                assert!(removed);
+                assert!(!path.exists());
+            }
+            other => panic!("expected reset outcome, got {other:?}"),
+        }
     }
 
     #[test]

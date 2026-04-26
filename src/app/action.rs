@@ -33,6 +33,10 @@ pub enum Action {
         workspace_path: PathBuf,
         lookup: PullRequestLookup,
     },
+    SetPullRequestRefreshing {
+        workspace_path: PathBuf,
+        refreshing: bool,
+    },
     SetRuntimeDiagnostics(Vec<DoctorFinding>),
     SetSystemStats(SystemStatsSnapshot),
     SetStartupLoading(bool),
@@ -54,6 +58,7 @@ pub enum Action {
     ToggleNotificationsMuted,
     CycleNotificationProfile,
     TogglePullRequestDetail,
+    RefreshSelectedPullRequest,
     OpenSelectedPullRequest,
     CopySelectedPullRequestUrl,
     CancelMode,
@@ -101,6 +106,7 @@ impl Action {
             Self::BeginSearch => "begin-search",
             Self::BeginFlash { .. } => "begin-flash",
             Self::SetPullRequestLookup { .. } => "set-pull-request-lookup",
+            Self::SetPullRequestRefreshing { .. } => "set-pull-request-refreshing",
             Self::SetRuntimeDiagnostics(_) => "set-runtime-diagnostics",
             Self::SetSystemStats(_) => "set-system-stats",
             Self::SetStartupLoading(_) => "set-startup-loading",
@@ -113,6 +119,7 @@ impl Action {
             Self::ToggleNotificationsMuted => "toggle-notifications-muted",
             Self::CycleNotificationProfile => "cycle-notification-profile",
             Self::TogglePullRequestDetail => "toggle-pull-request-detail",
+            Self::RefreshSelectedPullRequest => "refresh-selected-pull-request",
             Self::OpenSelectedPullRequest => "open-selected-pull-request",
             Self::CopySelectedPullRequestUrl => "copy-selected-pull-request-url",
             Self::CancelMode => "cancel-mode",
@@ -233,6 +240,13 @@ pub fn action_for_command(state: &AppState, command: Command) -> Action {
         Command::ToggleNotificationsMuted => Action::ToggleNotificationsMuted,
         Command::CycleNotificationProfile => Action::CycleNotificationProfile,
         Command::TogglePullRequestDetail => Action::TogglePullRequestDetail,
+        Command::RefreshPullRequest => {
+            if state.selected_workspace_path().is_some() {
+                Action::RefreshSelectedPullRequest
+            } else {
+                Action::Noop
+            }
+        }
         Command::OpenPullRequest => {
             if state.selected_pull_request().is_some() {
                 Action::OpenSelectedPullRequest

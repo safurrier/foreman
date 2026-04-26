@@ -96,10 +96,12 @@ impl Focus {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
 pub enum SortMode {
     #[default]
     Stable,
+    #[serde(rename = "attention-recent", alias = "attention-first")]
     AttentionFirst,
 }
 
@@ -115,6 +117,13 @@ impl SortMode {
         match self {
             Self::Stable => "stable by name",
             Self::AttentionFirst => "attention first, then recent",
+        }
+    }
+
+    pub fn config_label(self) -> &'static str {
+        match self {
+            Self::Stable => "stable",
+            Self::AttentionFirst => "attention-recent",
         }
     }
 }
@@ -758,7 +767,7 @@ impl Inventory {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SelectionTarget {
     Session(SessionId),
     Window(WindowId),
@@ -1103,6 +1112,7 @@ pub struct AppState {
     pub pull_request_detail_workspace: Option<PathBuf>,
     pub pull_request_detail_manual: bool,
     pub pull_request_auto_open_dismissed: BTreeSet<PathBuf>,
+    pub pull_request_refreshing_workspace: Option<PathBuf>,
     pub notifications: NotificationState,
     pub input_draft: TextDraft,
     pub modal: Option<ModalState>,
@@ -1110,6 +1120,7 @@ pub struct AppState {
     pub operator_alert: Option<OperatorAlert>,
     pub startup_loading: bool,
     pub startup_cache_age_ms: Option<u64>,
+    pub startup_cache_path: Option<PathBuf>,
     pub startup_error: Option<String>,
     pub runtime_diagnostics: Vec<DoctorFinding>,
     pub visible_state: VisibleStateCache,
@@ -1125,6 +1136,7 @@ pub struct InventorySummary {
     pub visible_panes: usize,
     pub startup_loading: bool,
     pub startup_cache_age_ms: Option<u64>,
+    pub startup_cache_path: Option<PathBuf>,
     pub startup_error: Option<String>,
 }
 
@@ -1149,6 +1161,7 @@ impl Default for AppState {
             pull_request_detail_workspace: None,
             pull_request_detail_manual: false,
             pull_request_auto_open_dismissed: BTreeSet::new(),
+            pull_request_refreshing_workspace: None,
             notifications: NotificationState::default(),
             input_draft: TextDraft::default(),
             modal: None,
@@ -1156,6 +1169,7 @@ impl Default for AppState {
             operator_alert: None,
             startup_loading: false,
             startup_cache_age_ms: None,
+            startup_cache_path: None,
             startup_error: None,
             runtime_diagnostics: Vec::new(),
             visible_state: VisibleStateCache::default(),
@@ -1307,6 +1321,7 @@ impl AppState {
             visible_panes: self.visible_state.visible_panes,
             startup_loading: self.startup_loading,
             startup_cache_age_ms: self.startup_cache_age_ms,
+            startup_cache_path: self.startup_cache_path.clone(),
             startup_error: self.startup_error.clone(),
         }
     }
@@ -1582,6 +1597,15 @@ impl AppState {
         self.pull_request_cache.get(&workspace_path)
     }
 
+    pub fn selected_pull_request_refreshing(&self) -> bool {
+        self.selected_workspace_path()
+            .as_ref()
+            .zip(self.pull_request_refreshing_workspace.as_ref())
+            .is_some_and(|(selected_workspace, refreshing_workspace)| {
+                selected_workspace == refreshing_workspace
+            })
+    }
+
     pub fn selected_pull_request(&self) -> Option<&PullRequestData> {
         match self.selected_pull_request_lookup()? {
             PullRequestLookup::Available(pull_request) => Some(pull_request),
@@ -1602,6 +1626,9 @@ impl AppState {
     }
 
     pub fn pull_request_compact_label(&self) -> Option<String> {
+        if self.selected_pull_request_refreshing() {
+            return Some("pr=REFRESHING".to_string());
+        }
         match self.selected_pull_request_lookup()? {
             PullRequestLookup::Unknown => Some("pr=CHECKING".to_string()),
             PullRequestLookup::Missing => Some("pr=NONE".to_string()),
