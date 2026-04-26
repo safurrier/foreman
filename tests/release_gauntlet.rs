@@ -119,7 +119,7 @@ fn release_startup_navigation_gauntlet_proves_discovery_filters_and_help() {
     harness
         .fixture()
         .wait_for_alt_capture(&dashboard, "| INPUT |");
-    harness.fixture().send_keys(&dashboard, &["Escape"]);
+    harness.fixture().send_keys(&dashboard, &["1"]);
     harness
         .fixture()
         .wait_for_alt_capture(&dashboard, "| SIDEBAR |");

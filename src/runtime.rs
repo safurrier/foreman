@@ -22,6 +22,7 @@ use crate::services::pull_requests::{
 };
 use crate::services::startup_cache::{current_time_ms, write_startup_cache};
 use crate::services::system_stats::{SysinfoSystemStatsBackend, SystemStatsService};
+use crate::services::ui_preferences::{save_ui_preferences, PersistedUiPreferences};
 use crate::ui::render::{render, sidebar_viewport_rows_for_area};
 use crossterm::cursor::{Hide, Show};
 use crossterm::event::{self, Event};
@@ -49,6 +50,7 @@ const SLOW_STARTUP_CACHE_WRITE_MS: u128 = 20;
 const OFFSCREEN_PREVIEW_REFRESH_BATCH: usize = 4;
 const STARTUP_CACHE_WRITE_INTERVAL_MS: u64 = 5_000;
 const PULL_REQUEST_LOOKUP_RESULT_POLL_MS: u64 = 50;
+const UI_PREFERENCES_WRITE_DEBOUNCE_MS: u64 = 300;
 
 pub(crate) fn run(prepared: PreparedBootstrap) -> Result<(), RuntimeError> {
     let _terminal_guard = TerminalGuard::enter()?;
@@ -97,6 +99,8 @@ struct DashboardRuntime {
     inventory_refresh: InventoryRefreshWorker,
     notification_policy_epoch: u64,
     startup_cache: StartupCacheTracker,
+    pending_selection_restore: Option<crate::app::SelectionTarget>,
+    ui_preferences_dirty_since: Option<Instant>,
 }
 
 #[derive(Debug, Clone)]
@@ -201,6 +205,8 @@ impl DashboardRuntime {
             inventory_refresh,
             notification_policy_epoch: 0,
             startup_cache,
+            pending_selection_restore: prepared.pending_selection_restore,
+            ui_preferences_dirty_since: None,
             runtime: prepared.runtime,
             logger: prepared.logger,
             state: prepared.state,
@@ -232,6 +238,7 @@ impl DashboardRuntime {
                 self.drain_inventory_refresh_results()?;
             }
             self.drain_pull_request_lookup_results()?;
+            self.maybe_flush_ui_preferences(false, "debounce")?;
             let current_size = terminal.size()?;
             let sidebar_rows = sidebar_viewport_rows_for_area(Rect {
                 x: 0,
@@ -294,6 +301,7 @@ impl DashboardRuntime {
                             let previous_workspace = self.state.selected_workspace_path();
                             let action = action_for_command(&self.state, command);
                             if self.apply_action(action)? {
+                                self.maybe_flush_ui_preferences(true, "shutdown")?;
                                 break;
                             }
                             self.schedule_selected_pull_request_refresh(previous_workspace);
@@ -326,6 +334,7 @@ impl DashboardRuntime {
             }
         }
 
+        self.maybe_flush_ui_preferences(true, "shutdown")?;
         self.logger.info("dashboard_stopped")?;
         Ok(())
     }
@@ -358,6 +367,9 @@ impl DashboardRuntime {
             "toggle-notifications-muted" | "cycle-notification-profile"
         ) {
             self.notification_policy_epoch = self.notification_policy_epoch.saturating_add(1);
+        }
+        if should_persist_ui_preferences(action_label) {
+            self.mark_ui_preferences_dirty();
         }
 
         self.logger.log_timing(
@@ -504,6 +516,9 @@ impl DashboardRuntime {
                         }
                     }
                 }
+                Effect::RefreshPullRequest { workspace_path } => {
+                    self.request_pull_request_lookup(workspace_path, "manual")?;
+                }
                 Effect::Notify { request } => {
                     self.dispatch_notification(&request)?;
                 }
@@ -537,6 +552,7 @@ impl DashboardRuntime {
         self.apply_runtime_action(Action::SetStartupError(None))?;
         self.clear_alert_source(OperatorAlertSource::Tmux)?;
         self.apply_runtime_action(Action::ReplaceInventory(inventory))?;
+        self.restore_pending_selection()?;
 
         let summary = self.state.inventory_summary();
         self.logger.log_timing(
@@ -791,24 +807,40 @@ impl DashboardRuntime {
     ) -> Result<(), RuntimeError> {
         if self.pull_request_lookup.in_flight_generation.is_some() {
             self.pending_pull_request_lookup = Some(PendingPullRequestLookup {
-                workspace_path,
+                workspace_path: workspace_path.clone(),
                 due_at: Instant::now()
                     + Duration::from_millis(SELECTION_PULL_REQUEST_LOOKUP_DEBOUNCE_MS),
             });
+            self.apply_runtime_action(Action::SetPullRequestRefreshing {
+                workspace_path,
+                refreshing: true,
+            })?;
             return Ok(());
         }
 
         let generation = self.pull_request_lookup.next_generation;
         self.pull_request_lookup.next_generation += 1;
         self.pull_request_lookup.in_flight_generation = Some(generation);
-        self.pull_request_lookup
-            .request_tx
-            .send(PullRequestLookupCommand::Lookup(PullRequestLookupRequest {
-                generation,
+        self.apply_runtime_action(Action::SetPullRequestRefreshing {
+            workspace_path: workspace_path.clone(),
+            refreshing: true,
+        })?;
+        let send_result =
+            self.pull_request_lookup
+                .request_tx
+                .send(PullRequestLookupCommand::Lookup(PullRequestLookupRequest {
+                    generation,
+                    workspace_path: workspace_path.clone(),
+                    trigger,
+                }));
+        if let Err(error) = send_result {
+            self.pull_request_lookup.in_flight_generation = None;
+            self.apply_runtime_action(Action::SetPullRequestRefreshing {
                 workspace_path,
-                trigger,
-            }))
-            .map_err(|error| io::Error::new(io::ErrorKind::BrokenPipe, error.to_string()))?;
+                refreshing: false,
+            })?;
+            return Err(io::Error::new(io::ErrorKind::BrokenPipe, error.to_string()).into());
+        }
 
         Ok(())
     }
@@ -877,12 +909,90 @@ impl DashboardRuntime {
             .as_ref()
             .filter(|alert| alert.source == OperatorAlertSource::PullRequests)
             .cloned();
+        self.apply_runtime_action(Action::SetPullRequestRefreshing {
+            workspace_path: workspace_path.clone(),
+            refreshing: false,
+        })?;
         self.apply_runtime_action(Action::SetPullRequestLookup {
             workspace_path,
             lookup,
         })?;
         self.log_pull_request_alert_transition(previous_pull_request_alert)?;
         Ok(())
+    }
+
+    fn restore_pending_selection(&mut self) -> Result<(), RuntimeError> {
+        let Some(target) = self.pending_selection_restore.clone() else {
+            return Ok(());
+        };
+        if self.state.inventory.contains_target(&target) {
+            self.apply_runtime_action(Action::SetSelection(target))?;
+            self.pending_selection_restore = None;
+        } else if !self.state.inventory.sessions.is_empty() {
+            self.pending_selection_restore = None;
+        }
+        Ok(())
+    }
+
+    fn mark_ui_preferences_dirty(&mut self) {
+        if self.ui_preferences_dirty_since.is_none() {
+            self.ui_preferences_dirty_since = Some(Instant::now());
+        }
+    }
+
+    fn ui_preferences_flush_timeout(&self, fallback: Duration) -> Duration {
+        let Some(dirty_since) = self.ui_preferences_dirty_since else {
+            return fallback;
+        };
+        Duration::from_millis(UI_PREFERENCES_WRITE_DEBOUNCE_MS)
+            .saturating_sub(dirty_since.elapsed())
+    }
+
+    fn maybe_flush_ui_preferences(
+        &mut self,
+        force: bool,
+        reason: &'static str,
+    ) -> Result<(), RuntimeError> {
+        let Some(dirty_since) = self.ui_preferences_dirty_since else {
+            return Ok(());
+        };
+        if !force && dirty_since.elapsed() < Duration::from_millis(UI_PREFERENCES_WRITE_DEBOUNCE_MS)
+        {
+            return Ok(());
+        }
+        self.persist_ui_preferences(reason)
+    }
+
+    fn persist_ui_preferences(&mut self, reason: &'static str) -> Result<(), RuntimeError> {
+        let preferences = PersistedUiPreferences::from_state(&self.state, self.runtime.theme);
+        let started = Instant::now();
+        match save_ui_preferences(&self.runtime.ui_preferences_file, &preferences) {
+            Ok(bytes_written) => {
+                self.ui_preferences_dirty_since = None;
+                let elapsed_ms = started.elapsed().as_millis();
+                self.logger.log_timing(
+                    "ui_preferences_write",
+                    &format!(
+                        "reason={reason} path={} bytes={} elapsed_ms={elapsed_ms}",
+                        self.runtime.ui_preferences_file.display(),
+                        bytes_written
+                    ),
+                )?;
+                Ok(())
+            }
+            Err(error) => {
+                self.ui_preferences_dirty_since = None;
+                self.logger.info(&format!(
+                    "ui_preferences_save_failed path={} error={error}",
+                    self.runtime.ui_preferences_file.display()
+                ))?;
+                self.record_alert(
+                    OperatorAlertSource::Diagnostics,
+                    OperatorAlertLevel::Warn,
+                    format!("UI preferences were not saved: {error}"),
+                )
+            }
+        }
     }
 
     fn dispatch_notification(&mut self, request: &NotificationRequest) -> Result<(), RuntimeError> {
@@ -964,6 +1074,7 @@ impl DashboardRuntime {
         inventory_timeout
             .min(pending_timeout)
             .min(lookup_result_timeout)
+            .min(self.ui_preferences_flush_timeout(inventory_timeout))
     }
 
     fn schedule_selected_pull_request_refresh(&mut self, previous_workspace: Option<PathBuf>) {
@@ -1277,6 +1388,21 @@ fn load_inventory_refresh_payload(
         codex_native,
         pi_native,
     ))
+}
+
+fn should_persist_ui_preferences(action_label: &str) -> bool {
+    matches!(
+        action_label,
+        "move-selection"
+            | "set-selection"
+            | "commit-search-selection"
+            | "toggle-show-non-agent-sessions"
+            | "toggle-show-non-agent-panes"
+            | "cycle-harness-filter"
+            | "toggle-session-collapsed"
+            | "set-sort-mode"
+            | "cycle-theme"
+    )
 }
 
 fn worker_channel_error(message: impl Into<String>) -> RuntimeError {

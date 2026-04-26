@@ -8,6 +8,8 @@ use crate::integrations::{
     apply_configured_claude_signals, apply_configured_codex_signals, apply_configured_pi_signals,
     ClaudeNativeOverlaySummary, CodexNativeOverlaySummary, PiNativeOverlaySummary,
 };
+use crate::services::startup_cache::{load_startup_cache, StartupCacheLoadResult};
+use crate::services::ui_preferences::load_ui_preferences;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -24,6 +26,15 @@ const HOOK_ERROR_SIGNATURES: &[&str] = &[
     "foreman-claude-hook failed",
     "foreman-codex-hook failed",
     "foreman-pi-hook failed",
+];
+const RECENT_HOOK_ERROR_LINES: usize = 24;
+const HOOK_RECOVERY_SIGNATURES: &[&str] = &[
+    "-- insert --",
+    "bypass permissions on",
+    "new task?",
+    "/clear to save",
+    "ready for pr",
+    "ready for human review",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -877,6 +888,9 @@ fn config_findings(
         return findings;
     }
 
+    findings.push(ui_preferences_finding(runtime));
+    findings.push(startup_cache_finding(runtime));
+
     for (provider, preference, native_dir) in [
         (
             HarnessKind::ClaudeCode,
@@ -912,6 +926,141 @@ fn config_findings(
     }
 
     findings
+}
+
+fn ui_preferences_finding(runtime: &RuntimeConfig) -> DoctorFinding {
+    if !runtime.ui_preferences_file.exists() {
+        return DoctorFinding::new(
+            "ui-preferences",
+            DoctorSeverity::Info,
+            DoctorArea::Config,
+            "No persisted UI state has been written yet.",
+        )
+        .with_detail(format!("path={}", runtime.ui_preferences_file.display()));
+    }
+
+    match load_ui_preferences(&runtime.ui_preferences_file) {
+        Ok(preferences) => {
+            let mut finding = DoctorFinding::new(
+                "ui-preferences",
+                DoctorSeverity::Ok,
+                DoctorArea::Config,
+                "Persisted UI state is readable.",
+            )
+            .with_detail(format!("path={}", runtime.ui_preferences_file.display()));
+            finding.push_evidence(format!(
+                "sort={} theme={} filters={} collapsed_sessions={} selection={}",
+                preferences
+                    .sort_mode
+                    .map(|sort| sort.config_label())
+                    .unwrap_or("unset"),
+                preferences
+                    .theme
+                    .map(|theme| theme.label())
+                    .unwrap_or("unset"),
+                preferences.filters.is_some(),
+                preferences.collapsed_sessions.len(),
+                preferences.selection.is_some()
+            ));
+            finding
+        }
+        Err(error) => DoctorFinding::new(
+            "ui-preferences",
+            DoctorSeverity::Warn,
+            DoctorArea::Config,
+            "Persisted UI state could not be read.",
+        )
+        .with_detail(format!(
+            "path={} error={error}",
+            runtime.ui_preferences_file.display()
+        ))
+        .with_next_step("Run foreman --reset-ui-state to remove the persisted UI state file"),
+    }
+}
+
+fn startup_cache_finding(runtime: &RuntimeConfig) -> DoctorFinding {
+    match load_startup_cache(runtime, runtime.startup_cache_max_age_ms) {
+        Ok(StartupCacheLoadResult::Loaded(cache)) => {
+            let mut finding = DoctorFinding::new(
+                "startup-cache",
+                DoctorSeverity::Ok,
+                DoctorArea::Config,
+                "Popup startup cache is available.",
+            )
+            .with_detail(format!(
+                "path={} age_ms={} max_age_ms={} generated_at_ms={}",
+                cache.path.display(),
+                cache.age_ms,
+                runtime.startup_cache_max_age_ms,
+                cache.generated_at_ms
+            ));
+            finding.push_evidence(format!(
+                "last_inventory sessions={} windows={} panes={}",
+                cache.inventory.session_count(),
+                cache.inventory.window_count(),
+                cache.inventory.pane_count()
+            ));
+            finding
+        }
+        Ok(StartupCacheLoadResult::Missing { path }) => DoctorFinding::new(
+            "startup-cache",
+            DoctorSeverity::Info,
+            DoctorArea::Config,
+            "Popup startup cache has not been written yet.",
+        )
+        .with_detail(format!(
+            "path={} max_age_ms={}",
+            path.display(),
+            runtime.startup_cache_max_age_ms
+        )),
+        Ok(StartupCacheLoadResult::Stale {
+            path,
+            age_ms,
+            inventory,
+        }) => {
+            let mut finding = DoctorFinding::new(
+                "startup-cache",
+                DoctorSeverity::Warn,
+                DoctorArea::Config,
+                "Popup startup cache is older than the configured freshness window.",
+            )
+            .with_detail(format!(
+                "path={} age_ms={} max_age_ms={}",
+                path.display(),
+                age_ms,
+                runtime.startup_cache_max_age_ms
+            ))
+            .with_next_step(
+                "Let Foreman complete a live refresh or increase [monitoring].startup_cache_max_age_ms",
+            );
+            finding.push_evidence(format!(
+                "last_inventory sessions={} windows={} panes={}",
+                inventory.sessions, inventory.windows, inventory.panes
+            ));
+            finding
+        }
+        Ok(StartupCacheLoadResult::Empty { path }) => DoctorFinding::new(
+            "startup-cache",
+            DoctorSeverity::Info,
+            DoctorArea::Config,
+            "Popup startup cache exists but contains no sessions.",
+        )
+        .with_detail(format!("path={}", path.display())),
+        Ok(StartupCacheLoadResult::Invalid { path, reason }) => DoctorFinding::new(
+            "startup-cache",
+            DoctorSeverity::Warn,
+            DoctorArea::Config,
+            "Popup startup cache could not be reused.",
+        )
+        .with_detail(format!("path={} reason={reason}", path.display())),
+        Err(error) => DoctorFinding::new(
+            "startup-cache",
+            DoctorSeverity::Warn,
+            DoctorArea::Config,
+            "Popup startup cache could not be inspected.",
+        )
+        .with_detail(error.to_string()),
+    }
 }
 
 fn repo_findings(repo_path: &Path) -> Vec<DoctorFinding> {
@@ -2162,11 +2311,30 @@ fn value_contains_string(value: &Value, needle: &str) -> bool {
 }
 
 fn hook_error_signature(preview: &str) -> Option<&'static str> {
-    let lower = preview.to_ascii_lowercase();
-    HOOK_ERROR_SIGNATURES
-        .iter()
-        .copied()
-        .find(|needle| lower.contains(needle))
+    for line in preview
+        .lines()
+        .rev()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .take(RECENT_HOOK_ERROR_LINES)
+    {
+        let lower = line.to_ascii_lowercase();
+        if HOOK_RECOVERY_SIGNATURES
+            .iter()
+            .any(|needle| lower.contains(needle))
+        {
+            return None;
+        }
+        if let Some(signature) = HOOK_ERROR_SIGNATURES
+            .iter()
+            .copied()
+            .find(|needle| lower.contains(needle))
+        {
+            return Some(signature);
+        }
+    }
+
+    None
 }
 
 fn dir_file_count(path: &Path) -> usize {
@@ -2283,9 +2451,10 @@ impl LoggedNativeSummary {
 mod tests {
     use super::{
         apply_claude_fix, apply_codex_fix, apply_pi_fix, apply_safe_fixes, claude_repo_findings,
-        codex_repo_findings, merge_claude_hooks, merge_codex_hooks, parse_latest_log_summaries,
-        pi_repo_findings, resolve_requested_repo_root, runtime_findings, runtime_findings_scoped,
-        DoctorFixMode, DoctorFixStatus, LoggedNativeSummary, RuntimeDoctorContext,
+        codex_repo_findings, config_findings, hook_error_signature, merge_claude_hooks,
+        merge_codex_hooks, parse_latest_log_summaries, pi_repo_findings,
+        resolve_requested_repo_root, runtime_findings, runtime_findings_scoped, DoctorFixMode,
+        DoctorFixStatus, DoctorSeverity, LoggedNativeSummary, RuntimeDoctorContext,
         SetupProviderSelection, SetupScopeSelection,
     };
     use crate::app::{
@@ -2293,6 +2462,8 @@ mod tests {
         WindowBuilder,
     };
     use crate::config::{AppConfig, RuntimeConfig};
+    use crate::services::startup_cache::write_startup_cache;
+    use crate::services::ui_preferences::{save_ui_preferences, PersistedUiPreferences};
     use clap::Parser;
     use std::sync::Mutex;
     use tempfile::tempdir;
@@ -2305,6 +2476,7 @@ mod tests {
                 config_file: config_file.to_path_buf(),
                 log_dir: log_dir.to_path_buf(),
                 startup_cache_dir: crate::config::default_startup_cache_dir(log_dir),
+                ui_preferences_file: crate::config::default_ui_preferences_file(config_file),
             },
             AppConfig::default(),
             &crate::cli::Cli::parse_from(["foreman"]),
@@ -2328,6 +2500,80 @@ mod tests {
             Ok(value) => value,
             Err(payload) => std::panic::resume_unwind(payload),
         }
+    }
+
+    #[test]
+    fn config_findings_report_startup_cache_inventory_readout() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let config_file = temp_dir.path().join("config.toml");
+        std::fs::write(&config_file, "[ui]\n").expect("config should exist");
+        let runtime = sample_runtime(&config_file, temp_dir.path().join("logs").as_path());
+        let inventory = inventory([SessionBuilder::new("alpha")
+            .window(WindowBuilder::new("alpha:agents").pane(
+                PaneBuilder::agent("%1", HarnessKind::ClaudeCode).working_dir("/tmp/alpha"),
+            ))]);
+        write_startup_cache(&runtime, &inventory).expect("cache should write");
+
+        let findings = config_findings(&runtime, None);
+        let finding = findings
+            .iter()
+            .find(|finding| finding.id == "startup-cache")
+            .expect("startup cache finding should be present");
+
+        assert_eq!(finding.severity, super::DoctorSeverity::Ok);
+        assert!(finding
+            .detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("path="));
+        assert!(finding
+            .evidence
+            .iter()
+            .any(|evidence| evidence == "last_inventory sessions=1 windows=1 panes=1"));
+    }
+
+    #[test]
+    fn config_findings_report_invalid_ui_preferences() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let config_file = temp_dir.path().join("config.toml");
+        std::fs::write(&config_file, "[ui]\n").expect("config should exist");
+        let runtime = sample_runtime(&config_file, temp_dir.path().join("logs").as_path());
+        std::fs::write(&runtime.ui_preferences_file, "{invalid-json")
+            .expect("ui preferences should be written");
+
+        let findings = config_findings(&runtime, None);
+        let finding = findings
+            .iter()
+            .find(|finding| finding.id == "ui-preferences")
+            .expect("ui preferences finding should be present");
+
+        assert_eq!(finding.severity, DoctorSeverity::Warn);
+        assert!(finding
+            .next_step
+            .as_deref()
+            .unwrap_or_default()
+            .contains("--reset-ui-state"));
+    }
+
+    #[test]
+    fn config_findings_report_readable_ui_preferences() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let config_file = temp_dir.path().join("config.toml");
+        std::fs::write(&config_file, "[ui]\n").expect("config should exist");
+        let runtime = sample_runtime(&config_file, temp_dir.path().join("logs").as_path());
+        save_ui_preferences(
+            &runtime.ui_preferences_file,
+            &PersistedUiPreferences::default(),
+        )
+        .expect("ui preferences should be written");
+
+        let findings = config_findings(&runtime, None);
+        let finding = findings
+            .iter()
+            .find(|finding| finding.id == "ui-preferences")
+            .expect("ui preferences finding should be present");
+
+        assert_eq!(finding.severity, DoctorSeverity::Ok);
     }
 
     #[test]
@@ -2454,6 +2700,17 @@ mod tests {
 }"#;
         let (_, changed) = merge_claude_hooks(Some(original)).expect("merge should work");
         assert!(!changed);
+    }
+
+    #[test]
+    fn hook_error_signature_ignores_stale_scrollback_errors() {
+        let preview = "PostToolUse:Edit hook error\nFailed with non-blocking status code\n\nPushed branch. Ready for PR.\n────────────────────────\n❯\n────────────────────────\n-- INSERT -- ⏵⏵ bypass permissions on";
+
+        assert_eq!(hook_error_signature(preview), None);
+        assert_eq!(
+            hook_error_signature("All good\nStop hook error: Failed to run"),
+            Some("hook error")
+        );
     }
 
     #[test]

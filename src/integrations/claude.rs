@@ -1,5 +1,5 @@
 use super::native;
-use super::{status_from_hints, CompatibilityObservation, StatusHints};
+use super::{status_from_recent_preview_lines, CompatibilityObservation, StatusHints};
 use crate::app::{AgentStatus, HarnessKind, Inventory};
 
 const RECOGNITION_TOKENS: &[&str] = &["claude", "claude code"];
@@ -26,8 +26,20 @@ const STATUS_HINTS: StatusHints = StatusHints {
         "analyzing",
         "updating",
     ],
-    idle: &["ready", "idle", "awaiting task", "waiting for task", "done"],
+    idle: &[
+        "ready",
+        "idle",
+        "awaiting task",
+        "waiting for task",
+        "done",
+        "new task?",
+        "/clear to save",
+        "-- insert --",
+        "bypass permissions on",
+    ],
 };
+
+const RECENT_STATUS_LINES: usize = 24;
 
 pub use native::{
     FileNativeSignalSource as FileClaudeNativeSignalSource,
@@ -40,7 +52,7 @@ pub(crate) fn recognition_tokens() -> &'static [&'static str] {
 }
 
 pub(crate) fn compatibility_status(observation: CompatibilityObservation<'_>) -> AgentStatus {
-    status_from_hints(observation, STATUS_HINTS)
+    status_from_recent_preview_lines(observation, STATUS_HINTS, RECENT_STATUS_LINES)
 }
 
 pub fn apply_native_signals<S: ClaudeNativeSignalSource>(
@@ -102,6 +114,23 @@ mod tests {
         assert_eq!(
             compatibility_status(observation(Some("claude"), "shell", "Claude ready")),
             AgentStatus::Idle
+        );
+
+        assert_eq!(
+            compatibility_status(observation(
+                Some("claude.exe"),
+                "✳ Claude Code",
+                "PostToolUse:Edit hook error\nFailed with non-blocking status code\n────────────────────────\n-- INSERT -- ⏵⏵ bypass permissions on (shift+tab to cycle) · new task? /clear to save",
+            )),
+            AgentStatus::Idle
+        );
+        assert_eq!(
+            compatibility_status(observation(
+                Some("claude.exe"),
+                "✳ Claude Code",
+                "All good\n────────────────────────\nError: current hook failed",
+            )),
+            AgentStatus::Error
         );
     }
 

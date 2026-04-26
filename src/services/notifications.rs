@@ -216,67 +216,88 @@ pub fn evaluate_inventory_notifications(
     context: NotificationPolicyContext<'_>,
     cooldowns: &std::collections::BTreeMap<NotificationCooldownKey, u64>,
 ) -> Vec<NotificationDecision> {
-    current
-        .sessions
-        .iter()
-        .flat_map(|session| session.windows.iter())
-        .flat_map(|window| window.panes.iter())
-        .filter_map(|pane| {
-            let current_agent = pane.agent.as_ref()?;
-            let previous_agent = previous.pane(&pane.id)?.agent.as_ref()?;
-            let (kind, transition_reason) =
-                transition_kind(previous_agent.status, current_agent.status)?;
+    let mut decisions = Vec::new();
+    for session in &current.sessions {
+        for window in &session.windows {
+            for pane in &window.panes {
+                let Some(current_agent) = pane.agent.as_ref() else {
+                    continue;
+                };
+                let Some(previous_agent) =
+                    previous.pane(&pane.id).and_then(|pane| pane.agent.as_ref())
+                else {
+                    continue;
+                };
+                let Some((kind, transition_reason)) =
+                    transition_kind(previous_agent.status, current_agent.status)
+                else {
+                    continue;
+                };
 
-            if context.muted {
-                return Some(NotificationDecision {
+                if context.muted {
+                    decisions.push(NotificationDecision {
+                        pane_id: pane.id.clone(),
+                        kind,
+                        reason: NotificationDecisionReason::Muted,
+                        request: None,
+                    });
+                    continue;
+                }
+
+                if !context.profile.allows(kind) {
+                    decisions.push(NotificationDecision {
+                        pane_id: pane.id.clone(),
+                        kind,
+                        reason: NotificationDecisionReason::ProfileFiltered,
+                        request: None,
+                    });
+                    continue;
+                }
+
+                if context.selected_pane_id == Some(&pane.id) {
+                    decisions.push(NotificationDecision {
+                        pane_id: pane.id.clone(),
+                        kind,
+                        reason: NotificationDecisionReason::SelectedPane,
+                        request: None,
+                    });
+                    continue;
+                }
+
+                let cooldown_key = NotificationCooldownKey {
                     pane_id: pane.id.clone(),
                     kind,
-                    reason: NotificationDecisionReason::Muted,
-                    request: None,
-                });
-            }
+                };
+                if cooldowns.get(&cooldown_key).is_some_and(|last_tick| {
+                    context.refresh_tick.saturating_sub(*last_tick) < context.cooldown_ticks
+                }) {
+                    decisions.push(NotificationDecision {
+                        pane_id: pane.id.clone(),
+                        kind,
+                        reason: NotificationDecisionReason::CooldownActive,
+                        request: None,
+                    });
+                    continue;
+                }
 
-            if !context.profile.allows(kind) {
-                return Some(NotificationDecision {
+                decisions.push(NotificationDecision {
                     pane_id: pane.id.clone(),
                     kind,
-                    reason: NotificationDecisionReason::ProfileFiltered,
-                    request: None,
+                    reason: transition_reason,
+                    request: Some(notification_request(
+                        pane,
+                        Some(NotificationLocationContext {
+                            session_name: &session.name,
+                            window_name: &window.name,
+                        }),
+                        kind,
+                    )),
                 });
             }
+        }
+    }
 
-            if context.selected_pane_id == Some(&pane.id) {
-                return Some(NotificationDecision {
-                    pane_id: pane.id.clone(),
-                    kind,
-                    reason: NotificationDecisionReason::SelectedPane,
-                    request: None,
-                });
-            }
-
-            let cooldown_key = NotificationCooldownKey {
-                pane_id: pane.id.clone(),
-                kind,
-            };
-            if cooldowns.get(&cooldown_key).is_some_and(|last_tick| {
-                context.refresh_tick.saturating_sub(*last_tick) < context.cooldown_ticks
-            }) {
-                return Some(NotificationDecision {
-                    pane_id: pane.id.clone(),
-                    kind,
-                    reason: NotificationDecisionReason::CooldownActive,
-                    request: None,
-                });
-            }
-
-            Some(NotificationDecision {
-                pane_id: pane.id.clone(),
-                kind,
-                reason: transition_reason,
-                request: Some(notification_request(pane, kind)),
-            })
-        })
-        .collect()
+    decisions
 }
 
 fn configured_backend(name: NotificationBackendName) -> Box<dyn NotificationBackend> {
@@ -321,15 +342,45 @@ fn transition_kind(
     None
 }
 
-fn notification_request(pane: &Pane, kind: NotificationKind) -> NotificationRequest {
+struct NotificationLocationContext<'a> {
+    session_name: &'a str,
+    window_name: &'a str,
+}
+
+fn notification_request(
+    pane: &Pane,
+    location_context: Option<NotificationLocationContext<'_>>,
+    kind: NotificationKind,
+) -> NotificationRequest {
+    let target = pane.navigation_title();
+    let workspace = pane
+        .working_dir
+        .as_ref()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "unknown workspace".to_string());
+    let source = pane
+        .agent
+        .as_ref()
+        .map(|agent| agent.integration_mode.source_label())
+        .unwrap_or("tmux capture");
+    let tmux_location = location_context
+        .map(|context| format!("{} / {}", context.session_name, context.window_name))
+        .unwrap_or_else(|| "unknown tmux location".to_string());
+    let location = format!(
+        "{} · {} · {} · {}",
+        tmux_location,
+        pane.id.as_str(),
+        workspace,
+        source
+    );
     let (title, body) = match kind {
         NotificationKind::Completion => (
-            format!("Agent ready: {}", pane.title),
-            "The agent returned to an idle state.".to_string(),
+            format!("Agent ready: {target}"),
+            format!("Returned to idle. {location}"),
         ),
         NotificationKind::NeedsAttention => (
-            format!("Needs attention: {}", pane.title),
-            "The agent is waiting for input or intervention.".to_string(),
+            format!("Needs attention: {target}"),
+            format!("Waiting for input or intervention. {location}"),
         ),
     };
 
@@ -394,7 +445,12 @@ mod tests {
             NotificationDecisionReason::WorkingBecameReady
         );
         assert_eq!(decisions[0].kind, NotificationKind::Completion);
-        assert!(decisions[0].request.is_some());
+        let request = decisions[0]
+            .request
+            .as_ref()
+            .expect("request should be built");
+        assert!(request.body.contains("alpha / alpha:agents"));
+        assert!(request.body.contains("alpha:claude"));
     }
 
     #[test]

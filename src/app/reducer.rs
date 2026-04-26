@@ -37,6 +37,9 @@ pub enum Effect {
     CopyToClipboard {
         text: String,
     },
+    RefreshPullRequest {
+        workspace_path: std::path::PathBuf,
+    },
     Notify {
         request: NotificationRequest,
     },
@@ -106,6 +109,9 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
         }
         Action::SetStartupCacheAge(startup_cache_age_ms) => {
             state.startup_cache_age_ms = startup_cache_age_ms;
+            if startup_cache_age_ms.is_none() {
+                state.startup_cache_path = None;
+            }
         }
         Action::SetStartupError(startup_error) => {
             state.startup_error = startup_error;
@@ -210,6 +216,25 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             state.mode = Mode::Normal;
             state.focus = Focus::Sidebar;
             state.modal = None;
+        }
+        Action::SetPullRequestRefreshing {
+            workspace_path,
+            refreshing,
+        } => {
+            if refreshing {
+                state.pull_request_refreshing_workspace = Some(workspace_path);
+            } else if state
+                .pull_request_refreshing_workspace
+                .as_ref()
+                .is_some_and(|current| current == &workspace_path)
+            {
+                state.pull_request_refreshing_workspace = None;
+            }
+        }
+        Action::RefreshSelectedPullRequest => {
+            if let Some(workspace_path) = state.selected_workspace_path() {
+                return vec![Effect::RefreshPullRequest { workspace_path }];
+            }
         }
         Action::OpenSelectedPullRequest => {
             if let Some(pull_request) = state.selected_pull_request() {

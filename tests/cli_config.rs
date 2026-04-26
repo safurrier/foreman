@@ -302,7 +302,9 @@ fn help_surfaces_setup_first_run_flow() {
     assert!(stdout.contains("foreman --doctor"));
     assert!(stdout.contains("foreman --setup --project --codex --repo /path/to/repo"));
     assert!(stdout.contains("--repo <REPO>"));
-    assert!(!stdout.contains("--doctor-fix"));
+    assert!(stdout.contains("foreman --config-show"));
+    assert!(stdout.contains("foreman --doctor --doctor-fix --doctor-dry-run"));
+    assert!(stdout.contains("--doctor-fix"));
 }
 
 #[test]

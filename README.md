@@ -2,7 +2,7 @@
 
 TUI for managing AI agents across tmux
 
-Current crate version: `1.0.0`
+Current crate version: `1.1.0`
 
 ## Quick Start
 
@@ -149,16 +149,22 @@ Useful timing lines:
 
 `inventory_tmux` now also shows how many panes were freshly captured vs reused
 from cached previews on that refresh, which is the first thing to check if
-local lag still feels tied to tmux polling.
+local lag still feels tied to tmux polling. Startup cache lines include the cache
+path and age so popup startup behavior is easier to debug. `foreman --doctor` also
+reports the popup cache path, freshness window, age, and last inventory counts.
 
-Theme selection:
+UI preferences:
 
 ```toml
+[monitoring]
+startup_cache_max_age_ms = 300000
+
 [ui]
 theme = "catppuccin" # catppuccin | gruvbox | tokyo-night | nord | dracula | terminal | no-color
+default_sort = "stable" # stable | attention-recent
 ```
 
-You can also cycle themes live with `t` in normal mode.
+Foreman also persists runtime UI choices such as theme, sort mode, filters, collapsed sessions, and the last selected target in `ui-state.json` next to the resolved config file. Explicit `[ui].theme` and `[ui].default_sort` config values win over persisted values; persisted values fill in only when those keys are omitted. You can cycle themes live with `t` and sort modes live with `o` in normal mode. Use `foreman --reset-ui-state` to remove persisted UI choices.
 
 Contributor docs:
 - [`docs/tour.md`](docs/tour.md) — repo quickstart and reading order
@@ -361,7 +367,11 @@ mise run plan -- <slug>
 | `mise run check` | Fast quality gate (fmt + lint + typecheck + test) |
 | `mise run dev` | Run `foreman` from source |
 | `foreman --setup --user --project` | Initialize config and wire user-level plus project-level Claude, Codex, and Pi integration |
-| `foreman --doctor` | Diagnose local install, hook wiring, and live runtime fallback from the current repo |
+| `foreman --config-show` | Print resolved config, UI state, popup cache, and runtime values |
+| `foreman --doctor` | Diagnose local install, hook wiring, popup cache, UI state, and live runtime fallback from the current repo |
+| `foreman --doctor --doctor-fix --doctor-dry-run` | Preview safe doctor repairs before writing setup/config files |
+| `foreman --doctor --doctor-fix` | Apply safe doctor repairs such as missing config, native dirs, and provider wiring |
+| `foreman --reset-ui-state` | Remove persisted sort/theme/filter/collapse/selection choices for the resolved config |
 | `mise run ci` | CI entrypoint (= check) |
 | `mise run plan -- <slug>` | Create a plan directory for a unit of work |
 | `mise run verify` | Heavy validation (integration, docker, security) |
@@ -385,7 +395,7 @@ mise run plan -- <slug>
 3. Run `mise run verify-release` if you want the release-confidence report locally before tagging.
 4. If the release touches native harness behavior, run `mise run native-preflight`
    first, then strict `mise run verify-native`.
-5. Push a matching annotated tag such as `v1.0.0`.
+5. Push a matching annotated tag such as `v1.1.0`.
 6. GitHub Actions verifies the repo and publishes release bundles.
 
 Validation evidence now lands in a stable root:

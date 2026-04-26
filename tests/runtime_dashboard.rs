@@ -141,8 +141,9 @@ fn interactive_binary_renders_dashboard_and_sends_input_to_selected_agent() {
 
     let config_dir = tempdir().expect("config dir should exist");
     let log_dir = tempdir().expect("log dir should exist");
+    let latest_log_path = log_dir.path().join("latest.log");
     let dashboard_command = format!(
-        "FOREMAN_CONFIG_HOME={} FOREMAN_LOG_DIR={} {} --tmux-socket {} --poll-interval-ms 100 --capture-lines 20 --no-notify",
+        "FOREMAN_CONFIG_HOME={} FOREMAN_LOG_DIR={} {} --tmux-socket {} --poll-interval-ms 100 --capture-lines 20 --no-notify --debug",
         config_dir.path().display(),
         log_dir.path().display(),
         foreman_bin(),
@@ -152,18 +153,22 @@ fn interactive_binary_renders_dashboard_and_sends_input_to_selected_agent() {
         "dashboard",
         &fixture.keep_alive_command(&dashboard_command, "FOREMAN_EXITED"),
     );
+    fixture.resize_window("dashboard", 180, 48);
 
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman");
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
 
     fixture.send_keys(&dashboard_pane, &["j", "j"]);
     fixture.wait_for_alt_capture(&dashboard_pane, "Compose ->");
+    fixture.send_keys(&dashboard_pane, &["o"]);
+    fixture.wait_for_alt_capture(&dashboard_pane, "attention->recent");
 
     fixture.send_keys(&dashboard_pane, &["i", "h", "i", "Enter"]);
     fixture.wait_for_capture(&agent_pane, "INPUT:hi");
 
     fixture.send_keys(&dashboard_pane, &["q"]);
     fixture.wait_for_capture(&dashboard_pane, "FOREMAN_EXITED");
+    wait_for_log_contains(&latest_log_path, "ui_preferences_write", 40);
 }
 
 #[test]

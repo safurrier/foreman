@@ -44,13 +44,41 @@ pub struct LoadedStartupCache {
     pub path: PathBuf,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StartupCacheInventorySummary {
+    pub sessions: usize,
+    pub windows: usize,
+    pub panes: usize,
+}
+
+impl StartupCacheInventorySummary {
+    fn from_inventory(inventory: &Inventory) -> Self {
+        Self {
+            sessions: inventory.session_count(),
+            windows: inventory.window_count(),
+            panes: inventory.pane_count(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StartupCacheLoadResult {
     Loaded(LoadedStartupCache),
-    Missing { path: PathBuf },
-    Stale { path: PathBuf, age_ms: u64 },
-    Empty { path: PathBuf },
-    Invalid { path: PathBuf, reason: String },
+    Missing {
+        path: PathBuf,
+    },
+    Stale {
+        path: PathBuf,
+        age_ms: u64,
+        inventory: StartupCacheInventorySummary,
+    },
+    Empty {
+        path: PathBuf,
+    },
+    Invalid {
+        path: PathBuf,
+        reason: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,7 +144,11 @@ pub fn load_startup_cache(
     let now_ms = current_time_ms();
     let age_ms = now_ms.saturating_sub(cache_file.generated_at_ms);
     if age_ms > max_age_ms {
-        return Ok(StartupCacheLoadResult::Stale { path, age_ms });
+        return Ok(StartupCacheLoadResult::Stale {
+            path,
+            age_ms,
+            inventory: StartupCacheInventorySummary::from_inventory(&cache_file.inventory),
+        });
     }
 
     Ok(StartupCacheLoadResult::Loaded(LoadedStartupCache {
@@ -184,7 +216,9 @@ mod tests {
     use super::{
         load_startup_cache, startup_cache_file_path, write_startup_cache, StartupCacheLoadResult,
     };
-    use crate::app::{inventory, HarnessKind, PaneBuilder, SessionBuilder, WindowBuilder};
+    use crate::app::{
+        inventory, HarnessKind, PaneBuilder, SessionBuilder, SortMode, WindowBuilder,
+    };
     use crate::config::{
         IntegrationPreference, LogVerbosity, NotificationBackendName, RuntimeConfig,
     };
@@ -197,6 +231,7 @@ mod tests {
             config_file: root.join("config.toml"),
             log_dir: root.join("logs"),
             startup_cache_dir: root.join("cache"),
+            ui_preferences_file: root.join("ui-state.json"),
             tmux_socket: Some(root.join("tmux.sock")),
             claude_native_dir: None,
             codex_native_dir: None,
@@ -204,6 +239,7 @@ mod tests {
             log_verbosity: LogVerbosity::Info,
             poll_interval_ms: 1500,
             capture_lines: 40,
+            startup_cache_max_age_ms: crate::config::DEFAULT_STARTUP_CACHE_MAX_AGE_MS,
             popup: true,
             pull_request_monitoring_enabled: true,
             pull_request_poll_interval_ms: 30_000,
@@ -219,6 +255,9 @@ mod tests {
             pi_integration_preference: IntegrationPreference::Auto,
             log_retention: 5,
             theme: ThemeName::Catppuccin,
+            default_sort: SortMode::Stable,
+            ui_theme_configured: false,
+            ui_default_sort_configured: false,
         }
     }
 
@@ -248,6 +287,30 @@ mod tests {
                 assert!(loaded.age_ms < 60_000);
             }
             other => panic!("expected loaded cache, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stale_startup_cache_keeps_inventory_counts_for_diagnostics() {
+        let root = tempdir().expect("temp dir should exist");
+        let runtime = runtime_config(root.path());
+        let inventory = sample_inventory();
+        write_startup_cache(&runtime, &inventory).expect("cache write should work");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+
+        let load = load_startup_cache(&runtime, 0).expect("cache lookup should work");
+
+        match load {
+            StartupCacheLoadResult::Stale {
+                inventory,
+                age_ms: _,
+                path: _,
+            } => {
+                assert_eq!(inventory.sessions, 1);
+                assert_eq!(inventory.windows, 1);
+                assert_eq!(inventory.panes, 1);
+            }
+            other => panic!("expected stale cache, got {other:?}"),
         }
     }
 

@@ -1,4 +1,4 @@
-use crate::app::NotificationProfile;
+use crate::app::{NotificationProfile, SortMode};
 use crate::ui::theme::ThemeName;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -10,6 +10,7 @@ const APP_DIR_NAME: &str = "foreman";
 const CONFIG_FILE_NAME: &str = "config.toml";
 pub const DEFAULT_LOG_RETENTION: usize = 20;
 pub const DEFAULT_NOTIFICATION_COOLDOWN_TICKS: u64 = 3;
+pub const DEFAULT_STARTUP_CACHE_MAX_AGE_MS: u64 = 5 * 60_000;
 
 fn default_enabled() -> bool {
     true
@@ -93,6 +94,7 @@ pub struct AppPaths {
     pub config_file: PathBuf,
     pub log_dir: PathBuf,
     pub startup_cache_dir: PathBuf,
+    pub ui_preferences_file: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -104,6 +106,14 @@ pub struct AppConfig {
     pub pull_requests: PullRequestConfig,
     pub integrations: IntegrationConfig,
     pub ui: UiConfig,
+    #[serde(skip)]
+    pub ui_sources: UiConfigSources,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct UiConfigSources {
+    pub theme: bool,
+    pub default_sort: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -111,6 +121,7 @@ pub struct AppConfig {
 pub struct MonitoringConfig {
     pub poll_interval_ms: u64,
     pub capture_lines: usize,
+    pub startup_cache_max_age_ms: u64,
 }
 
 impl Default for MonitoringConfig {
@@ -118,6 +129,7 @@ impl Default for MonitoringConfig {
         Self {
             poll_interval_ms: 1_500,
             capture_lines: 40,
+            startup_cache_max_age_ms: DEFAULT_STARTUP_CACHE_MAX_AGE_MS,
         }
     }
 }
@@ -177,6 +189,7 @@ impl Default for PullRequestConfig {
 #[serde(default)]
 pub struct UiConfig {
     pub theme: ThemeName,
+    pub default_sort: SortMode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -254,6 +267,7 @@ pub struct RuntimeConfig {
     pub config_file: PathBuf,
     pub log_dir: PathBuf,
     pub startup_cache_dir: PathBuf,
+    pub ui_preferences_file: PathBuf,
     pub tmux_socket: Option<PathBuf>,
     pub claude_native_dir: Option<PathBuf>,
     pub codex_native_dir: Option<PathBuf>,
@@ -261,6 +275,7 @@ pub struct RuntimeConfig {
     pub log_verbosity: LogVerbosity,
     pub poll_interval_ms: u64,
     pub capture_lines: usize,
+    pub startup_cache_max_age_ms: u64,
     pub popup: bool,
     pub pull_request_monitoring_enabled: bool,
     pub pull_request_poll_interval_ms: u64,
@@ -273,6 +288,9 @@ pub struct RuntimeConfig {
     pub pi_integration_preference: IntegrationPreference,
     pub log_retention: usize,
     pub theme: ThemeName,
+    pub default_sort: SortMode,
+    pub ui_theme_configured: bool,
+    pub ui_default_sort_configured: bool,
 }
 
 impl RuntimeConfig {
@@ -297,6 +315,7 @@ impl RuntimeConfig {
             config_file: paths.config_file,
             log_dir: paths.log_dir,
             startup_cache_dir: paths.startup_cache_dir,
+            ui_preferences_file: paths.ui_preferences_file,
             tmux_socket: cli.tmux_socket.clone(),
             claude_native_dir,
             codex_native_dir,
@@ -312,6 +331,7 @@ impl RuntimeConfig {
             capture_lines: cli
                 .capture_lines
                 .unwrap_or(file_config.monitoring.capture_lines),
+            startup_cache_max_age_ms: file_config.monitoring.startup_cache_max_age_ms,
             popup: cli.popup,
             pull_request_monitoring_enabled: file_config.pull_requests.enabled,
             pull_request_poll_interval_ms: file_config.pull_requests.poll_interval_ms,
@@ -328,6 +348,9 @@ impl RuntimeConfig {
             pi_integration_preference: file_config.integrations.pi.mode,
             log_retention: file_config.logging.retain_run_logs,
             theme: file_config.ui.theme,
+            default_sort: file_config.ui.default_sort,
+            ui_theme_configured: file_config.ui_sources.theme,
+            ui_default_sort_configured: file_config.ui_sources.default_sort,
         }
     }
 }
@@ -359,11 +382,13 @@ pub fn resolve_paths_with_env(
     };
 
     let startup_cache_dir = default_startup_cache_dir(&log_dir);
+    let ui_preferences_file = default_ui_preferences_file(&config_file);
 
     Ok(AppPaths {
         config_file,
         log_dir,
         startup_cache_dir,
+        ui_preferences_file,
     })
 }
 
@@ -373,7 +398,20 @@ pub fn load_config(path: &Path) -> Result<AppConfig, ConfigError> {
     }
 
     let contents = fs::read_to_string(path)?;
-    Ok(toml::from_str(&contents)?)
+    let value: toml::Value = toml::from_str(&contents)?;
+    let mut config: AppConfig = toml::from_str(&contents)?;
+    config.ui_sources = ui_config_sources(&value);
+    Ok(config)
+}
+
+fn ui_config_sources(value: &toml::Value) -> UiConfigSources {
+    let Some(ui) = value.get("ui").and_then(toml::Value::as_table) else {
+        return UiConfigSources::default();
+    };
+    UiConfigSources {
+        theme: ui.contains_key("theme"),
+        default_sort: ui.contains_key("default_sort"),
+    }
 }
 
 pub fn write_default_config(path: &Path) -> Result<(), ConfigError> {
@@ -405,6 +443,11 @@ pub fn default_pi_native_dir(log_dir: &Path) -> PathBuf {
 pub fn default_startup_cache_dir(log_dir: &Path) -> PathBuf {
     let state_dir = log_dir.parent().unwrap_or(log_dir);
     state_dir.join("cache")
+}
+
+pub fn default_ui_preferences_file(config_file: &Path) -> PathBuf {
+    let state_dir = config_file.parent().unwrap_or(config_file);
+    state_dir.join("ui-state.json")
 }
 
 fn default_native_dir(log_dir: &Path, leaf: &str) -> PathBuf {
@@ -456,16 +499,17 @@ fn resolve_log_dir(env: &PathEnvironment) -> Result<PathBuf, ConfigError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        default_claude_native_dir, default_codex_native_dir, default_pi_native_dir,
+        default_claude_native_dir, default_codex_native_dir, default_pi_native_dir, load_config,
         resolve_paths_with_env, write_default_config, AppConfig, ConfigError,
         IntegrationPreference, LoggingConfig, NotificationBackendName, NotificationConfig,
         PathEnvironment, PullRequestConfig, RuntimeConfig, UiConfig,
-        DEFAULT_NOTIFICATION_COOLDOWN_TICKS,
+        DEFAULT_NOTIFICATION_COOLDOWN_TICKS, DEFAULT_STARTUP_CACHE_MAX_AGE_MS,
     };
-    use crate::app::NotificationProfile;
+    use crate::app::{NotificationProfile, SortMode};
     use crate::cli::Cli;
     use crate::ui::theme::ThemeName;
     use clap::Parser;
+    use std::fs;
     use std::path::Path;
     use tempfile::tempdir;
 
@@ -569,6 +613,9 @@ mod tests {
                 config_file: Path::new("/tmp/config.toml").to_path_buf(),
                 log_dir: Path::new("/tmp/logs").to_path_buf(),
                 startup_cache_dir: super::default_startup_cache_dir(Path::new("/tmp/logs")),
+                ui_preferences_file: super::default_ui_preferences_file(Path::new(
+                    "/tmp/config.toml",
+                )),
             },
             AppConfig::default(),
             &cli,
@@ -576,6 +623,10 @@ mod tests {
 
         assert_eq!(runtime.poll_interval_ms, 250);
         assert_eq!(runtime.capture_lines, 400);
+        assert_eq!(
+            runtime.startup_cache_max_age_ms,
+            DEFAULT_STARTUP_CACHE_MAX_AGE_MS
+        );
         assert_eq!(runtime.tmux_socket, None);
         assert_eq!(
             runtime.claude_native_dir,
@@ -623,6 +674,9 @@ mod tests {
             IntegrationPreference::Auto
         );
         assert_eq!(runtime.theme, ThemeName::Catppuccin);
+        assert_eq!(runtime.default_sort, SortMode::Stable);
+        assert!(!runtime.ui_theme_configured);
+        assert!(!runtime.ui_default_sort_configured);
     }
 
     #[test]
@@ -664,6 +718,7 @@ enabled = false
         assert_eq!(parsed.integrations.pi.mode, IntegrationPreference::Auto);
         assert_eq!(parsed.integrations.pi.native_dir, None);
         assert_eq!(parsed.ui.theme, ThemeName::Catppuccin);
+        assert_eq!(parsed.ui.default_sort, SortMode::Stable);
     }
 
     #[test]
@@ -690,6 +745,7 @@ native_dir = "/tmp/pi-native"
 
 [ui]
 theme = "dracula"
+default_sort = "attention-recent"
 "#,
         )
         .expect("config should parse");
@@ -728,6 +784,7 @@ theme = "dracula"
             Some(Path::new("/tmp/pi-native").to_path_buf())
         );
         assert_eq!(parsed.ui.theme, ThemeName::Dracula);
+        assert_eq!(parsed.ui.default_sort, SortMode::AttentionFirst);
     }
 
     #[test]
@@ -753,6 +810,46 @@ theme = "{label}"
 
             assert_eq!(parsed.ui.theme, expected);
         }
+    }
+
+    #[test]
+    fn config_parsing_supports_public_default_sort_names() {
+        let cases = [
+            ("stable", SortMode::Stable),
+            ("attention-recent", SortMode::AttentionFirst),
+            ("attention-first", SortMode::AttentionFirst),
+        ];
+
+        for (label, expected) in cases {
+            let parsed: AppConfig = toml::from_str(&format!(
+                r#"
+[ui]
+default_sort = "{label}"
+"#
+            ))
+            .expect("config should parse");
+
+            assert_eq!(parsed.ui.default_sort, expected);
+        }
+    }
+
+    #[test]
+    fn load_config_tracks_explicit_ui_preference_keys() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let config_path = temp_dir.path().join("config.toml");
+        fs::write(
+            &config_path,
+            r#"
+[ui]
+default_sort = "attention-recent"
+"#,
+        )
+        .expect("config should be written");
+
+        let config = load_config(&config_path).expect("config should load");
+
+        assert!(!config.ui_sources.theme);
+        assert!(config.ui_sources.default_sort);
     }
 
     #[test]

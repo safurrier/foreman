@@ -299,6 +299,7 @@ yet expose a stable contract.
 - Foreman uses a user-scoped config file.
 - Config supports pane polling interval.
 - Config supports pane capture depth.
+- Config supports popup startup cache freshness.
 - Config supports per-harness integration mode selection or preference where multiple modes are possible.
 - Config supports pull request monitoring enablement and cadence.
 - Config supports notification enablement.
@@ -307,6 +308,8 @@ yet expose a stable contract.
 - Config supports a small set of built-in named notification profiles.
 - Config supports selection of the active notification profile.
 - Config supports selection of the default UI theme.
+- Config supports selection of the startup sort mode with `stable` and `attention-recent` values.
+- Runtime UI choices may persist across launches, including sort mode, theme, filters, collapsed sessions, and last selected target.
 - Built-in UI themes include `catppuccin`, `gruvbox`, `tokyo-night`, `nord`,
   `dracula`, `terminal`, and `no-color`.
 - Config may override the local signal directory or equivalent bridge path for
@@ -546,10 +549,13 @@ mise run ci
 **A15. Sorting**
 
 - Given the dashboard is running, cycling sort mode reorders the sidebar by the selected preset (`stable` or `attention -> recent`) and preserves the current logical selection where possible.
+- Given `[ui].default_sort = "attention-recent"`, startup uses the attention/recent order before the operator presses `o`, even when persisted UI state contains a different sort.
+- Given the operator changes sort/filter/theme/collapsed state or selection, a later launch restores those choices when the target still exists; explicit `[ui]` config keys override persisted theme/sort.
+- Given persisted UI state is corrupt or unwanted, `foreman --doctor` reports it and `foreman --reset-ui-state` removes it.
 
 **A16. Pull request awareness**
 
-- Given pull request monitoring is enabled and local tooling is available, when the selected workspace has an open pull request, compact pull request state appears, detail can be expanded, and browser or copy actions work.
+- Given pull request monitoring is enabled and local tooling is available, when the selected workspace has an open pull request, compact pull request state appears, detail can be expanded, manual refresh reports in-progress feedback, and browser or copy actions work.
 
 **A17. Pull request graceful degradation**
 

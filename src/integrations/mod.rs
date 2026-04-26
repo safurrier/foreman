@@ -233,23 +233,75 @@ pub(crate) fn status_from_hints(
     observation: CompatibilityObservation<'_>,
     hints: StatusHints,
 ) -> AgentStatus {
-    if matches_any(observation, hints.attention) {
+    status_from_text(&observation.haystack(), hints)
+}
+
+pub(crate) fn status_from_recent_preview_lines(
+    observation: CompatibilityObservation<'_>,
+    hints: StatusHints,
+    max_lines: usize,
+) -> AgentStatus {
+    for line in observation
+        .preview
+        .lines()
+        .rev()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .take(max_lines)
+    {
+        let status = status_from_text(&line.to_ascii_lowercase(), hints);
+        if status != AgentStatus::Unknown {
+            return status;
+        }
+    }
+
+    let tail = observation
+        .preview
+        .lines()
+        .rev()
+        .take(max_lines)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join("\n");
+    let haystack = format!(
+        "{}\n{}\n{}",
+        observation.current_command.unwrap_or_default(),
+        observation.title,
+        tail
+    )
+    .to_ascii_lowercase();
+    status_from_text(&haystack, hints)
+}
+
+fn status_from_text(haystack: &str, hints: StatusHints) -> AgentStatus {
+    if contains_any(haystack, hints.attention) {
         return AgentStatus::NeedsAttention;
     }
 
-    if matches_any(observation, hints.error) {
+    if contains_any(haystack, hints.error) {
         return AgentStatus::Error;
     }
 
-    if matches_any(observation, hints.working) {
+    if contains_any(haystack, hints.working) {
         return AgentStatus::Working;
     }
 
-    if matches_any(observation, hints.idle) {
+    if contains_any(haystack, hints.idle) {
         return AgentStatus::Idle;
     }
 
     AgentStatus::Unknown
+}
+
+fn contains_any<T>(haystack: &str, needles: impl IntoIterator<Item = T>) -> bool
+where
+    T: AsRef<str>,
+{
+    needles
+        .into_iter()
+        .any(|needle| haystack.contains(&needle.as_ref().to_ascii_lowercase()))
 }
 
 fn debounce_snapshot(previous: &AgentSnapshot, current: &mut AgentSnapshot) {
@@ -337,9 +389,7 @@ where
     T: AsRef<str>,
 {
     let haystack = observation.haystack();
-    needles
-        .into_iter()
-        .any(|needle| haystack.contains(&needle.as_ref().to_ascii_lowercase()))
+    contains_any(&haystack, needles)
 }
 
 #[cfg(test)]
