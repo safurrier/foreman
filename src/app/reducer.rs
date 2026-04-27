@@ -994,7 +994,7 @@ mod tests {
 
         assert_eq!(
             state.selection,
-            Some(SelectionTarget::Window("beta:agents".into()))
+            Some(SelectionTarget::Pane("beta:codex".into()))
         );
     }
 
@@ -1509,19 +1509,12 @@ mod tests {
             state.visible_targets(),
             vec![
                 SelectionTarget::Session("alpha".into()),
-                SelectionTarget::Window("alpha:agents".into()),
                 SelectionTarget::Pane("alpha:claude".into()),
             ]
         );
         assert_eq!(
             state.selection,
             Some(SelectionTarget::Session("alpha".into()))
-        );
-
-        reduce(&mut state, Action::MoveSelection(SelectionDirection::Next));
-        assert_eq!(
-            state.selection,
-            Some(SelectionTarget::Window("alpha:agents".into()))
         );
 
         reduce(&mut state, Action::MoveSelection(SelectionDirection::Next));

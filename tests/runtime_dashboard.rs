@@ -269,7 +269,7 @@ fn interactive_binary_help_and_harness_filter_walkthrough_stays_actionable() {
     fixture.wait_for_alt_capture(&dashboard_pane, "alpha");
     fixture.wait_for_alt_capture(&dashboard_pane, "beta");
     fixture.wait_for_alt_capture(&dashboard_pane, "Keys • Sidebar");
-    fixture.wait_for_alt_capture(&dashboard_pane, "Status source: compatibility heuristic");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Status source:  compatibility heuristic");
 
     fixture.send_keys(&dashboard_pane, &["?"]);
     fixture.wait_for_alt_capture(&dashboard_pane, "Focus: Sidebar");
@@ -319,16 +319,16 @@ fn interactive_binary_footer_tracks_focus_and_help_explains_provenance() {
     fixture.resize_window("dashboard", 160, 40);
 
     fixture.wait_for_alt_capture(&dashboard_pane, "Keys • Sidebar");
-    fixture.wait_for_alt_capture(&dashboard_pane, "Sidebar: j/k move");
-    fixture.wait_for_alt_capture(&dashboard_pane, "Status source: compatibility heuristic");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Move: j/k");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Status source:  compatibility heuristic");
 
     fixture.send_keys(&dashboard_pane, &["2"]);
     fixture.wait_for_alt_capture(&dashboard_pane, "Keys • Details");
-    fixture.wait_for_alt_capture(&dashboard_pane, "Details: j/k scroll");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Scroll: j/k");
 
     fixture.send_keys(&dashboard_pane, &["3"]);
     fixture.wait_for_alt_capture(&dashboard_pane, "Keys • Compose");
-    fixture.wait_for_alt_capture(&dashboard_pane, "Compose: Enter or i start");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Compose: Enter or i");
 
     fixture.send_keys(&dashboard_pane, &["?"]);
     fixture.wait_for_alt_capture(&dashboard_pane, "Focus: Compose");
@@ -399,6 +399,46 @@ fn interactive_binary_help_scrolls_in_small_layout() {
 }
 
 #[test]
+fn interactive_binary_popup_keeps_side_by_side_tree_layout() {
+    let fixture = TmuxFixture::new();
+    let agent_pane = fixture.new_session(
+        "alpha",
+        &fixture.interactive_echo_command("Claude Code ready", "CLAUDE:"),
+    );
+    fixture.wait_for_capture(&agent_pane, "Claude Code ready");
+
+    let config_dir = tempdir().expect("config dir should exist");
+    let log_dir = tempdir().expect("log dir should exist");
+    let dashboard_command = format!(
+        "FOREMAN_CONFIG_HOME={} FOREMAN_LOG_DIR={} {} --popup --tmux-socket {} --poll-interval-ms 100 --capture-lines 20 --no-notify",
+        config_dir.path().display(),
+        log_dir.path().display(),
+        foreman_bin(),
+        fixture.socket_path().display()
+    );
+    let dashboard_pane = fixture.new_session(
+        "dashboard",
+        &fixture.keep_alive_command(&dashboard_command, "FOREMAN_EXITED"),
+    );
+    fixture.resize_window("dashboard", 88, 20);
+
+    fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
+    fixture.wait_for_alt_capture(&dashboard_pane, "* Targets");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Details");
+
+    let capture = fixture.capture_alt(&dashboard_pane);
+    assert!(
+        capture
+            .lines()
+            .any(|line| line.contains("* Targets") && line.contains("Details")),
+        "expected popup layout to keep sidebar and details side-by-side:\n{capture}"
+    );
+
+    fixture.send_keys(&dashboard_pane, &["q"]);
+    fixture.wait_for_capture(&dashboard_pane, "FOREMAN_EXITED");
+}
+
+#[test]
 fn interactive_binary_popup_focus_action_exits_after_success() {
     let fixture = TmuxFixture::new();
     let helper_pane = fixture.new_session("alpha", &fixture.shell_command("plain shell"));
@@ -423,7 +463,7 @@ fn interactive_binary_popup_focus_action_exits_after_success() {
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman");
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
     fixture.wait_for_alt_capture(&dashboard_pane, "▾ alpha");
-    fixture.wait_for_alt_capture(&dashboard_pane, "• ✦ foreman");
+    fixture.wait_for_alt_capture(&dashboard_pane, "✦ foreman");
 
     fixture.send_keys(&dashboard_pane, &["f"]);
     fixture.wait_for_capture(&dashboard_pane, "FOREMAN_EXITED");
@@ -499,28 +539,28 @@ fn interactive_binary_surfaces_claude_native_status_and_attention_view() {
     fixture.resize_window("dashboard", 180, 48);
 
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
-    fixture.wait_for_alt_capture(&dashboard_pane, "Status source: compatibility heuristic");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Status source:  compatibility heuristic");
     fixture.send_keys(&dashboard_pane, &["/"]);
     send_text(&fixture, &dashboard_pane, "alpha");
     fixture.send_keys(&dashboard_pane, &["Enter"]);
-    fixture.wait_for_alt_capture(&dashboard_pane, "Target pane: • ✦ alpha");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Target:         ✦ alpha");
     fixture.send_keys(&dashboard_pane, &["o"]);
-    fixture.wait_for_alt_capture(&dashboard_pane, "View: attention->recent");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Sort: attention->recent");
 
     send_claude_hook_event(
         native_dir.path(),
         &alpha_pane,
         r#"{"hook_event_name":"UserPromptSubmit","prompt":"manual smoke"}"#,
     );
-    fixture.wait_for_alt_capture(&dashboard_pane, "Status source: native hook");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Status source:  native hook");
 
     send_claude_hook_event(
         native_dir.path(),
         &alpha_pane,
         r#"{"hook_event_name":"Notification","notification_type":"permission_prompt"}"#,
     );
-    fixture.wait_for_alt_capture(&dashboard_pane, "Target pane: ! ✦ alpha");
-    fixture.wait_for_alt_capture(&dashboard_pane, "Status source: native hook");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Status:         ATTENTION");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Status source:  native hook");
 
     fixture.send_keys(&dashboard_pane, &["q"]);
     fixture.wait_for_capture(&dashboard_pane, "FOREMAN_EXITED");
@@ -568,7 +608,7 @@ fn interactive_binary_popup_focus_action_switches_cross_session_target() {
     fixture.send_keys(&dashboard_pane, &["/"]);
     send_text(&fixture, &dashboard_pane, "beta");
     fixture.send_keys(&dashboard_pane, &["Enter"]);
-    fixture.wait_for_alt_capture(&dashboard_pane, "Target pane: ! ◎ beta");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Target:         ◎ beta");
     fixture.wait_for_alt_capture(&dashboard_pane, beta_dir.display().to_string().as_str());
 
     fixture.send_keys(&dashboard_pane, &["f"]);

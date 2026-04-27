@@ -23,7 +23,7 @@ use crate::services::pull_requests::{
 use crate::services::startup_cache::{current_time_ms, write_startup_cache};
 use crate::services::system_stats::{SysinfoSystemStatsBackend, SystemStatsService};
 use crate::services::ui_preferences::{save_ui_preferences, PersistedUiPreferences};
-use crate::ui::render::{render, sidebar_viewport_rows_for_area};
+use crate::ui::render::{render, sidebar_viewport_rows_for_area_with_popup};
 use crossterm::cursor::{Hide, Show};
 use crossterm::event::{self, Event};
 use crossterm::execute;
@@ -227,12 +227,15 @@ impl DashboardRuntime {
         self.logger.info("dashboard_started")?;
         self.logger.debug("dashboard_event_loop_started")?;
         self.apply_runtime_action(Action::SetSidebarViewportRows(
-            sidebar_viewport_rows_for_area(Rect {
-                x: 0,
-                y: 0,
-                width: initial_size.width,
-                height: initial_size.height,
-            }),
+            sidebar_viewport_rows_for_area_with_popup(
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: initial_size.width,
+                    height: initial_size.height,
+                },
+                self.state.popup_mode,
+            ),
         ))?;
 
         loop {
@@ -242,12 +245,15 @@ impl DashboardRuntime {
             self.drain_pull_request_lookup_results()?;
             self.maybe_flush_ui_preferences(false, "debounce")?;
             let current_size = terminal.size()?;
-            let sidebar_rows = sidebar_viewport_rows_for_area(Rect {
-                x: 0,
-                y: 0,
-                width: current_size.width,
-                height: current_size.height,
-            }) as usize;
+            let sidebar_rows = sidebar_viewport_rows_for_area_with_popup(
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: current_size.width,
+                    height: current_size.height,
+                },
+                self.state.popup_mode,
+            ) as usize;
             if self.state.sidebar_viewport_rows != sidebar_rows {
                 self.apply_runtime_action(Action::SetSidebarViewportRows(sidebar_rows as u16))?;
             }
@@ -314,12 +320,15 @@ impl DashboardRuntime {
                     }
                     Event::Resize(width, height) => {
                         self.apply_runtime_action(Action::SetSidebarViewportRows(
-                            sidebar_viewport_rows_for_area(Rect {
-                                x: 0,
-                                y: 0,
-                                width,
-                                height,
-                            }),
+                            sidebar_viewport_rows_for_area_with_popup(
+                                Rect {
+                                    x: 0,
+                                    y: 0,
+                                    width,
+                                    height,
+                                },
+                                self.state.popup_mode,
+                            ),
                         ))?;
                     }
                     Event::Mouse(_) | Event::FocusGained | Event::FocusLost => {}

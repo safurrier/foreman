@@ -33,6 +33,7 @@ EXPECTED_CAPTURE_PATHS = [
     ARTIFACT_DIR / "foreman-ux-gruvbox.png",
     ARTIFACT_DIR / "foreman-ux-no-color.png",
     ARTIFACT_DIR / "foreman-ux-help.png",
+    ARTIFACT_DIR / "foreman-ux-popup.png",
     ARTIFACT_DIR / "foreman-ux-search.png",
     ARTIFACT_DIR / "foreman-ux-flash.png",
 ]
@@ -40,6 +41,7 @@ INITIAL_SCREENSHOT_PATH = ARTIFACT_DIR / "foreman-ux-initial.png"
 GRUVBOX_SCREENSHOT_PATH = ARTIFACT_DIR / "foreman-ux-gruvbox.png"
 NO_COLOR_SCREENSHOT_PATH = ARTIFACT_DIR / "foreman-ux-no-color.png"
 HELP_SCREENSHOT_PATH = ARTIFACT_DIR / "foreman-ux-help.png"
+POPUP_SCREENSHOT_PATH = ARTIFACT_DIR / "foreman-ux-popup.png"
 SEARCH_SCREENSHOT_PATH = ARTIFACT_DIR / "foreman-ux-search.png"
 FLASH_SCREENSHOT_PATH = ARTIFACT_DIR / "foreman-ux-flash.png"
 
@@ -133,6 +135,22 @@ def write_tape() -> None:
                 "",
                 'Type "?"',
                 "Sleep 400ms",
+                'Type "q"',
+                "Sleep 300ms",
+                "Ctrl+L",
+                "Sleep 300ms",
+                'Type@0ms "FOREMAN_LOG_DIR=$log_dir target/debug/foreman --popup --no-notify --tmux-socket $socket"',
+                "Enter",
+                "Sleep 2200ms",
+                f'Screenshot "{POPUP_SCREENSHOT_PATH}"',
+                "Sleep 400ms",
+                'Type "q"',
+                "Sleep 300ms",
+                "Ctrl+L",
+                "Sleep 300ms",
+                'Type@0ms "FOREMAN_LOG_DIR=$log_dir target/debug/foreman --no-notify --tmux-socket $socket"',
+                "Enter",
+                "Sleep 1800ms",
                 'Type "/"',
                 "Sleep 500ms",
                 'Type "gamma"',

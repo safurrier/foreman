@@ -93,7 +93,7 @@ fn release_startup_navigation_gauntlet_proves_discovery_filters_and_help() {
         .wait_for_alt_capture(&dashboard, "Keys • Sidebar");
     harness
         .fixture()
-        .wait_for_alt_capture(&dashboard, "Status source: compatibility heuristic");
+        .wait_for_alt_capture(&dashboard, "Status source:  compatibility heuristic");
     harness
         .fixture()
         .wait_for_alt_capture_not_contains(&dashboard, "notessess");
@@ -145,7 +145,7 @@ fn release_startup_navigation_gauntlet_proves_discovery_filters_and_help() {
     harness.fixture().send_keys(&dashboard, &["j"]);
     harness
         .fixture()
-        .wait_for_alt_capture(&dashboard, "Target: ✦ alphawork");
+        .wait_for_alt_capture(&dashboard, "Target:         ✦ alphawork");
     harness.fixture().send_keys(&dashboard, &["f"]);
     harness
         .fixture()
@@ -339,6 +339,9 @@ fn release_action_gauntlet_proves_search_flash_sort_and_pane_operations() {
         .wait_for_alt_capture_not_contains(&dashboard, "Query: alphawork");
     harness
         .fixture()
+        .wait_for_alt_capture_not_contains(&dashboard, "/alphawork");
+    harness
+        .fixture()
         .wait_for_alt_capture(&dashboard, "Foreman | NORMAL");
     harness
         .fixture()
@@ -393,7 +396,7 @@ fn release_action_gauntlet_proves_search_flash_sort_and_pane_operations() {
     harness.fixture().send_keys(&dashboard, &["o"]);
     harness
         .fixture()
-        .wait_for_alt_capture(&dashboard, "View: attention->recent");
+        .wait_for_alt_capture(&dashboard, "Sort: attention->recent");
     harness.fixture().send_keys(&dashboard, &["i"]);
     send_text(harness.fixture(), &dashboard, "sortkeep");
     harness.fixture().send_keys(&dashboard, &["Enter"]);
@@ -534,7 +537,7 @@ active_profile = "all"
         .wait_for_alt_capture(&dashboard, "claudesess");
     harness
         .fixture()
-        .wait_for_alt_capture(&dashboard, "Target: ✦ alphawork");
+        .wait_for_alt_capture(&dashboard, "Target:         ✦ alphawork");
     harness.wait_for_log_contains("run_started");
     harness.wait_for_log_contains("pull_request_lookup workspace=");
     harness

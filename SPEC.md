@@ -169,15 +169,29 @@ yet expose a stable contract.
 **R9. Main UI surfaces**
 
 - The dashboard includes a header with system and workload overview.
-- The dashboard includes a sidebar organized by session and window.
+- The dashboard includes a sidebar organized as a semantic session/agent tree in the default agents-only view.
+- The default sidebar elides singleton tmux window rows so the operator sees the actionable agent directly under its session.
+- Topology-oriented views preserve explicit tmux window rows so the raw session/window/pane tree remains available when needed.
+- Singleton counts such as `1w/1p` or `1p` are not repeated when the visible hierarchy already communicates that structure.
 - The dashboard includes a detailed pane preview.
 - The dashboard includes an input area for sending text to the selected agent.
 - The dashboard includes a footer with contextual actions or hints.
+- The footer uses labeled action groups so movement, selection, search, view,
+  and panel controls are easy to scan.
 - The dashboard includes a help surface with a legend for compact badges, status indicators, and status-source hints.
 - The help surface is keyboard-scrollable in layouts where its full contents do not fit at once.
 - The dashboard may include summary, subagent, and pull request detail panels.
+- Popup mode preserves the same side-by-side sidebar/details mental model as
+  the regular dashboard when the popup has enough width and height.
 - The preview identifies whether the selected or actionable pane status comes from native mode or compatibility heuristics.
 - The preview can surface setup or diagnosis hints when compatibility fallback is likely caused by missing hook wiring or failing hook commands.
+
+**R9b. Details information hierarchy**
+
+- The details pane uses stable, labeled sections so alerts, pull request state, current selection, diagnostics, dashboard overview, and pane output are visually distinguishable.
+- The details pane uses aligned scan rows for recurring facts such as status, source, target, workspace, PR state, diagnostics, and actions.
+- The selected target summary avoids duplicating the same status, source, target, and command facts in multiple adjacent blocks.
+- Event summaries and pane output use distinct names so recent notifications or refreshes are not confused with terminal output.
 
 **R10. Keyboard-first interaction**
 
@@ -189,7 +203,7 @@ yet expose a stable contract.
   supported agent family at a time, with empty harness views skipped by default.
 - The operator can cycle the active theme at runtime.
 - The operator can scroll the help surface with the keyboard when help is open.
-- Escape semantics cancel or dismiss the current mode according to context.
+- Escape cancels or dismisses non-normal modes; in normal mode it quits like `q`.
 
 **R11. Pane focus behavior**
 
@@ -215,6 +229,8 @@ yet expose a stable contract.
 
 - The dashboard provides interactive search that filters visible items by query.
 - Search supports moving between matches.
+- Search renders inline in the footer as `/<query>` with match count and does
+  not obscure the dashboard with a floating overlay.
 - Search can confirm into a focus action or an expansion action depending on the selected target.
 - Search can cancel and restore the previous cursor position.
 
@@ -286,6 +302,8 @@ yet expose a stable contract.
 - Normal interactive startup renders immediately with a loading state before the first tmux inventory refresh completes.
 - Popup startup may seed that first render from a fresh persisted inventory snapshot, but cached state must be marked and replaced by live tmux refresh.
 - It supports showing the config path.
+- It supports showing resolved config, UI state, popup cache, and runtime values.
+- It supports resetting persisted runtime UI state.
 - It supports initializing a config file.
 - It supports popup execution mode.
 - It supports debug logging mode.
@@ -324,6 +342,7 @@ yet expose a stable contract.
 - For each supported harness, Foreman defines fallback behavior when native integration becomes unavailable.
 - For each supported harness, Foreman defines how state transitions are debounced to avoid flicker and notification noise.
 - Native integrations should consume structured hooks, events, or machine-readable streams where available.
+- File-backed hook bridges use the tmux pane identity from `TMUX_PANE` so signal files match the pane IDs Foreman discovers from tmux inventory.
 - Compatibility integrations may use tmux-visible process metadata and captured terminal content, but these heuristics are treated as lower-confidence signals.
 - Compatibility integrations must not keep reviving an agent identity from stale title or preview text once the pane foreground command has returned to a shell.
 
@@ -455,6 +474,7 @@ mise run ci
 **A5. Integration mode selection**
 
 - Given a supported harness with native integration available, when the dashboard discovers that agent, it uses native mode as the authoritative source of status.
+- Given a Claude, Codex, or Pi hook bridge runs inside a tmux pane, when it writes a native signal, Foreman matches that signal to the same pane ID and promotes the pane from compatibility to native mode.
 - Given native integration is not available and the harness is still visible in tmux, the dashboard falls back to compatibility mode instead of dropping the pane entirely.
 - Given config forces compatibility mode for Claude, Codex, or Pi, native signal data does not override compatibility status for that run.
 
@@ -462,6 +482,11 @@ mise run ci
 
 - Given a mix of agent and non-agent panes, when the dashboard starts, non-agent-only sessions and non-agent panes are hidden by default.
 - When the operator toggles the relevant filters, those hidden items become visible.
+- Given one visible agent pane inside a one-pane tmux window, the default
+  sidebar shows the agent pane directly below its session, with harness glyph
+  and status styling on the pane row.
+- Given topology-oriented filters are enabled, the same one-pane tmux window
+  remains visible as an explicit window row.
 - Given visible supported harness families, pressing the harness-view key cycles
   the sidebar through those harnesses plus the unfiltered view and reconciles the
   selection to a visible target without stopping on empty harness views by
@@ -471,6 +496,13 @@ mise run ci
 
 - Given an agent shows signs of active work, repeated refreshes continue to show that agent as working.
 - If the activity signal disappears only briefly, the UI does not flicker immediately back to idle.
+
+**A7b. Details pane hierarchy**
+
+- Given a selected agent pane with pull request and diagnostic state, the details pane separates current alerts, pull request state, selected target facts, diagnostics, overview, and recent terminal output under distinct labels.
+- Given the details pane includes recurring metadata, labels and values align into predictable scan rows instead of loose prose.
+- Given recent notification or pull request activity exists, it is labeled as activity rather than recent terminal output.
+- Given a pane is selected, the details pane shows status/source/target metadata once before the recent terminal output section.
 
 **A8. Keyboard navigation**
 
