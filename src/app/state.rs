@@ -1349,8 +1349,9 @@ impl AppState {
                 .unwrap_or_else(|| format!("window {}", window_id.as_str())),
             SelectionTarget::Pane(pane_id) => self
                 .inventory
-                .pane(pane_id)
-                .map(|pane| {
+                .parent_for_pane(pane_id)
+                .zip(self.inventory.pane(pane_id))
+                .map(|((_, window), pane)| {
                     let harness = pane
                         .agent
                         .as_ref()
@@ -1362,7 +1363,8 @@ impl AppState {
                         .map(|agent| agent.status.label())
                         .unwrap_or("NON-AGENT");
                     format!(
-                        "pane {} {} {} {}",
+                        "pane {} {} {} {} {}",
+                        window.navigation_title(),
                         pane.navigation_title(),
                         pane.title,
                         harness,
@@ -1814,7 +1816,10 @@ impl AppState {
 
             for window in visible_windows {
                 let visible_panes = window.visible_panes(&self.filters, self.sort_mode);
-                if !should_elide_singleton_window(&self.filters, visible_panes.len()) {
+                let elide_window =
+                    should_elide_singleton_window(&self.filters, visible_panes.len());
+                let window_navigation_title = window.navigation_title();
+                if !elide_window {
                     entries.push(VisibleTargetEntry {
                         target: SelectionTarget::Window(window.id.clone()),
                         actionable_pane_id: visible_panes.first().map(|pane| pane.id.clone()),
@@ -1828,7 +1833,7 @@ impl AppState {
                                 .filter_map(|pane| pane.working_dir.clone()),
                         ),
                         sidebar: SidebarRowKind::Window {
-                            name: window.navigation_title(),
+                            name: window_navigation_title.clone(),
                             rank: window.attention_rank(),
                             visible_panes: visible_panes.len(),
                             harnesses: harness_summary_for_panes(visible_panes.iter().copied()),
@@ -1843,7 +1848,15 @@ impl AppState {
                         actionable_workspace_path: pane.working_dir.clone(),
                         aggregate_workspace_path: pane.working_dir.clone(),
                         sidebar: SidebarRowKind::Pane {
-                            navigation_title: pane.navigation_title(),
+                            navigation_title: if elide_window {
+                                if is_generic_elided_window_name(&window.name) {
+                                    pane.navigation_title()
+                                } else {
+                                    window_navigation_title.clone()
+                                }
+                            } else {
+                                pane.navigation_title()
+                            },
                             status: pane.agent.as_ref().map(|agent| agent.status),
                             harness: pane.harness_kind(),
                             is_agent: pane.is_agent(),
@@ -1907,6 +1920,14 @@ fn is_generic_window_name(name: &str) -> bool {
         name.trim().to_ascii_lowercase().as_str(),
         "" | "sh" | "zsh" | "bash" | "fish" | "nu" | "shell"
     )
+}
+
+fn is_generic_elided_window_name(name: &str) -> bool {
+    is_generic_window_name(name)
+        || matches!(
+            name.trim().to_ascii_lowercase().as_str(),
+            "agent" | "agents"
+        )
 }
 
 fn should_elide_singleton_window(filters: &Filters, visible_pane_count: usize) -> bool {
@@ -2123,6 +2144,37 @@ mod tests {
             .visible_target_entries()
             .iter()
             .all(|entry| !matches!(entry.sidebar, SidebarRowKind::Window { .. })));
+    }
+
+    #[test]
+    fn agent_first_sidebar_uses_elided_window_title_for_direct_pane_rows() {
+        let inventory = inventory([SessionBuilder::new("obsidian").window(
+            WindowBuilder::new("obsidian:0")
+                .name("opus-context-review")
+                .pane(
+                    PaneBuilder::agent("obsidian:claude", HarnessKind::ClaudeCode)
+                        .title("obsidian-vault")
+                        .working_dir("/tmp/obsidian-vault"),
+                ),
+        )]);
+
+        let state = AppState::with_inventory(inventory);
+        let pane_entry = state
+            .visible_target_entries()
+            .iter()
+            .find(|entry| matches!(entry.target, SelectionTarget::Pane(_)))
+            .expect("pane row should be visible");
+
+        assert!(matches!(
+            &pane_entry.sidebar,
+            SidebarRowKind::Pane {
+                navigation_title,
+                ..
+            } if navigation_title == "opus-context-review"
+        ));
+        assert!(state
+            .target_label(&SelectionTarget::Pane("obsidian:claude".into()))
+            .contains("opus-context-review"));
     }
 
     #[test]

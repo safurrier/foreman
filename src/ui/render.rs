@@ -30,8 +30,6 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState, theme_name: ThemeName) {
         render_help(frame, state, &theme, layout_mode);
     } else if state.modal.is_some() {
         render_modal(frame, state, &theme, layout_mode);
-    } else if state.mode == Mode::Search {
-        render_search_overlay(frame, state, &theme, layout_mode);
     }
 }
 
@@ -377,40 +375,6 @@ fn render_help(frame: &mut Frame<'_>, state: &AppState, theme: &Theme, layout_mo
         .style(theme.muted);
         frame.render_widget(hint, hint_area);
     }
-}
-
-fn render_search_overlay(
-    frame: &mut Frame<'_>,
-    state: &AppState,
-    theme: &Theme,
-    layout_mode: LayoutMode,
-) {
-    let popup = overlay_rect(frame.area(), layout_mode, 64, 9);
-    frame.render_widget(Clear, popup);
-    let query = state.search_query().unwrap_or("");
-    let overlay = Paragraph::new(Text::from(vec![
-        section_line("Search", theme),
-        plain_line(""),
-        plain_line(format!(
-            "Query: {}",
-            if query.is_empty() { "<empty>" } else { query }
-        )),
-        plain_line(format!("Matches: {}", state.visible_target_count())),
-        plain_line(""),
-        muted_line(
-            "Type to filter. Enter confirms. Esc restores the previous selection.",
-            theme,
-        ),
-    ]))
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title("Search")
-            .border_style(theme.search_border),
-    )
-    .wrap(Wrap { trim: false })
-    .style(theme.base);
-    frame.render_widget(overlay, popup);
 }
 
 fn render_modal(frame: &mut Frame<'_>, state: &AppState, theme: &Theme, layout_mode: LayoutMode) {
@@ -1006,7 +970,7 @@ fn footer_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Text
     let sep = format!(" {} ", theme.glyphs.separator);
     let lines = match state.mode {
         Mode::Input => vec![format!("Compose: Enter send{sep}Ctrl+J newline{sep}Esc cancel")],
-        Mode::Search => vec![format!("Search: type filter{sep}Enter use match{sep}Esc restore")],
+        Mode::Search => search_footer_lines(state, theme, layout_mode),
         Mode::FlashNavigate => {
             let mode_name = state
                 .flash
@@ -1053,7 +1017,7 @@ fn help_lines(state: &AppState, theme: &Theme) -> Vec<Line<'static>> {
         ),
         muted_line(
             format!(
-                "Status: {} working  {} attention  {} idle  {} error  {} unknown",
+                "Status color: {} working  {} attention  {} idle  {} error  {} unknown",
                 theme.glyphs.working,
                 theme.glyphs.attention,
                 theme.glyphs.idle,
@@ -1482,17 +1446,6 @@ fn modal_rect(area: Rect, layout_mode: LayoutMode) -> Rect {
     }
 }
 
-fn overlay_rect(area: Rect, layout_mode: LayoutMode, width: u16, height: u16) -> Rect {
-    match layout_mode {
-        LayoutMode::Compact => centered_rect(
-            area,
-            width.min(area.width.saturating_sub(4)),
-            height.min(area.height.saturating_sub(4)),
-        ),
-        LayoutMode::Medium | LayoutMode::Wide => centered_rect(area, width, height),
-    }
-}
-
 fn inset_rect(area: Rect, horizontal_margin: u16, vertical_margin: u16) -> Rect {
     let width = area
         .width
@@ -1703,25 +1656,40 @@ fn footer_title(state: &AppState, theme: &Theme) -> String {
     }
 }
 
+fn search_footer_lines(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Vec<String> {
+    let sep = format!(" {} ", theme.glyphs.separator);
+    let query = state.search_query().unwrap_or_default();
+    let prompt = format!("/{query}");
+    let matches = state.visible_target_count();
+    let match_label = if matches == 1 { "match" } else { "matches" };
+    let primary = format!("Search: {prompt}{sep}{matches} {match_label}");
+    let secondary = format!("Type filters live{sep}Enter use match{sep}Esc restore");
+
+    match layout_mode {
+        LayoutMode::Compact => vec![format!("{primary}{sep}Enter use{sep}Esc restore")],
+        LayoutMode::Medium | LayoutMode::Wide => vec![primary, secondary],
+    }
+}
+
 fn normal_footer_lines(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Vec<String> {
     let sep = format!(" {} ", theme.glyphs.separator);
-    let sort_hint = format!("Sort {}", state.sort_label());
+    let sort_hint = format!("Sort: {}", state.sort_label());
     let secondary = match layout_mode {
-        LayoutMode::Compact => format!("View h/o/t{sep}Help ?"),
+        LayoutMode::Compact => format!("Find: /{sep}View: h/o/t{sep}Help: ?"),
         LayoutMode::Medium => {
-            format!("Panels Tab or 1/2/3{sep}Find / s S{sep}{sort_hint}{sep}View h o t{sep}Help ?")
+            format!("Panels: Tab 1/2/3{sep}Find: / s S{sep}{sort_hint}{sep}View: h o t{sep}Help: ?")
         }
         LayoutMode::Wide => {
-            format!("Panels Tab or 1/2/3{sep}Find / s S{sep}{sort_hint}{sep}View h o t{sep}Alerts m n{sep}Help ?")
+            format!("Panels: Tab 1/2/3{sep}Find: / s S{sep}{sort_hint}{sep}View: h o t{sep}Alerts: m n{sep}Help: ?")
         }
     };
 
     match state.focus {
         Focus::Sidebar => {
             let primary = if state.selected_actionable_pane().is_some() {
-                format!("Sidebar: j/k move{sep}Enter use row{sep}f jump tmux{sep}i compose")
+                format!("Move: j/k{sep}Use: Enter{sep}Tmux: f{sep}Compose: i")
             } else {
-                format!("Sidebar: j/k move{sep}Enter fold row{sep}Tab details{sep}Help ?")
+                format!("Move: j/k{sep}Fold: Enter{sep}Details: Tab{sep}Help: ?")
             };
             match layout_mode {
                 LayoutMode::Compact => vec![primary],
@@ -1730,19 +1698,19 @@ fn normal_footer_lines(state: &AppState, theme: &Theme, layout_mode: LayoutMode)
         }
         Focus::Preview => {
             let primary = if state.selected_actionable_pane().is_some() {
-                format!("Details: j/k scroll{sep}f jump tmux{sep}i compose")
+                format!("Scroll: j/k{sep}Tmux: f{sep}Compose: i")
             } else {
-                format!("Details: j/k scroll{sep}Tab sidebar{sep}Help ?")
+                format!("Scroll: j/k{sep}Sidebar: Tab{sep}Help: ?")
             };
             let pr_actions = if state.selected_pull_request().is_some() {
-                format!("PR p{sep}Refresh Ctrl-R{sep}Open O{sep}Copy Y")
+                format!("PR: p{sep}Refresh: Ctrl-R{sep}Open: O{sep}Copy: Y")
             } else {
-                "PR p / Ctrl-R".to_string()
+                "PR: p / Ctrl-R".to_string()
             };
             match layout_mode {
                 LayoutMode::Compact => {
                     vec![format!(
-                        "Details: j/k scroll{sep}f tmux{sep}p/Ctrl-R PR{sep}Help ?"
+                        "Scroll: j/k{sep}Tmux: f{sep}PR: p/Ctrl-R{sep}Help: ?"
                     )]
                 }
                 LayoutMode::Medium | LayoutMode::Wide => {
@@ -1752,9 +1720,9 @@ fn normal_footer_lines(state: &AppState, theme: &Theme, layout_mode: LayoutMode)
         }
         Focus::Input => {
             let primary = if state.selected_actionable_pane().is_some() {
-                format!("Compose: Enter or i start{sep}f jump tmux{sep}x kill")
+                format!("Compose: Enter or i{sep}Tmux: f{sep}Kill: x")
             } else {
-                format!("Compose: select an agent row first{sep}Tab sidebar{sep}Help ?")
+                format!("Compose: select an agent row first{sep}Sidebar: Tab{sep}Help: ?")
             };
             match layout_mode {
                 LayoutMode::Compact => vec![primary],
@@ -2184,14 +2152,14 @@ mod tests {
         let recent_output = render_to_string(&state);
         assert!(recent_output.contains("View:"));
         assert!(recent_output.contains("stable"));
-        assert!(recent_output.contains("Sort stable"));
+        assert!(recent_output.contains("Sort: stable"));
 
         state.sort_mode = crate::app::SortMode::AttentionFirst;
         state.rebuild_visible_state();
         let attention_output = render_to_string(&state);
         assert!(attention_output.contains("View:"));
         assert!(attention_output.contains("attention->recent"));
-        assert!(attention_output.contains("Sort attention->recent"));
+        assert!(attention_output.contains("Sort: attention->recent"));
     }
 
     #[test]
@@ -2236,7 +2204,7 @@ mod tests {
     }
 
     #[test]
-    fn render_displays_search_overlay_and_match_count() {
+    fn render_displays_inline_search_footer_and_match_count() {
         let mut state = sample_state();
         state.mode = Mode::Search;
         let mut search = SearchState::new(state.selection.clone());
@@ -2246,9 +2214,10 @@ mod tests {
         state.rebuild_visible_state();
         let output = render_to_string(&state);
 
-        assert!(output.contains("Search"));
-        assert!(output.contains("codex"));
-        assert!(output.contains("Matches: 1"));
+        assert!(output.contains("Keys • Search") || output.contains("Keys | Search"));
+        assert!(output.contains("Search: /codex"));
+        assert!(output.contains("1 match"));
+        assert!(!output.contains("Query: codex"));
     }
 
     #[test]
@@ -2285,7 +2254,7 @@ mod tests {
         let output = render_to_string(&state);
 
         assert!(output.contains("✦ alpha"));
-        assert!(output.contains("◎ foreman"));
+        assert!(output.contains("◎ review"));
         assert!(!output.contains("Pane     "));
     }
 
@@ -2305,11 +2274,11 @@ mod tests {
         let output = render_to_string(&state);
 
         assert!(output.contains("Keys • Sidebar") || output.contains("Keys | Sidebar"));
-        assert!(output.contains("Sidebar: j/k move"));
-        assert!(output.contains("Enter use row"));
-        assert!(output.contains("Sort stable"));
-        assert!(output.contains("Find / s S"));
-        assert!(output.contains("Help ?"));
+        assert!(output.contains("Move: j/k"));
+        assert!(output.contains("Use: Enter"));
+        assert!(output.contains("Sort: stable"));
+        assert!(output.contains("Find: / s S"));
+        assert!(output.contains("Help: ?"));
     }
 
     #[test]

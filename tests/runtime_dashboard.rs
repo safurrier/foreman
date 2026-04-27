@@ -319,16 +319,16 @@ fn interactive_binary_footer_tracks_focus_and_help_explains_provenance() {
     fixture.resize_window("dashboard", 160, 40);
 
     fixture.wait_for_alt_capture(&dashboard_pane, "Keys • Sidebar");
-    fixture.wait_for_alt_capture(&dashboard_pane, "Sidebar: j/k move");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Move: j/k");
     fixture.wait_for_alt_capture(&dashboard_pane, "Status source:  compatibility heuristic");
 
     fixture.send_keys(&dashboard_pane, &["2"]);
     fixture.wait_for_alt_capture(&dashboard_pane, "Keys • Details");
-    fixture.wait_for_alt_capture(&dashboard_pane, "Details: j/k scroll");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Scroll: j/k");
 
     fixture.send_keys(&dashboard_pane, &["3"]);
     fixture.wait_for_alt_capture(&dashboard_pane, "Keys • Compose");
-    fixture.wait_for_alt_capture(&dashboard_pane, "Compose: Enter or i start");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Compose: Enter or i");
 
     fixture.send_keys(&dashboard_pane, &["?"]);
     fixture.wait_for_alt_capture(&dashboard_pane, "Focus: Compose");
@@ -545,7 +545,7 @@ fn interactive_binary_surfaces_claude_native_status_and_attention_view() {
     fixture.send_keys(&dashboard_pane, &["Enter"]);
     fixture.wait_for_alt_capture(&dashboard_pane, "Target:         ✦ alpha");
     fixture.send_keys(&dashboard_pane, &["o"]);
-    fixture.wait_for_alt_capture(&dashboard_pane, "Sort attention->recent");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Sort: attention->recent");
 
     send_claude_hook_event(
         native_dir.path(),

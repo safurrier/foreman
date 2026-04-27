@@ -176,6 +176,8 @@ yet expose a stable contract.
 - The dashboard includes a detailed pane preview.
 - The dashboard includes an input area for sending text to the selected agent.
 - The dashboard includes a footer with contextual actions or hints.
+- The footer uses labeled action groups so movement, selection, search, view,
+  and panel controls are easy to scan.
 - The dashboard includes a help surface with a legend for compact badges, status indicators, and status-source hints.
 - The help surface is keyboard-scrollable in layouts where its full contents do not fit at once.
 - The dashboard may include summary, subagent, and pull request detail panels.
@@ -227,6 +229,8 @@ yet expose a stable contract.
 
 - The dashboard provides interactive search that filters visible items by query.
 - Search supports moving between matches.
+- Search renders inline in the footer as `/<query>` with match count and does
+  not obscure the dashboard with a floating overlay.
 - Search can confirm into a focus action or an expansion action depending on the selected target.
 - Search can cancel and restore the previous cursor position.
 
