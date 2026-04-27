@@ -21,3 +21,10 @@ description: How changes were verified. Append entries after testing.
 - `mise run check` — passed after review fixes.
 - `mise run verify-ux` — passed and refreshed UX screenshots/GIF after review fixes.
 - `cargo test --test runtime_dashboard interactive_binary_surfaces_claude_native_status_and_attention_view -- --nocapture` — passed after tightening the Codex bot native-attention assertion.
+## Native hook tmux e2e follow-up
+
+- Manual tmux smoke: `danger` unsets `CLAUDECODE` but preserves `TMUX_PANE`; direct `foreman-claude-hook` writes `%pane.json` with `CLAUDECODE` unset.
+- Manual live Claude smoke: fresh interactive `danger` pane falls back before first prompt; after submitting a prompt, Claude fires `UserPromptSubmit`, writes a native signal, and `foreman --doctor --claude-native-dir <temp>` reports native Claude active.
+- `cargo test --test native_hook_tmux_e2e -- --nocapture` — passed, covering Claude, Codex, and Pi tmux-pane hook signal promotion.
+- `cargo test --test claude_hook_bridge --test codex_hook_bridge --test pi_hook_bridge -- --nocapture` — passed.
+- `mise run check` — passed with `native_hook_tmux_e2e` included in the full Rust test suite.

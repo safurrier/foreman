@@ -20,3 +20,8 @@ description: Dev diary for this unit of work.
 ## Review iteration
 
 - Codex review caught hard-coded Unicode in Details, Diagnostics still labeled Setup, and plan metadata status drift; fixed before merge.
+## Claude native diagnosis
+
+- `danger` only unsets `CLAUDECODE`; the Foreman hook bridge keys off `TMUX_PANE`, so that alias does not break native signals.
+- Fresh interactive Claude panes do not write native signals until the first hook event, so Foreman can legitimately show compatibility on a just-opened prompt screen.
+- Added deterministic tmux e2e coverage for the provider hook seam: tmux pane env -> hook binary -> native signal file -> Foreman native overlay.

@@ -332,6 +332,7 @@ yet expose a stable contract.
 - For each supported harness, Foreman defines fallback behavior when native integration becomes unavailable.
 - For each supported harness, Foreman defines how state transitions are debounced to avoid flicker and notification noise.
 - Native integrations should consume structured hooks, events, or machine-readable streams where available.
+- File-backed hook bridges use the tmux pane identity from `TMUX_PANE` so signal files match the pane IDs Foreman discovers from tmux inventory.
 - Compatibility integrations may use tmux-visible process metadata and captured terminal content, but these heuristics are treated as lower-confidence signals.
 - Compatibility integrations must not keep reviving an agent identity from stale title or preview text once the pane foreground command has returned to a shell.
 
@@ -463,6 +464,7 @@ mise run ci
 **A5. Integration mode selection**
 
 - Given a supported harness with native integration available, when the dashboard discovers that agent, it uses native mode as the authoritative source of status.
+- Given a Claude, Codex, or Pi hook bridge runs inside a tmux pane, when it writes a native signal, Foreman matches that signal to the same pane ID and promotes the pane from compatibility to native mode.
 - Given native integration is not available and the harness is still visible in tmux, the dashboard falls back to compatibility mode instead of dropping the pane entirely.
 - Given config forces compatibility mode for Claude, Codex, or Pi, native signal data does not override compatibility status for that run.
 
