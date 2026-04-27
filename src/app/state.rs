@@ -668,9 +668,12 @@ impl Inventory {
             }
 
             for window in session.visible_windows(filters, sort_mode) {
-                targets.push(SelectionTarget::Window(window.id.clone()));
+                let visible_panes = window.visible_panes(filters, sort_mode);
+                if !should_elide_singleton_window(filters, visible_panes.len()) {
+                    targets.push(SelectionTarget::Window(window.id.clone()));
+                }
 
-                for pane in window.visible_panes(filters, sort_mode) {
+                for pane in visible_panes {
                     targets.push(SelectionTarget::Pane(pane.id.clone()));
                 }
             }
@@ -1811,25 +1814,27 @@ impl AppState {
 
             for window in visible_windows {
                 let visible_panes = window.visible_panes(&self.filters, self.sort_mode);
-                entries.push(VisibleTargetEntry {
-                    target: SelectionTarget::Window(window.id.clone()),
-                    actionable_pane_id: visible_panes.first().map(|pane| pane.id.clone()),
-                    actionable_workspace_path: visible_panes
-                        .first()
-                        .and_then(|pane| pane.working_dir.clone()),
-                    aggregate_workspace_path: unique_workspace_path(
-                        window
-                            .panes
-                            .iter()
-                            .filter_map(|pane| pane.working_dir.clone()),
-                    ),
-                    sidebar: SidebarRowKind::Window {
-                        name: window.navigation_title(),
-                        rank: window.attention_rank(),
-                        visible_panes: visible_panes.len(),
-                        harnesses: harness_summary_for_panes(visible_panes.iter().copied()),
-                    },
-                });
+                if !should_elide_singleton_window(&self.filters, visible_panes.len()) {
+                    entries.push(VisibleTargetEntry {
+                        target: SelectionTarget::Window(window.id.clone()),
+                        actionable_pane_id: visible_panes.first().map(|pane| pane.id.clone()),
+                        actionable_workspace_path: visible_panes
+                            .first()
+                            .and_then(|pane| pane.working_dir.clone()),
+                        aggregate_workspace_path: unique_workspace_path(
+                            window
+                                .panes
+                                .iter()
+                                .filter_map(|pane| pane.working_dir.clone()),
+                        ),
+                        sidebar: SidebarRowKind::Window {
+                            name: window.navigation_title(),
+                            rank: window.attention_rank(),
+                            visible_panes: visible_panes.len(),
+                            harnesses: harness_summary_for_panes(visible_panes.iter().copied()),
+                        },
+                    });
+                }
 
                 for pane in visible_panes {
                     entries.push(VisibleTargetEntry {
@@ -1904,6 +1909,10 @@ fn is_generic_window_name(name: &str) -> bool {
     )
 }
 
+fn should_elide_singleton_window(filters: &Filters, visible_pane_count: usize) -> bool {
+    visible_pane_count == 1 && !filters.show_non_agent_sessions && !filters.show_non_agent_panes
+}
+
 fn build_flash_targets(targets: &[SelectionTarget]) -> Vec<FlashTarget> {
     let width = flash_label_width(targets.len());
     targets
@@ -1968,7 +1977,7 @@ fn flash_label_for_index(mut index: usize, width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{AppState, SearchState, SelectionTarget, SortMode};
+    use super::{AppState, SearchState, SelectionTarget, SidebarRowKind, SortMode};
     use crate::app::{
         inventory, AgentStatus, HarnessKind, PaneBuilder, SessionBuilder, WindowBuilder,
     };
@@ -2089,6 +2098,76 @@ mod tests {
             vec![SelectionTarget::Pane("beta:codex".into())]
         );
         assert_eq!(state.visible_target_count(), 1);
+    }
+
+    #[test]
+    fn agent_first_sidebar_elides_singleton_window_rows() {
+        let inventory = inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:0").name("agent-scaffold").pane(
+                PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
+                    .title("agent-scaffold-broken")
+                    .working_dir("/tmp/agent-scaffold-broken"),
+            ),
+        )]);
+
+        let state = AppState::with_inventory(inventory);
+
+        assert_eq!(
+            state.base_visible_targets(),
+            vec![
+                SelectionTarget::Session("alpha".into()),
+                SelectionTarget::Pane("alpha:claude".into()),
+            ]
+        );
+        assert!(state
+            .visible_target_entries()
+            .iter()
+            .all(|entry| !matches!(entry.sidebar, SidebarRowKind::Window { .. })));
+    }
+
+    #[test]
+    fn agent_first_sidebar_keeps_windows_with_multiple_visible_panes() {
+        let inventory = inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:0")
+                .name("agents")
+                .pane(PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode))
+                .pane(PaneBuilder::agent("alpha:codex", HarnessKind::CodexCli)),
+        )]);
+
+        let state = AppState::with_inventory(inventory);
+
+        assert_eq!(
+            state.base_visible_targets(),
+            vec![
+                SelectionTarget::Session("alpha".into()),
+                SelectionTarget::Window("alpha:0".into()),
+                SelectionTarget::Pane("alpha:claude".into()),
+                SelectionTarget::Pane("alpha:codex".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn topology_sidebar_keeps_singleton_window_rows() {
+        let inventory = inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:0").name("agent-scaffold").pane(
+                PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
+                    .title("agent-scaffold-broken"),
+            ),
+        )]);
+
+        let mut state = AppState::with_inventory(inventory);
+        state.filters.show_non_agent_panes = true;
+        state.rebuild_visible_state();
+
+        assert_eq!(
+            state.base_visible_targets(),
+            vec![
+                SelectionTarget::Session("alpha".into()),
+                SelectionTarget::Window("alpha:0".into()),
+                SelectionTarget::Pane("alpha:claude".into()),
+            ]
+        );
     }
 
     #[test]

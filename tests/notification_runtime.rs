@@ -284,7 +284,7 @@ active_profile = "completion-only"
     fixture.wait_for_alt_capture(&dashboard_pane, "▾ alpha");
     fixture.wait_for_alt_capture(&dashboard_pane, "▾ beta");
 
-    fixture.send_keys(&dashboard_pane, &["j", "j"]);
+    fixture.send_keys(&dashboard_pane, &["j"]);
     fixture.wait_for_alt_capture(&dashboard_pane, "Compose ->");
 
     fixture.send_keys(&dashboard_pane, &["i", "s", "l", "e", "e", "p", "C-s"]);

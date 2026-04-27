@@ -603,14 +603,16 @@ fn sidebar_line(state: &AppState, theme: &Theme, entry: &VisibleTargetEntry) -> 
                     theme.emphasis
                 },
             ));
-            spans.push(Span::styled(
-                format!("  {}w/{}p", visible_windows, visible_panes),
-                if selected {
-                    theme.selected
-                } else {
-                    theme.muted
-                },
-            ));
+            if *visible_windows != 1 || *visible_panes != 1 {
+                spans.push(Span::styled(
+                    format!("  {}w/{}p", visible_windows, visible_panes),
+                    if selected {
+                        theme.selected
+                    } else {
+                        theme.muted
+                    },
+                ));
+            }
             if !marks.is_empty() {
                 spans.push(Span::styled(
                     format!("  {marks}"),
@@ -638,14 +640,16 @@ fn sidebar_line(state: &AppState, theme: &Theme, entry: &VisibleTargetEntry) -> 
                 name.clone(),
                 if selected { theme.selected } else { theme.base },
             ));
-            spans.push(Span::styled(
-                format!(" {}p", visible_panes),
-                if selected {
-                    theme.selected
-                } else {
-                    theme.muted
-                },
-            ));
+            if *visible_panes != 1 {
+                spans.push(Span::styled(
+                    format!(" {}p", visible_panes),
+                    if selected {
+                        theme.selected
+                    } else {
+                        theme.muted
+                    },
+                ));
+            }
             if !marks.is_empty() {
                 spans.push(Span::styled(
                     format!("  {marks}"),
@@ -2489,5 +2493,16 @@ mod tests {
         assert!(!output.contains("▸"));
         assert!(!output.contains("•"));
         assert!(!output.contains("·"));
+    }
+
+    #[test]
+    fn render_sidebar_elides_singleton_window_noise() {
+        let state = sample_state();
+        let output = render_to_string(&state);
+
+        assert!(output.contains("alpha"));
+        assert!(output.contains("✦ alpha"));
+        assert!(!output.contains("agents 1p"));
+        assert!(!output.contains("alpha  1w/1p"));
     }
 }
