@@ -519,7 +519,7 @@ fn interactive_binary_surfaces_claude_native_status_and_attention_view() {
         &alpha_pane,
         r#"{"hook_event_name":"Notification","notification_type":"permission_prompt"}"#,
     );
-    fixture.wait_for_alt_capture(&dashboard_pane, "Target: ✦ alpha");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Status: ATTENTION");
     fixture.wait_for_alt_capture(&dashboard_pane, "Status source: native hook");
 
     fixture.send_keys(&dashboard_pane, &["q"]);
