@@ -503,9 +503,9 @@ fn interactive_binary_surfaces_claude_native_status_and_attention_view() {
     fixture.send_keys(&dashboard_pane, &["/"]);
     send_text(&fixture, &dashboard_pane, "alpha");
     fixture.send_keys(&dashboard_pane, &["Enter"]);
-    fixture.wait_for_alt_capture(&dashboard_pane, "Target pane: • ✦ alpha");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Target: ✦ alpha");
     fixture.send_keys(&dashboard_pane, &["o"]);
-    fixture.wait_for_alt_capture(&dashboard_pane, "View: attention->recent");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Sort attention->recent");
 
     send_claude_hook_event(
         native_dir.path(),
@@ -519,7 +519,7 @@ fn interactive_binary_surfaces_claude_native_status_and_attention_view() {
         &alpha_pane,
         r#"{"hook_event_name":"Notification","notification_type":"permission_prompt"}"#,
     );
-    fixture.wait_for_alt_capture(&dashboard_pane, "Target pane: ! ✦ alpha");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Target: ✦ alpha");
     fixture.wait_for_alt_capture(&dashboard_pane, "Status source: native hook");
 
     fixture.send_keys(&dashboard_pane, &["q"]);
@@ -568,7 +568,7 @@ fn interactive_binary_popup_focus_action_switches_cross_session_target() {
     fixture.send_keys(&dashboard_pane, &["/"]);
     send_text(&fixture, &dashboard_pane, "beta");
     fixture.send_keys(&dashboard_pane, &["Enter"]);
-    fixture.wait_for_alt_capture(&dashboard_pane, "Target pane: ! ◎ beta");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Target: ◎ beta");
     fixture.wait_for_alt_capture(&dashboard_pane, beta_dir.display().to_string().as_str());
 
     fixture.send_keys(&dashboard_pane, &["f"]);

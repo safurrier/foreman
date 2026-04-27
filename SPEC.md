@@ -179,6 +179,12 @@ yet expose a stable contract.
 - The preview identifies whether the selected or actionable pane status comes from native mode or compatibility heuristics.
 - The preview can surface setup or diagnosis hints when compatibility fallback is likely caused by missing hook wiring or failing hook commands.
 
+**R9b. Details information hierarchy**
+
+- The details pane uses stable, labeled sections so alerts, current selection, pull request state, diagnostics, dashboard overview, and pane output are visually distinguishable.
+- The selected target summary avoids duplicating the same status, source, target, and command facts in multiple adjacent blocks.
+- Event summaries and pane output use distinct names so recent notifications or refreshes are not confused with terminal output.
+
 **R10. Keyboard-first interaction**
 
 - The operator can move through visible items with keyboard navigation.
@@ -189,7 +195,7 @@ yet expose a stable contract.
   supported agent family at a time, with empty harness views skipped by default.
 - The operator can cycle the active theme at runtime.
 - The operator can scroll the help surface with the keyboard when help is open.
-- Escape semantics cancel or dismiss the current mode according to context.
+- Escape cancels or dismisses non-normal modes; in normal mode it quits like `q`.
 
 **R11. Pane focus behavior**
 
@@ -286,6 +292,8 @@ yet expose a stable contract.
 - Normal interactive startup renders immediately with a loading state before the first tmux inventory refresh completes.
 - Popup startup may seed that first render from a fresh persisted inventory snapshot, but cached state must be marked and replaced by live tmux refresh.
 - It supports showing the config path.
+- It supports showing resolved config, UI state, popup cache, and runtime values.
+- It supports resetting persisted runtime UI state.
 - It supports initializing a config file.
 - It supports popup execution mode.
 - It supports debug logging mode.
@@ -471,6 +479,12 @@ mise run ci
 
 - Given an agent shows signs of active work, repeated refreshes continue to show that agent as working.
 - If the activity signal disappears only briefly, the UI does not flicker immediately back to idle.
+
+**A7b. Details pane hierarchy**
+
+- Given a selected agent pane with pull request and diagnostic state, the details pane separates current alerts, selected target facts, pull request state, diagnostics, overview, and recent terminal output under distinct labels.
+- Given recent notification or pull request activity exists, it is labeled as activity rather than recent terminal output.
+- Given a pane is selected, the details pane shows status/source/target metadata once before the recent terminal output section.
 
 **A8. Keyboard navigation**
 
