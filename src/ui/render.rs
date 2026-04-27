@@ -2496,11 +2496,12 @@ mod tests {
     }
 
     #[test]
-    fn render_sidebar_elides_singleton_window_noise() {
+    fn render_sidebar_keeps_tree_but_quiets_singleton_counts() {
         let state = sample_state();
         let output = render_to_string(&state);
 
         assert!(output.contains("alpha"));
+        assert!(output.contains("agents"));
         assert!(output.contains("✦ alpha"));
         assert!(!output.contains("agents 1p"));
         assert!(!output.contains("alpha  1w/1p"));
