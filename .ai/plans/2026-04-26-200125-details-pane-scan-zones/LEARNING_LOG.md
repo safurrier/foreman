@@ -15,3 +15,7 @@ description: Dev diary for this unit of work.
 - Kept the pass render-only: no reducer, runtime, or service changes.
 - Reordered Pull request above Selected target so PR state has a stable early scan zone when present.
 - Aligned recurring labels with semantic value styles; used a compact event row for long notification copy to avoid wrapping too early.
+## Self-review fixes
+
+- Review caught that the longest aligned label had no value gap. Fixed the helper instead of patching individual rows.
+- Review also caught that broad glyph waits could pass from sidebar text. Runtime and release waits now target Details rows directly.

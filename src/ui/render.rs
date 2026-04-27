@@ -1762,8 +1762,8 @@ fn detail_value_line(
     theme: &Theme,
 ) -> Line<'static> {
     let label = label.as_ref();
-    let padding = " ".repeat(DETAIL_LABEL_WIDTH.saturating_sub(label.chars().count()));
-    let mut spans = vec![Span::styled(format!("  {label}: {padding}"), theme.muted)];
+    let padding = " ".repeat((DETAIL_LABEL_WIDTH + 1).saturating_sub(label.chars().count()));
+    let mut spans = vec![Span::styled(format!("  {label}:{padding}"), theme.muted)];
     spans.extend(value_spans);
     Line::from(spans)
 }
@@ -2122,8 +2122,7 @@ mod tests {
         assert!(output.contains("Target:"));
         assert!(output.contains("Status source:"));
         assert!(output.contains("native hook"));
-        assert!(output.contains("Preview source:"));
-        assert!(output.contains("captured"));
+        assert!(output.contains("Preview source: captured"));
     }
 
     #[test]
@@ -2142,8 +2141,7 @@ mod tests {
         assert!(output.contains("Status source:"));
         assert!(output.contains("native hook"));
         assert!(output.contains("native hook"));
-        assert!(output.contains("Preview source:"));
-        assert!(output.contains("captured"));
+        assert!(output.contains("Preview source: captured"));
     }
 
     #[test]
@@ -2180,8 +2178,7 @@ mod tests {
 
         let output = render_to_string_at(&state, ThemeName::Catppuccin, 100, 40);
 
-        assert!(output.contains("Preview source:"));
-        assert!(output.contains("capture failed"));
+        assert!(output.contains("Preview source: capture failed"));
         assert!(output.contains("tmux capture failed on the latest refresh"));
     }
 
@@ -2487,6 +2484,8 @@ mod tests {
 
         assert!(output.contains("> v alpha") || output.contains("> alpha"));
         assert!(output.contains("|") || output.contains("compose"));
+        assert!(output.contains("Preview source: captured"));
+        assert!(!output.contains("Preview source:captured"));
         assert!(!output.contains("▸"));
         assert!(!output.contains("•"));
         assert!(!output.contains("·"));
