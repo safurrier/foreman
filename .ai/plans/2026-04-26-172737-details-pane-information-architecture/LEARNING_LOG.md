@@ -17,3 +17,6 @@ description: Dev diary for this unit of work.
 ## PR loop
 
 - Opened PR #4 for the details pane information architecture slice after local validation.
+## Review iteration
+
+- Codex review caught hard-coded Unicode in Details, Diagnostics still labeled Setup, and plan metadata status drift; fixed before merge.

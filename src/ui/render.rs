@@ -1,6 +1,6 @@
 use crate::app::{
-    AgentStatus, AppState, Focus, HarnessKind, ModalState, Mode, Pane, SelectionTarget,
-    SidebarHarnessSummary, SidebarRowKind, VisibleTargetEntry,
+    AgentStatus, AppState, Focus, HarnessKind, ModalState, Mode, Pane, PreviewProvenance,
+    SelectionTarget, SidebarHarnessSummary, SidebarRowKind, VisibleTargetEntry,
 };
 use crate::services::pull_requests::PullRequestLookup;
 use crate::ui::theme::{Theme, ThemeName};
@@ -630,7 +630,10 @@ fn sidebar_line(state: &AppState, theme: &Theme, entry: &VisibleTargetEntry) -> 
         } => {
             let marks = render_harness_marks(theme, harnesses);
             spans.push(Span::styled("  ", theme.muted));
-            spans.push(Span::styled("· ", attention_style_from_rank(theme, *rank)));
+            spans.push(Span::styled(
+                format!("{} ", theme.glyphs.non_agent),
+                attention_style_from_rank(theme, *rank),
+            ));
             spans.push(Span::styled(
                 name.clone(),
                 if selected { theme.selected } else { theme.base },
@@ -1276,7 +1279,10 @@ fn activity_digest_label(state: &AppState, theme: &Theme) -> Option<Line<'static
         Line::from(vec![
             Span::styled("Agents: ", theme.muted),
             Span::styled(
-                format!("{working} working · {attention} attention · {error} error · {idle} idle"),
+                format!(
+                    "{working} working {sep}{attention} attention {sep}{error} error {sep}{idle} idle",
+                    sep = format!(" {} ", theme.glyphs.separator)
+                ),
                 theme.base,
             ),
             Span::styled(format!(" {} ", theme.glyphs.separator), theme.muted),
@@ -1303,7 +1309,10 @@ fn activity_event_section_lines(state: &AppState, theme: &Theme) -> Vec<Line<'st
 
     vec![
         detail_section_line("Activity", theme),
-        Line::from(vec![Span::styled(events.join(" · "), theme.base)]),
+        Line::from(vec![Span::styled(
+            events.join(format!(" {} ", theme.glyphs.separator).as_str()),
+            theme.base,
+        )]),
     ]
 }
 
@@ -1318,7 +1327,7 @@ fn diagnostic_lines(state: &AppState, theme: &Theme) -> Vec<Line<'static>> {
         return Vec::new();
     }
 
-    let mut lines = vec![section_line("Setup", theme)];
+    let mut lines = vec![detail_section_line("Diagnostics", theme)];
     for finding in diagnostics {
         let severity_style = match finding.severity {
             crate::doctor::DoctorSeverity::Error => theme.error,
@@ -1501,7 +1510,10 @@ fn selected_target_summary_lines(
     ]));
     lines.push(Line::from(vec![
         Span::styled("Preview source: ", theme.muted),
-        Span::styled(pane.preview_provenance.label(), theme.base),
+        Span::styled(
+            pane.preview_provenance.label(),
+            preview_provenance_style(theme, pane.preview_provenance),
+        ),
     ]));
     lines.push(Line::from(vec![
         Span::styled("Target: ", theme.muted),
@@ -1545,10 +1557,11 @@ fn selected_target_summary_lines(
         }
     }
 
+    let separator = format!(" {} ", theme.glyphs.separator);
     let next = if matches!(selection, SelectionTarget::Pane(_)) {
-        "Next: f focus tmux · i compose · x kill"
+        format!("Next: f focus tmux{separator}i compose{separator}x kill")
     } else {
-        "Next: Enter uses row · f focuses target · i compose"
+        format!("Next: Enter uses row{separator}f focuses target{separator}i compose")
     };
     lines.push(muted_line(next, theme));
     lines
@@ -1672,6 +1685,14 @@ fn status_style(theme: &Theme, status: Option<AgentStatus>, is_agent: bool) -> S
     }
 }
 
+fn preview_provenance_style(theme: &Theme, provenance: PreviewProvenance) -> Style {
+    match provenance {
+        PreviewProvenance::Captured => theme.base,
+        PreviewProvenance::PendingCapture | PreviewProvenance::ReusedCached => theme.attention,
+        PreviewProvenance::CaptureFailed => theme.error,
+    }
+}
+
 fn attention_style_from_rank(theme: &Theme, rank: u8) -> Style {
     match rank {
         0 => theme.error,
@@ -1688,7 +1709,7 @@ fn section_line(text: impl Into<String>, theme: &Theme) -> Line<'static> {
 
 fn detail_section_line(text: impl Into<String>, theme: &Theme) -> Line<'static> {
     Line::from(vec![
-        Span::styled("▸ ", theme.muted),
+        Span::styled(format!("{} ", theme.glyphs.session_closed), theme.muted),
         Span::styled(text.into(), theme.emphasis),
     ])
 }
@@ -2030,7 +2051,7 @@ mod tests {
 
         let output = render_to_string(&state);
 
-        assert!(output.contains("Setup"));
+        assert!(output.contains("Diagnostics"));
         assert!(output.contains("No native signals were observed"));
         assert!(output.contains("Run foreman --setup"));
     }
@@ -2297,5 +2318,8 @@ mod tests {
 
         assert!(output.contains("> v alpha") || output.contains("> alpha"));
         assert!(output.contains("|") || output.contains("compose"));
+        assert!(!output.contains("▸"));
+        assert!(!output.contains("•"));
+        assert!(!output.contains("·"));
     }
 }

@@ -11,5 +11,5 @@ description: Checkable tasks for this unit of work.
 - [x] Remove duplicate selected target metadata
 - [x] Update render/release tests for new wording
 - [x] Run focused render tests
-- [x] Run full validation ladder
+- [x] Run validation ladder through local Docker boundary
 - [x] Open PR and iterate on CI/review
