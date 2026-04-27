@@ -12,4 +12,4 @@ description: Checkable tasks for this unit of work.
 - [x] Update render/release tests for new wording
 - [x] Run focused render tests
 - [x] Run full validation ladder
-- [ ] Open PR and iterate on CI/review
+- [x] Open PR and iterate on CI/review
