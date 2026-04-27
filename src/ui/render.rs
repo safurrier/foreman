@@ -1,8 +1,8 @@
 use crate::app::{
-    AgentStatus, AppState, Focus, HarnessKind, ModalState, Mode, Pane, PreviewProvenance,
-    SelectionTarget, SidebarHarnessSummary, SidebarRowKind, VisibleTargetEntry,
+    AgentStatus, AppState, Focus, HarnessKind, IntegrationMode, ModalState, Mode, Pane,
+    PreviewProvenance, SelectionTarget, SidebarHarnessSummary, SidebarRowKind, VisibleTargetEntry,
 };
-use crate::services::pull_requests::PullRequestLookup;
+use crate::services::pull_requests::{PullRequestLookup, PullRequestStatus};
 use crate::ui::theme::{Theme, ThemeName};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
@@ -737,14 +737,14 @@ fn preview_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Tex
         sections.push(startup_lines);
     }
 
-    let selection_lines = selected_target_summary_lines(state, theme, layout_mode);
-    if !selection_lines.is_empty() {
-        sections.push(selection_lines);
-    }
-
     let pull_request_lines = pull_request_lines(state, theme);
     if !pull_request_lines.is_empty() {
         sections.push(pull_request_lines);
+    }
+
+    let selection_lines = selected_target_summary_lines(state, theme, layout_mode);
+    if !selection_lines.is_empty() {
+        sections.push(selection_lines);
     }
 
     let diagnostic_lines = diagnostic_lines(state, theme);
@@ -789,19 +789,28 @@ fn startup_cache_lines(state: &AppState, theme: &Theme) -> Vec<Line<'static>> {
         return Vec::new();
     };
     let mut lines = vec![detail_section_line("Startup cache", theme)];
-    lines.push(plain_line(format!(
-        "Snapshot age: {}",
-        humanize_age_ms(age_ms)
-    )));
+    lines.push(detail_value_line(
+        "Snapshot age",
+        vec![Span::styled(humanize_age_ms(age_ms), theme.attention)],
+        theme,
+    ));
     if let Some(path) = &state.startup_cache_path {
-        lines.push(muted_line(format!("Cache file: {}", path.display()), theme));
+        lines.push(detail_value_line(
+            "Cache file",
+            vec![Span::styled(path.display().to_string(), theme.muted)],
+            theme,
+        ));
     }
-    lines.push(muted_line(
-        if state.startup_loading {
-            "Showing cached inventory while live tmux refreshes."
-        } else {
-            "Cached inventory is still visible until live tmux replaces it."
-        },
+    lines.push(detail_value_line(
+        "State",
+        vec![Span::styled(
+            if state.startup_loading {
+                "showing cache while tmux refreshes"
+            } else {
+                "visible until live tmux replaces it"
+            },
+            theme.muted,
+        )],
         theme,
     ));
     lines
@@ -809,30 +818,42 @@ fn startup_cache_lines(state: &AppState, theme: &Theme) -> Vec<Line<'static>> {
 
 fn overview_lines(state: &AppState, theme: &Theme) -> Vec<Line<'static>> {
     let mut lines = vec![detail_section_line("Overview", theme)];
-    lines.push(Line::from(vec![
-        Span::styled("View: ", theme.muted),
-        Span::styled(state.sort_label(), theme.base),
-        Span::styled(format!(" {} ", theme.glyphs.separator), theme.muted),
-        Span::styled(state.filter_label(), theme.base),
-    ]));
+    lines.push(detail_value_line(
+        "View",
+        vec![
+            Span::styled(state.sort_label(), theme.base),
+            detail_separator(theme),
+            Span::styled(state.filter_label(), theme.base),
+        ],
+        theme,
+    ));
     if let Some(activity) = activity_digest_label(state, theme) {
         lines.push(activity);
     }
-    lines.push(Line::from(vec![
-        Span::styled("Notifications: ", theme.muted),
-        Span::styled(
+    lines.push(detail_value_line(
+        "Notifications",
+        vec![Span::styled(
             if state.notifications.muted {
                 "muted".to_string()
             } else {
                 state.notifications.profile.label().to_ascii_lowercase()
             },
+            if state.notifications.muted {
+                theme.muted
+            } else {
+                theme.emphasis
+            },
+        )],
+        theme,
+    ));
+    lines.push(detail_value_line(
+        "PR panel",
+        vec![Span::styled(
+            state.selected_pull_request_panel_label(),
             theme.base,
-        ),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("PR panel: ", theme.muted),
-        Span::styled(state.selected_pull_request_panel_label(), theme.base),
-    ]));
+        )],
+        theme,
+    ));
 
     lines
 }
@@ -1170,14 +1191,27 @@ fn pull_request_lines(state: &AppState, theme: &Theme) -> Vec<Line<'static>> {
     let mut lines = vec![detail_section_line("Pull request", theme)];
     let mut has_state = false;
 
+    let panel_line = || {
+        detail_value_line(
+            "Panel",
+            vec![Span::styled(
+                state.selected_pull_request_panel_label(),
+                theme.base,
+            )],
+            theme,
+        )
+    };
+
     if state.selected_pull_request_refreshing() {
         has_state = true;
-        lines.push(Line::from(vec![
-            Span::styled("Panel: ", theme.muted),
-            Span::styled(state.selected_pull_request_panel_label(), theme.base),
-        ]));
-        lines.push(muted_line(
-            "Refreshing now; results update when the lookup finishes.",
+        lines.push(panel_line());
+        lines.push(detail_value_line(
+            "State",
+            vec![Span::styled("refreshing lookup", theme.attention)],
+            theme,
+        ));
+        lines.push(detail_note_line(
+            "Results update when the lookup finishes.",
             theme,
         ));
     }
@@ -1185,42 +1219,79 @@ fn pull_request_lines(state: &AppState, theme: &Theme) -> Vec<Line<'static>> {
     match state.selected_pull_request_lookup() {
         Some(PullRequestLookup::Unknown) => {
             has_state = true;
-            lines.push(muted_line(
-                "Checking in the background; detail opens when a branch match is found.",
+            lines.push(detail_value_line(
+                "State",
+                vec![Span::styled("checking in background", theme.attention)],
+                theme,
+            ));
+            lines.push(detail_note_line(
+                "Detail opens when a branch match is found.",
                 theme,
             ));
         }
         Some(PullRequestLookup::Missing) => {
             has_state = true;
-            lines.push(muted_line(
-                "No open pull request for this workspace.",
+            lines.push(detail_value_line(
+                "State",
+                vec![Span::styled("no open pull request", theme.muted)],
                 theme,
             ));
         }
         Some(PullRequestLookup::Unavailable { message }) => {
             has_state = true;
-            lines.push(plain_line("Unavailable"));
-            lines.push(muted_line(format!("Reason: {message}"), theme));
+            lines.push(detail_value_line(
+                "State",
+                vec![Span::styled("Unavailable", theme.error)],
+                theme,
+            ));
+            lines.push(detail_value_line(
+                "Reason",
+                vec![Span::styled(message.clone(), theme.muted)],
+                theme,
+            ));
         }
         Some(PullRequestLookup::Available(pull_request)) => {
             has_state = true;
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("#{} {}", pull_request.number, pull_request.status.label()),
-                    theme.emphasis,
-                ),
-                Span::styled(format!("  {}", pull_request.title), theme.base),
-            ]));
+            lines.push(detail_value_line(
+                "PR",
+                vec![
+                    Span::styled(format!("#{}", pull_request.number), theme.emphasis),
+                    Span::raw(" "),
+                    Span::styled(
+                        pull_request.status.label(),
+                        pull_request_status_style(theme, pull_request.status),
+                    ),
+                    Span::styled(format!("  {}", pull_request.title), theme.base),
+                ],
+                theme,
+            ));
 
             if state.is_pull_request_detail_open() {
-                lines.push(plain_line(format!("Repo: {}", pull_request.repository)));
-                lines.push(plain_line(format!(
-                    "Branches: {} -> {}",
-                    pull_request.branch, pull_request.base_branch
-                )));
-                lines.push(plain_line(format!("Author: {}", pull_request.author)));
-                lines.push(muted_line(
-                    "p toggles detail. O opens in the browser. Y copies the URL.",
+                lines.push(detail_value_line(
+                    "Repo",
+                    vec![Span::styled(pull_request.repository.clone(), theme.base)],
+                    theme,
+                ));
+                lines.push(detail_value_line(
+                    "Branches",
+                    vec![
+                        Span::styled(pull_request.branch.clone(), theme.base),
+                        Span::styled(" -> ", theme.muted),
+                        Span::styled(pull_request.base_branch.clone(), theme.muted),
+                    ],
+                    theme,
+                ));
+                lines.push(detail_value_line(
+                    "Author",
+                    vec![Span::styled(pull_request.author.clone(), theme.base)],
+                    theme,
+                ));
+                lines.push(detail_value_line(
+                    "Actions",
+                    vec![Span::styled(
+                        "p toggle detail, O open browser, Y copy URL",
+                        theme.muted,
+                    )],
                     theme,
                 ));
             }
@@ -1230,13 +1301,7 @@ fn pull_request_lines(state: &AppState, theme: &Theme) -> Vec<Line<'static>> {
 
     if has_state {
         if !state.selected_pull_request_refreshing() {
-            lines.insert(
-                1,
-                Line::from(vec![
-                    Span::styled("Panel: ", theme.muted),
-                    Span::styled(state.selected_pull_request_panel_label(), theme.base),
-                ]),
-            );
+            lines.insert(1, panel_line());
         }
         lines
     } else {
@@ -1276,21 +1341,21 @@ fn activity_digest_label(state: &AppState, theme: &Theme) -> Option<Line<'static
     }
 
     (total > 0).then(|| {
-        Line::from(vec![
-            Span::styled("Agents: ", theme.muted),
-            Span::styled(
-                format!(
-                    "{working} working {sep}{attention} attention {sep}{error} error {sep}{idle} idle",
-                    sep = format!(" {} ", theme.glyphs.separator)
+        detail_value_line(
+            "Agents",
+            vec![
+                Span::styled(
+                    format!(
+                        "{working} working {sep}{attention} attention {sep}{error} error {sep}{idle} idle",
+                        sep = format!(" {} ", theme.glyphs.separator)
+                    ),
+                    theme.base,
                 ),
-                theme.base,
-            ),
-            Span::styled(format!(" {} ", theme.glyphs.separator), theme.muted),
-            Span::styled(
-                format!("{native} native / {compatibility} compat"),
-                theme.base,
-            ),
-        ])
+                detail_separator(theme),
+                Span::styled(format!("{native} native / {compatibility} compat"), theme.base),
+            ],
+            theme,
+        )
     })
 }
 
@@ -1309,10 +1374,14 @@ fn activity_event_section_lines(state: &AppState, theme: &Theme) -> Vec<Line<'st
 
     vec![
         detail_section_line("Activity", theme),
-        Line::from(vec![Span::styled(
-            events.join(format!(" {} ", theme.glyphs.separator).as_str()),
-            theme.base,
-        )]),
+        detail_compact_value_line(
+            "Event",
+            vec![Span::styled(
+                events.join(format!(" {} ", theme.glyphs.separator).as_str()),
+                theme.base,
+            )],
+            theme,
+        ),
     ]
 }
 
@@ -1335,12 +1404,17 @@ fn diagnostic_lines(state: &AppState, theme: &Theme) -> Vec<Line<'static>> {
             crate::doctor::DoctorSeverity::Info => theme.muted,
             crate::doctor::DoctorSeverity::Ok => theme.base,
         };
-        lines.push(Line::from(vec![
-            Span::styled(format!("{} ", finding.severity.label()), severity_style),
-            Span::styled(finding.summary.clone(), theme.base),
-        ]));
+        lines.push(detail_value_line(
+            finding.severity.label(),
+            vec![Span::styled(finding.summary.clone(), severity_style)],
+            theme,
+        ));
         if let Some(next_step) = &finding.next_step {
-            lines.push(muted_line(next_step.clone(), theme));
+            lines.push(detail_value_line(
+                "Next",
+                vec![Span::styled(next_step.clone(), theme.muted)],
+                theme,
+            ));
         }
     }
 
@@ -1481,13 +1555,14 @@ fn selected_target_summary_lines(
             SelectionTarget::Window(window_id) => format!("window {}", window_id.as_str()),
             SelectionTarget::Pane(pane_id) => format!("pane {}", pane_id.as_str()),
         });
-    lines.push(Line::from(vec![Span::styled(
-        selection_label,
-        theme.emphasis,
-    )]));
+    lines.push(detail_value_line(
+        "Selection",
+        vec![Span::styled(selection_label, theme.emphasis)],
+        theme,
+    ));
 
     let Some(pane) = state.selected_actionable_pane() else {
-        lines.push(muted_line(
+        lines.push(detail_note_line(
             "No visible target pane is available under the current filters.",
             theme,
         ));
@@ -1496,74 +1571,96 @@ fn selected_target_summary_lines(
 
     let status = pane.agent.as_ref().map(|agent| agent.status);
     let status_label = status.map(AgentStatus::label).unwrap_or("SHELL");
-    let source_label = pane
-        .agent
-        .as_ref()
-        .map(|agent| agent.integration_mode.source_label())
+    let integration_mode = pane.agent.as_ref().map(|agent| agent.integration_mode);
+    let source_label = integration_mode
+        .map(IntegrationMode::source_label)
         .unwrap_or("plain shell");
-    lines.push(Line::from(vec![
-        Span::styled("Status: ", theme.muted),
-        Span::styled(status_label, status_style(theme, status, pane.is_agent())),
-        Span::styled(format!(" {} ", theme.glyphs.separator), theme.muted),
-        Span::styled("Status source: ", theme.muted),
-        Span::styled(source_label, theme.base),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("Preview source: ", theme.muted),
-        Span::styled(
+    lines.push(detail_value_line(
+        "Status",
+        vec![Span::styled(
+            status_label,
+            status_style(theme, status, pane.is_agent()),
+        )],
+        theme,
+    ));
+    lines.push(detail_value_line(
+        "Status source",
+        vec![Span::styled(
+            source_label,
+            integration_mode_style(theme, integration_mode),
+        )],
+        theme,
+    ));
+    lines.push(detail_value_line(
+        "Preview source",
+        vec![Span::styled(
             pane.preview_provenance.label(),
             preview_provenance_style(theme, pane.preview_provenance),
-        ),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("Target: ", theme.muted),
-        Span::styled(
-            format!("{} ", pane_harness_badge(theme, Some(pane))),
-            theme.emphasis,
-        ),
-        Span::styled(pane.navigation_title(), theme.base),
-        Span::styled(format!(" {} ", theme.glyphs.separator), theme.muted),
-        Span::styled(pane.id.as_str().to_string(), theme.muted),
-    ]));
+        )],
+        theme,
+    ));
+    lines.push(detail_value_line(
+        "Target",
+        vec![
+            Span::styled(
+                format!("{} ", pane_harness_badge(theme, Some(pane))),
+                theme.emphasis,
+            ),
+            Span::styled(pane.navigation_title(), theme.base),
+            detail_separator(theme),
+            Span::styled(pane.id.as_str().to_string(), theme.muted),
+        ],
+        theme,
+    ));
 
     if let Some(SelectionTarget::Pane(pane_id)) = state.selection.as_ref() {
         if let Some(selected_pane) = state.inventory.pane(pane_id) {
-            lines.push(Line::from(vec![
-                Span::styled("Command: ", theme.muted),
-                Span::styled(
+            lines.push(detail_value_line(
+                "Command",
+                vec![Span::styled(
                     selected_pane
                         .current_command
                         .as_deref()
                         .unwrap_or("unknown")
                         .to_string(),
                     theme.base,
-                ),
-            ]));
+                )],
+                theme,
+            ));
             if layout_mode != LayoutMode::Compact {
-                lines.push(Line::from(vec![
-                    Span::styled("Pane title: ", theme.muted),
-                    Span::styled(selected_pane.title.clone(), theme.base),
-                ]));
+                lines.push(detail_value_line(
+                    "Pane title",
+                    vec![Span::styled(selected_pane.title.clone(), theme.base)],
+                    theme,
+                ));
             }
         }
     }
 
     if layout_mode != LayoutMode::Compact {
         if let Some(workspace_path) = state.selected_workspace_path() {
-            lines.push(Line::from(vec![
-                Span::styled("Workspace: ", theme.muted),
-                Span::styled(workspace_path.display().to_string(), theme.base),
-            ]));
+            lines.push(detail_value_line(
+                "Workspace",
+                vec![Span::styled(
+                    workspace_path.display().to_string(),
+                    theme.base,
+                )],
+                theme,
+            ));
         }
     }
 
     let separator = format!(" {} ", theme.glyphs.separator);
     let next = if matches!(selection, SelectionTarget::Pane(_)) {
-        format!("Next: f focus tmux{separator}i compose{separator}x kill")
+        format!("f focus tmux{separator}i compose{separator}x kill")
     } else {
-        format!("Next: Enter uses row{separator}f focuses target{separator}i compose")
+        format!("Enter uses row{separator}f focuses target{separator}i compose")
     };
-    lines.push(muted_line(next, theme));
+    lines.push(detail_value_line(
+        "Actions",
+        vec![Span::styled(next, theme.muted)],
+        theme,
+    ));
     lines
 }
 
@@ -1654,6 +1751,59 @@ fn normal_footer_lines(state: &AppState, theme: &Theme, layout_mode: LayoutMode)
                 LayoutMode::Medium | LayoutMode::Wide => vec![primary, secondary],
             }
         }
+    }
+}
+
+const DETAIL_LABEL_WIDTH: usize = 14;
+
+fn detail_value_line(
+    label: impl AsRef<str>,
+    value_spans: Vec<Span<'static>>,
+    theme: &Theme,
+) -> Line<'static> {
+    let label = label.as_ref();
+    let padding = " ".repeat(DETAIL_LABEL_WIDTH.saturating_sub(label.chars().count()));
+    let mut spans = vec![Span::styled(format!("  {label}: {padding}"), theme.muted)];
+    spans.extend(value_spans);
+    Line::from(spans)
+}
+
+fn detail_compact_value_line(
+    label: impl AsRef<str>,
+    value_spans: Vec<Span<'static>>,
+    theme: &Theme,
+) -> Line<'static> {
+    let label = label.as_ref();
+    let mut spans = vec![Span::styled(format!("  {label}: "), theme.muted)];
+    spans.extend(value_spans);
+    Line::from(spans)
+}
+
+fn detail_note_line(text: impl Into<String>, theme: &Theme) -> Line<'static> {
+    Line::from(vec![
+        Span::styled("  ", theme.muted),
+        Span::styled(text.into(), theme.muted),
+    ])
+}
+
+fn detail_separator(theme: &Theme) -> Span<'static> {
+    Span::styled(format!(" {} ", theme.glyphs.separator), theme.muted)
+}
+
+fn integration_mode_style(theme: &Theme, integration_mode: Option<IntegrationMode>) -> Style {
+    match integration_mode {
+        Some(IntegrationMode::Native) => theme.emphasis,
+        Some(IntegrationMode::Compatibility) => theme.attention,
+        None => theme.muted,
+    }
+}
+
+fn pull_request_status_style(theme: &Theme, status: PullRequestStatus) -> Style {
+    match status {
+        PullRequestStatus::Open => theme.idle,
+        PullRequestStatus::Draft => theme.attention,
+        PullRequestStatus::Closed => theme.muted,
+        PullRequestStatus::Merged => theme.emphasis,
     }
 }
 
@@ -1904,10 +2054,12 @@ mod tests {
         let output = render_to_string(&state);
 
         assert!(output.contains("cached 4s ago"));
-        assert!(output.contains("Snapshot age: 4s ago"));
-        assert!(output.contains("Cache file: /tmp/foreman/cache/default.json"));
-        assert!(output.contains("Showing cached inventory"));
-        assert!(output.contains("live tmux refreshes"));
+        assert!(output.contains("Snapshot age:"));
+        assert!(output.contains("4s ago"));
+        assert!(output.contains("Cache file:"));
+        assert!(output.contains("/tmp/foreman/cache/default.json"));
+        assert!(output.contains("showing cache"));
+        assert!(output.contains("tmux refreshes"));
     }
 
     #[test]
@@ -1962,12 +2114,16 @@ mod tests {
         let output = render_to_string(&state);
 
         assert!(output.contains("Selected target"));
-        assert!(output.contains("Status: WORKING"));
+        assert!(output.contains("Status:"));
+        assert!(output.contains("WORKING"));
         assert!(output.contains("Target:"));
-        assert!(output.contains("Next: Enter uses row"));
+        assert!(output.contains("Actions:"));
+        assert!(output.contains("Enter uses row"));
         assert!(output.contains("Target:"));
-        assert!(output.contains("Status source: native hook"));
-        assert!(output.contains("Preview source: captured"));
+        assert!(output.contains("Status source:"));
+        assert!(output.contains("native hook"));
+        assert!(output.contains("Preview source:"));
+        assert!(output.contains("captured"));
     }
 
     #[test]
@@ -1976,13 +2132,18 @@ mod tests {
         let output = render_to_string(&state);
 
         assert!(output.contains("Selected target"));
-        assert!(output.contains("Status: WORKING"));
+        assert!(output.contains("Status:"));
+        assert!(output.contains("WORKING"));
         assert!(output.contains("native hook"));
-        assert!(output.contains("Workspace: /tmp/alpha"));
-        assert!(output.contains("Next: f focus tmux"));
-        assert!(output.contains("Status source: native hook"));
+        assert!(output.contains("Workspace:"));
+        assert!(output.contains("/tmp/alpha"));
+        assert!(output.contains("Actions:"));
+        assert!(output.contains("f focus tmux"));
+        assert!(output.contains("Status source:"));
         assert!(output.contains("native hook"));
-        assert!(output.contains("Preview source: captured"));
+        assert!(output.contains("native hook"));
+        assert!(output.contains("Preview source:"));
+        assert!(output.contains("captured"));
     }
 
     #[test]
@@ -2019,7 +2180,8 @@ mod tests {
 
         let output = render_to_string_at(&state, ThemeName::Catppuccin, 100, 40);
 
-        assert!(output.contains("Preview source: capture failed"));
+        assert!(output.contains("Preview source:"));
+        assert!(output.contains("capture failed"));
         assert!(output.contains("tmux capture failed on the latest refresh"));
     }
 
@@ -2027,13 +2189,15 @@ mod tests {
     fn render_surfaces_compound_sort_labels() {
         let mut state = sample_state();
         let recent_output = render_to_string(&state);
-        assert!(recent_output.contains("View: stable"));
+        assert!(recent_output.contains("View:"));
+        assert!(recent_output.contains("stable"));
         assert!(recent_output.contains("Sort stable"));
 
         state.sort_mode = crate::app::SortMode::AttentionFirst;
         state.rebuild_visible_state();
         let attention_output = render_to_string(&state);
-        assert!(attention_output.contains("View: attention->recent"));
+        assert!(attention_output.contains("View:"));
+        assert!(attention_output.contains("attention->recent"));
         assert!(attention_output.contains("Sort attention->recent"));
     }
 
@@ -2211,9 +2375,11 @@ mod tests {
         let output = render_to_string(&state);
 
         assert!(output.contains("pr=#42 OPEN"));
-        assert!(output.contains("Panel: open"));
+        assert!(output.contains("Panel:"));
+        assert!(output.contains("open"));
         assert!(output.contains("Pull request"));
-        assert!(output.contains("Repo: foreman"));
+        assert!(output.contains("Repo:"));
+        assert!(output.contains("foreman"));
         assert!(output.contains("feat/pr-awareness"));
     }
 
@@ -2227,8 +2393,9 @@ mod tests {
         let output = render_to_string(&state);
 
         assert!(output.contains("pr=NONE"));
-        assert!(output.contains("No open pull request"));
-        assert!(output.contains("Panel: none"));
+        assert!(output.contains("no open pull request"));
+        assert!(output.contains("Panel:"));
+        assert!(output.contains("none"));
     }
 
     #[test]
@@ -2258,7 +2425,8 @@ mod tests {
         let output = render_to_string(&state);
 
         assert!(output.contains("Unavailable"));
-        assert!(output.contains("Reason: gh is not authenticated"));
+        assert!(output.contains("Reason:"));
+        assert!(output.contains("gh is not authenticated"));
     }
 
     #[test]
@@ -2276,7 +2444,8 @@ mod tests {
         state.notifications.last_status = Some("Notification profile: COMPLETE".to_string());
         let profile_output = render_to_string(&state);
         assert!(profile_output.contains("notify=COMPLETE"));
-        assert!(profile_output.contains("notification: Notification profile: COMPLETE"));
+        assert!(profile_output.contains("Notification profile"));
+        assert!(profile_output.contains("COMPLETE"));
     }
 
     #[test]

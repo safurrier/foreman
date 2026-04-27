@@ -181,7 +181,8 @@ yet expose a stable contract.
 
 **R9b. Details information hierarchy**
 
-- The details pane uses stable, labeled sections so alerts, current selection, pull request state, diagnostics, dashboard overview, and pane output are visually distinguishable.
+- The details pane uses stable, labeled sections so alerts, pull request state, current selection, diagnostics, dashboard overview, and pane output are visually distinguishable.
+- The details pane uses aligned scan rows for recurring facts such as status, source, target, workspace, PR state, diagnostics, and actions.
 - The selected target summary avoids duplicating the same status, source, target, and command facts in multiple adjacent blocks.
 - Event summaries and pane output use distinct names so recent notifications or refreshes are not confused with terminal output.
 
@@ -484,7 +485,8 @@ mise run ci
 
 **A7b. Details pane hierarchy**
 
-- Given a selected agent pane with pull request and diagnostic state, the details pane separates current alerts, selected target facts, pull request state, diagnostics, overview, and recent terminal output under distinct labels.
+- Given a selected agent pane with pull request and diagnostic state, the details pane separates current alerts, pull request state, selected target facts, diagnostics, overview, and recent terminal output under distinct labels.
+- Given the details pane includes recurring metadata, labels and values align into predictable scan rows instead of loose prose.
 - Given recent notification or pull request activity exists, it is labeled as activity rather than recent terminal output.
 - Given a pane is selected, the details pane shows status/source/target metadata once before the recent terminal output section.
 
