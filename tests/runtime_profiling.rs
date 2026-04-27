@@ -67,7 +67,7 @@ fn navigation_burst_limits_pull_request_lookup_churn() {
     );
 
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
-    fixture.wait_for_alt_capture(&dashboard_pane, "9 targets");
+    fixture.wait_for_alt_capture(&dashboard_pane, "6 targets");
     fixture.send_keys(&dashboard_pane, &["j", "j", "j", "j", "j", "j"]);
 
     wait_for_lookup_count(&gh_lookup_log, 1, 60);

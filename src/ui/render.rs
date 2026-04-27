@@ -680,22 +680,16 @@ fn sidebar_line(state: &AppState, theme: &Theme, entry: &VisibleTargetEntry) -> 
             is_agent,
         } => {
             spans.push(Span::styled("    ", theme.muted));
-            spans.push(Span::styled(
-                format!("{} ", status_symbol(theme, *status, *is_agent)),
-                status_style(theme, *status, *is_agent),
-            ));
+            let pane_style = if selected {
+                theme.selected
+            } else {
+                status_style(theme, *status, *is_agent)
+            };
             spans.push(Span::styled(
                 format!("{} ", harness_badge(theme, *harness)),
-                if *is_agent {
-                    status_style(theme, *status, true)
-                } else {
-                    theme.muted
-                },
+                if *is_agent { pane_style } else { theme.muted },
             ));
-            spans.push(Span::styled(
-                navigation_title.clone(),
-                if selected { theme.selected } else { theme.base },
-            ));
+            spans.push(Span::styled(navigation_title.clone(), pane_style));
         }
     }
 
@@ -1823,20 +1817,6 @@ fn pull_request_status_style(theme: &Theme, status: PullRequestStatus) -> Style 
     }
 }
 
-fn status_symbol(theme: &Theme, status: Option<AgentStatus>, is_agent: bool) -> &'static str {
-    if !is_agent {
-        return theme.glyphs.non_agent;
-    }
-
-    match status.unwrap_or(AgentStatus::Unknown) {
-        AgentStatus::Working => theme.glyphs.working,
-        AgentStatus::NeedsAttention => theme.glyphs.attention,
-        AgentStatus::Idle => theme.glyphs.idle,
-        AgentStatus::Error => theme.glyphs.error,
-        AgentStatus::Unknown => theme.glyphs.unknown,
-    }
-}
-
 fn status_style(theme: &Theme, status: Option<AgentStatus>, is_agent: bool) -> Style {
     if !is_agent {
         return theme.non_agent;
@@ -2508,13 +2488,13 @@ mod tests {
     }
 
     #[test]
-    fn render_sidebar_keeps_tree_but_quiets_singleton_counts() {
+    fn render_sidebar_shows_agent_first_tree_without_singleton_window_noise() {
         let state = sample_state();
         let output = render_to_string(&state);
 
         assert!(output.contains("alpha"));
-        assert!(output.contains("agents"));
         assert!(output.contains("✦ alpha"));
+        assert!(!output.contains("• ✦ alpha"));
         assert!(!output.contains("agents 1p"));
         assert!(!output.contains("alpha  1w/1p"));
     }

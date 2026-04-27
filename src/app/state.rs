@@ -668,9 +668,12 @@ impl Inventory {
             }
 
             for window in session.visible_windows(filters, sort_mode) {
-                targets.push(SelectionTarget::Window(window.id.clone()));
+                let visible_panes = window.visible_panes(filters, sort_mode);
+                if !should_elide_singleton_window(filters, visible_panes.len()) {
+                    targets.push(SelectionTarget::Window(window.id.clone()));
+                }
 
-                for pane in window.visible_panes(filters, sort_mode) {
+                for pane in visible_panes {
                     targets.push(SelectionTarget::Pane(pane.id.clone()));
                 }
             }
@@ -1811,25 +1814,27 @@ impl AppState {
 
             for window in visible_windows {
                 let visible_panes = window.visible_panes(&self.filters, self.sort_mode);
-                entries.push(VisibleTargetEntry {
-                    target: SelectionTarget::Window(window.id.clone()),
-                    actionable_pane_id: visible_panes.first().map(|pane| pane.id.clone()),
-                    actionable_workspace_path: visible_panes
-                        .first()
-                        .and_then(|pane| pane.working_dir.clone()),
-                    aggregate_workspace_path: unique_workspace_path(
-                        window
-                            .panes
-                            .iter()
-                            .filter_map(|pane| pane.working_dir.clone()),
-                    ),
-                    sidebar: SidebarRowKind::Window {
-                        name: window.navigation_title(),
-                        rank: window.attention_rank(),
-                        visible_panes: visible_panes.len(),
-                        harnesses: harness_summary_for_panes(visible_panes.iter().copied()),
-                    },
-                });
+                if !should_elide_singleton_window(&self.filters, visible_panes.len()) {
+                    entries.push(VisibleTargetEntry {
+                        target: SelectionTarget::Window(window.id.clone()),
+                        actionable_pane_id: visible_panes.first().map(|pane| pane.id.clone()),
+                        actionable_workspace_path: visible_panes
+                            .first()
+                            .and_then(|pane| pane.working_dir.clone()),
+                        aggregate_workspace_path: unique_workspace_path(
+                            window
+                                .panes
+                                .iter()
+                                .filter_map(|pane| pane.working_dir.clone()),
+                        ),
+                        sidebar: SidebarRowKind::Window {
+                            name: window.navigation_title(),
+                            rank: window.attention_rank(),
+                            visible_panes: visible_panes.len(),
+                            harnesses: harness_summary_for_panes(visible_panes.iter().copied()),
+                        },
+                    });
+                }
 
                 for pane in visible_panes {
                     entries.push(VisibleTargetEntry {
@@ -1902,6 +1907,10 @@ fn is_generic_window_name(name: &str) -> bool {
         name.trim().to_ascii_lowercase().as_str(),
         "" | "sh" | "zsh" | "bash" | "fish" | "nu" | "shell"
     )
+}
+
+fn should_elide_singleton_window(filters: &Filters, visible_pane_count: usize) -> bool {
+    visible_pane_count == 1 && !filters.show_non_agent_sessions && !filters.show_non_agent_panes
 }
 
 fn build_flash_targets(targets: &[SelectionTarget]) -> Vec<FlashTarget> {
@@ -2092,7 +2101,7 @@ mod tests {
     }
 
     #[test]
-    fn agent_first_sidebar_keeps_singleton_window_rows() {
+    fn agent_first_sidebar_elides_singleton_window_rows() {
         let inventory = inventory([SessionBuilder::new("alpha").window(
             WindowBuilder::new("alpha:0").name("agent-scaffold").pane(
                 PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
@@ -2107,14 +2116,13 @@ mod tests {
             state.base_visible_targets(),
             vec![
                 SelectionTarget::Session("alpha".into()),
-                SelectionTarget::Window("alpha:0".into()),
                 SelectionTarget::Pane("alpha:claude".into()),
             ]
         );
         assert!(state
             .visible_target_entries()
             .iter()
-            .any(|entry| matches!(entry.sidebar, SidebarRowKind::Window { .. })));
+            .all(|entry| !matches!(entry.sidebar, SidebarRowKind::Window { .. })));
     }
 
     #[test]

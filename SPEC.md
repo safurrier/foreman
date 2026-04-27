@@ -169,8 +169,9 @@ yet expose a stable contract.
 **R9. Main UI surfaces**
 
 - The dashboard includes a header with system and workload overview.
-- The dashboard includes a sidebar organized as a visible session/window/pane tree.
-- The sidebar preserves explicit tmux window rows so the hierarchy reads like a file tree.
+- The dashboard includes a sidebar organized as a semantic session/agent tree in the default agents-only view.
+- The default sidebar elides singleton tmux window rows so the operator sees the actionable agent directly under its session.
+- Topology-oriented views preserve explicit tmux window rows so the raw session/window/pane tree remains available when needed.
 - Singleton counts such as `1w/1p` or `1p` are not repeated when the visible hierarchy already communicates that structure.
 - The dashboard includes a detailed pane preview.
 - The dashboard includes an input area for sending text to the selected agent.
@@ -478,8 +479,10 @@ mise run ci
 - Given a mix of agent and non-agent panes, when the dashboard starts, non-agent-only sessions and non-agent panes are hidden by default.
 - When the operator toggles the relevant filters, those hidden items become visible.
 - Given one visible agent pane inside a one-pane tmux window, the default
-  sidebar still shows the session, window, and pane hierarchy while avoiding
-  redundant singleton counts.
+  sidebar shows the agent pane directly below its session, with harness glyph
+  and status styling on the pane row.
+- Given topology-oriented filters are enabled, the same one-pane tmux window
+  remains visible as an explicit window row.
 - Given visible supported harness families, pressing the harness-view key cycles
   the sidebar through those harnesses plus the unfiltered view and reconciles the
   selection to a visible target without stopping on empty harness views by

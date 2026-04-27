@@ -463,7 +463,7 @@ fn interactive_binary_popup_focus_action_exits_after_success() {
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman");
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
     fixture.wait_for_alt_capture(&dashboard_pane, "▾ alpha");
-    fixture.wait_for_alt_capture(&dashboard_pane, "• ✦ foreman");
+    fixture.wait_for_alt_capture(&dashboard_pane, "✦ foreman");
 
     fixture.send_keys(&dashboard_pane, &["f"]);
     fixture.wait_for_capture(&dashboard_pane, "FOREMAN_EXITED");
