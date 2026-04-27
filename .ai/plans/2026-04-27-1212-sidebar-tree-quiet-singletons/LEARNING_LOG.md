@@ -14,3 +14,8 @@
 
 - The restored tree model keeps the same visible target count as the prior intuitive layout, so runtime/profiling expectations return to the original counts.
 - Visual validation still confirms the quiet singleton count renderer is preserved.
+
+## Popup Layout Finding
+
+- Popup was using the compact breakpoint at common popup sizes, which stacked Targets, Details, and Compose into horizontal bands.
+- Making layout selection popup-aware preserves the file-tree sidebar mental model in popup mode without changing genuinely tiny terminal behavior.

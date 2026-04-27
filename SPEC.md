@@ -178,6 +178,8 @@ yet expose a stable contract.
 - The dashboard includes a help surface with a legend for compact badges, status indicators, and status-source hints.
 - The help surface is keyboard-scrollable in layouts where its full contents do not fit at once.
 - The dashboard may include summary, subagent, and pull request detail panels.
+- Popup mode preserves the same side-by-side sidebar/details mental model as
+  the regular dashboard when the popup has enough width and height.
 - The preview identifies whether the selected or actionable pane status comes from native mode or compatibility heuristics.
 - The preview can surface setup or diagnosis hints when compatibility fallback is likely caused by missing hook wiring or failing hook commands.
 

@@ -41,6 +41,22 @@ Sleep 400ms
 
 Type "?"
 Sleep 400ms
+Type "q"
+Sleep 300ms
+Ctrl+L
+Sleep 300ms
+Type@0ms "FOREMAN_LOG_DIR=$log_dir target/debug/foreman --popup --no-notify --tmux-socket $socket"
+Enter
+Sleep 2200ms
+Screenshot "/Users/alex.furrier/git_repositories/foreman/.ai/validation/ux/foreman-ux-popup.png"
+Sleep 400ms
+Type "q"
+Sleep 300ms
+Ctrl+L
+Sleep 300ms
+Type@0ms "FOREMAN_LOG_DIR=$log_dir target/debug/foreman --no-notify --tmux-socket $socket"
+Enter
+Sleep 1800ms
 Type "/"
 Sleep 500ms
 Type "gamma"

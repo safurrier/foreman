@@ -12,7 +12,7 @@ use ratatui::Frame;
 
 pub fn render(frame: &mut Frame<'_>, state: &AppState, theme_name: ThemeName) {
     let theme = theme_name.resolve();
-    let layout_mode = LayoutMode::for_area(frame.area());
+    let layout_mode = LayoutMode::for_area(frame.area(), state.popup_mode);
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -43,7 +43,15 @@ enum LayoutMode {
 }
 
 impl LayoutMode {
-    fn for_area(area: Rect) -> Self {
+    fn for_area(area: Rect, popup_mode: bool) -> Self {
+        if popup_mode && area.width >= 80 && area.height >= 20 {
+            return if area.width >= 136 && area.height >= 36 {
+                Self::Wide
+            } else {
+                Self::Medium
+            };
+        }
+
         if area.width < 96 || area.height < 28 {
             Self::Compact
         } else if area.width < 136 || area.height < 36 {
@@ -55,7 +63,11 @@ impl LayoutMode {
 }
 
 pub fn sidebar_viewport_rows_for_area(area: Rect) -> u16 {
-    let layout_mode = LayoutMode::for_area(area);
+    sidebar_viewport_rows_for_area_with_popup(area, false)
+}
+
+pub fn sidebar_viewport_rows_for_area_with_popup(area: Rect, popup_mode: bool) -> u16 {
+    let layout_mode = LayoutMode::for_area(area, popup_mode);
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -2505,5 +2517,21 @@ mod tests {
         assert!(output.contains("✦ alpha"));
         assert!(!output.contains("agents 1p"));
         assert!(!output.contains("alpha  1w/1p"));
+    }
+
+    #[test]
+    fn render_popup_prefers_side_by_side_tree_layout_at_typical_size() {
+        let mut popup_state = sample_state();
+        popup_state.popup_mode = true;
+        let popup_output = render_to_string_at(&popup_state, ThemeName::Catppuccin, 88, 20);
+
+        assert!(popup_output
+            .lines()
+            .any(|line| line.contains("* Targets") && line.contains("Details")));
+
+        let regular_output = render_to_string_at(&sample_state(), ThemeName::Catppuccin, 88, 20);
+        assert!(!regular_output
+            .lines()
+            .any(|line| line.contains("* Targets") && line.contains("Details")));
     }
 }

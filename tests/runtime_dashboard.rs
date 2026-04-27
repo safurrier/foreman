@@ -399,6 +399,46 @@ fn interactive_binary_help_scrolls_in_small_layout() {
 }
 
 #[test]
+fn interactive_binary_popup_keeps_side_by_side_tree_layout() {
+    let fixture = TmuxFixture::new();
+    let agent_pane = fixture.new_session(
+        "alpha",
+        &fixture.interactive_echo_command("Claude Code ready", "CLAUDE:"),
+    );
+    fixture.wait_for_capture(&agent_pane, "Claude Code ready");
+
+    let config_dir = tempdir().expect("config dir should exist");
+    let log_dir = tempdir().expect("log dir should exist");
+    let dashboard_command = format!(
+        "FOREMAN_CONFIG_HOME={} FOREMAN_LOG_DIR={} {} --popup --tmux-socket {} --poll-interval-ms 100 --capture-lines 20 --no-notify",
+        config_dir.path().display(),
+        log_dir.path().display(),
+        foreman_bin(),
+        fixture.socket_path().display()
+    );
+    let dashboard_pane = fixture.new_session(
+        "dashboard",
+        &fixture.keep_alive_command(&dashboard_command, "FOREMAN_EXITED"),
+    );
+    fixture.resize_window("dashboard", 88, 20);
+
+    fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
+    fixture.wait_for_alt_capture(&dashboard_pane, "* Targets");
+    fixture.wait_for_alt_capture(&dashboard_pane, "Details");
+
+    let capture = fixture.capture_alt(&dashboard_pane);
+    assert!(
+        capture
+            .lines()
+            .any(|line| line.contains("* Targets") && line.contains("Details")),
+        "expected popup layout to keep sidebar and details side-by-side:\n{capture}"
+    );
+
+    fixture.send_keys(&dashboard_pane, &["q"]);
+    fixture.wait_for_capture(&dashboard_pane, "FOREMAN_EXITED");
+}
+
+#[test]
 fn interactive_binary_popup_focus_action_exits_after_success() {
     let fixture = TmuxFixture::new();
     let helper_pane = fixture.new_session("alpha", &fixture.shell_command("plain shell"));

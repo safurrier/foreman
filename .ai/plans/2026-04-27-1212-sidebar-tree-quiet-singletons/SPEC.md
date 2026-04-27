@@ -17,3 +17,9 @@ The previous singleton-window elision reduced row noise, but it also weakened th
 
 - No large visual redesign beyond restoring tree topology.
 - No changes to tmux inventory discovery or harness detection.
+
+
+## Popup Consistency Addendum
+
+- Typical popup dimensions should preserve the same side-by-side sidebar/details layout as regular dashboard mode.
+- `verify-ux` should capture popup mode as a visual artifact, not just regular mode.

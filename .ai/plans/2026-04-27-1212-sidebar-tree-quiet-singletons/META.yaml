@@ -2,5 +2,5 @@ slug: sidebar-tree-quiet-singletons
 branch: feat/details-pane-information-architecture
 created: 2026-04-27
 pr: https://github.com/safurrier/foreman/pull/4
-status: in-progress
+status: complete
 source: user-feedback-file-tree-mental-model
