@@ -1,0 +1,6 @@
+slug: 1-1-0-release-doc-sync
+branch: release/1.1.0-doc-sync
+created: 2026-04-27
+pr: https://github.com/safurrier/foreman/pull/5
+status: in-progress
+source: user requested a release-readiness doc/spec/changelog pass before tagging v1.1.0

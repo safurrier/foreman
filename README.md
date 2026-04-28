@@ -390,7 +390,8 @@ mise run plan -- <slug>
 
 ## Release Process
 
-1. Bump `Cargo.toml` to the intended release version.
+1. Bump `Cargo.toml` to the intended release version and add a matching
+   `CHANGELOG.md` entry.
 2. Merge the release branch to `main`.
 3. Run `mise run verify-release` if you want the release-confidence report locally before tagging.
 4. If the release touches native harness behavior, run `mise run native-preflight`

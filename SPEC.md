@@ -140,11 +140,10 @@ yet expose a stable contract.
 - Gemini CLI: compatibility mode
 - OpenCode: compatibility mode
 - Foreman distinguishes recognized agent panes from unrecognized panes.
-- The rebuild plan prioritizes integrations in this order:
-- Claude Code as the first first-class native integration
-- Codex CLI next
-- Pi after Codex, using the harness extension lifecycle rather than tmux-only parsing
-- Additional harnesses afterward, using native integrations where practical and compatibility integrations otherwise
+- Claude Code, Codex CLI, and Pi are first-class native integrations in the
+  current v1 line.
+- Future supported harnesses should use native integrations where practical and
+  compatibility integrations otherwise.
 
 **R7. Visibility controls**
 
