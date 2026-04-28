@@ -250,6 +250,8 @@ mod tests {
                 NotificationBackendName::OsaScript,
             ],
             notification_profile: crate::app::NotificationProfile::All,
+            notification_sound_profile: "default".to_string(),
+            notification_sound_profiles: Default::default(),
             claude_integration_preference: IntegrationPreference::Auto,
             codex_integration_preference: IntegrationPreference::Auto,
             pi_integration_preference: IntegrationPreference::Auto,

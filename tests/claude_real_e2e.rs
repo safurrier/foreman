@@ -267,7 +267,7 @@ native_dir = "{native_dir}"
         &payload_trace,
         &log_dir.join("latest.log"),
         &native_dir.join(format!("{agent_pane}.json")),
-        "completion|Agent ready:",
+        "completion|Foreman: agent ready",
     );
 
     let signal_contents = fs::read_to_string(native_dir.join(format!("{agent_pane}.json")))

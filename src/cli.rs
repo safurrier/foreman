@@ -615,9 +615,10 @@ fn config_readout(cli: &Cli, paths: &crate::config::AppPaths) -> Result<String, 
             runtime.poll_interval_ms, runtime.capture_lines
         ),
         format!(
-            "  notifications: enabled={} profile={} cooldown_ticks={} backends={}",
+            "  notifications: enabled={} profile={} sound_profile={} cooldown_ticks={} backends={}",
             runtime.notifications_enabled,
             runtime.notification_profile.label(),
+            runtime.notification_sound_profile,
             runtime.notification_cooldown_ticks,
             backends
         ),

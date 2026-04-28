@@ -79,7 +79,7 @@ active_profile = "completion-only"
     write_executable(
         &bin_dir.join("notify-send"),
         &format!(
-            "#!/bin/sh\nprintf '%s|%s|%s\\n' \"$FOREMAN_NOTIFY_KIND\" \"$FOREMAN_NOTIFY_TITLE\" \"$FOREMAN_NOTIFY_PANE_ID\" > \"{}\"\n",
+            "#!/bin/sh\nprintf '%s|%s|%s|%s|%s\\n' \"$FOREMAN_NOTIFY_KIND\" \"$FOREMAN_NOTIFY_TITLE\" \"$FOREMAN_NOTIFY_SUBTITLE\" \"$FOREMAN_NOTIFY_BODY\" \"$FOREMAN_NOTIFY_PANE_ID\" > \"{}\"\n",
             notification_file.display()
         ),
     );
@@ -117,7 +117,11 @@ active_profile = "completion-only"
         r#"{"status":"idle","activity_score":44}"#,
     );
 
-    wait_for_file_contents(&notification_file, "completion|Agent ready:");
+    wait_for_file_contents(&notification_file, "completion|Foreman: agent ready");
+    let notification_contents =
+        fs::read_to_string(&notification_file).expect("notification should be captured");
+    assert!(notification_contents.contains("beta /"));
+    assert!(!notification_contents.contains(native_dir.to_string_lossy().as_ref()));
 
     fixture.send_keys(&dashboard_pane, &["q"]);
     fixture.wait_for_capture(&dashboard_pane, "FOREMAN_EXITED");
@@ -303,7 +307,7 @@ active_profile = "completion-only"
         r#"{"status":"idle","activity_score":44}"#,
     );
 
-    wait_for_file_contents(&notification_file, "completion|Agent ready:");
+    wait_for_file_contents(&notification_file, "completion|Foreman: agent ready");
 
     fixture.send_keys(&dashboard_pane, &["q"]);
     fixture.wait_for_capture(&dashboard_pane, "FOREMAN_EXITED");

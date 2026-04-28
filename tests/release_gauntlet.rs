@@ -578,7 +578,7 @@ active_profile = "all"
     harness.write_native_signal(&alpha.pane_id, r#"{"status":"idle","activity_score":44}"#);
     harness.wait_for_file_line_count(&notification_file, 1);
     let notification_lines = harness.nonempty_lines(&notification_file);
-    assert!(notification_lines[0].contains("completion|Agent ready:"));
+    assert!(notification_lines[0].contains("completion|Foreman: agent ready"));
 
     harness.fixture().send_keys(&dashboard, &["m"]);
     harness
@@ -636,7 +636,7 @@ active_profile = "all"
     );
     harness.wait_for_file_line_count(&notification_file, 2);
     let notification_lines = harness.nonempty_lines(&notification_file);
-    assert!(notification_lines[1].contains("needs_attention|Needs attention:"));
+    assert!(notification_lines[1].contains("needs_attention|Foreman: needs attention"));
 
     harness.fixture().send_keys(&dashboard, &["/"]);
     send_text(harness.fixture(), &dashboard, "betawork");

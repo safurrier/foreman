@@ -82,7 +82,7 @@ impl RunLogger {
         self.write_line(
             "INFO",
             &format!(
-                "bootstrap_complete config={} poll_interval_ms={} capture_lines={} popup={} pr_monitoring_enabled={} pr_poll_interval_ms={} notifications_enabled={} notification_cooldown_ticks={} notification_profile={} notification_backends={} claude_integration_preference={} codex_integration_preference={} pi_integration_preference={} log_verbosity={} tmux_socket={} startup_cache_dir={} startup_cache_max_age_ms={} ui_preferences_file={} default_sort={}",
+                "bootstrap_complete config={} poll_interval_ms={} capture_lines={} popup={} pr_monitoring_enabled={} pr_poll_interval_ms={} notifications_enabled={} notification_cooldown_ticks={} notification_profile={} notification_sound_profile={} notification_backends={} claude_integration_preference={} codex_integration_preference={} pi_integration_preference={} log_verbosity={} tmux_socket={} startup_cache_dir={} startup_cache_max_age_ms={} ui_preferences_file={} default_sort={}",
                 runtime.config_file.display(),
                 runtime.poll_interval_ms,
                 runtime.capture_lines,
@@ -92,6 +92,7 @@ impl RunLogger {
                 runtime.notifications_enabled,
                 runtime.notification_cooldown_ticks,
                 runtime.notification_profile.label(),
+                runtime.notification_sound_profile,
                 runtime
                     .notification_backends
                     .iter()
@@ -421,6 +422,8 @@ mod tests {
                 NotificationBackendName::OsaScript,
             ],
             notification_profile: crate::app::NotificationProfile::All,
+            notification_sound_profile: "default".to_string(),
+            notification_sound_profiles: Default::default(),
             claude_integration_preference: IntegrationPreference::Auto,
             codex_integration_preference: IntegrationPreference::Auto,
             pi_integration_preference: IntegrationPreference::Auto,
@@ -502,6 +505,7 @@ mod tests {
         assert!(contents.contains("pr_poll_interval_ms=30000"));
         assert!(contents.contains("notification_cooldown_ticks=3"));
         assert!(contents.contains("notification_profile=ALL"));
+        assert!(contents.contains("notification_sound_profile=default"));
         assert!(contents.contains("notification_backends=notify-send,osascript"));
         assert!(contents.contains("claude_integration_preference=auto"));
         assert!(contents.contains("codex_integration_preference=auto"));
@@ -686,7 +690,9 @@ mod tests {
             pane_title: "claude-main".to_string(),
             kind: NotificationKind::Completion,
             title: "Agent ready: claude-main".to_string(),
+            subtitle: "claude-main".to_string(),
             body: "The agent returned to an idle state.".to_string(),
+            window_target: Some("alpha:0".to_string()),
             workspace_path: None,
         };
 

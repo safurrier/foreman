@@ -31,7 +31,7 @@ fn shell_backed_notification_dispatcher_falls_back_and_logs_selection() {
         "#!/bin/sh\nprintf '%s|%s|%s\\n' \"$FOREMAN_NOTIFY_TITLE\" \"$FOREMAN_NOTIFY_KIND\" \"$FOREMAN_NOTIFY_PANE_ID\" > \"$1\"\n",
     );
 
-    let dispatcher = NotificationDispatcher::new(vec![
+    let mut dispatcher = NotificationDispatcher::new(vec![
         Box::new(CommandNotificationBackend::new(
             "primary",
             &fail_script,
@@ -48,7 +48,9 @@ fn shell_backed_notification_dispatcher_falls_back_and_logs_selection() {
         pane_title: "claude-main".to_string(),
         kind: NotificationKind::Completion,
         title: "Agent ready: claude-main".to_string(),
+        subtitle: "claude-main".to_string(),
         body: "The agent returned to an idle state.".to_string(),
+        window_target: Some("alpha:0".to_string()),
         workspace_path: Some(temp_dir.path().to_path_buf()),
     };
 

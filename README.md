@@ -166,6 +166,31 @@ default_sort = "stable" # stable | attention-recent
 
 Foreman also persists runtime UI choices such as theme, sort mode, filters, collapsed sessions, and the last selected target in `ui-state.json` next to the resolved config file. Explicit `[ui].theme` and `[ui].default_sort` config values win over persisted values; persisted values fill in only when those keys are omitted. You can cycle themes live with `t` and sort modes live with `o` in normal mode. Use `foreman --reset-ui-state` to remove persisted UI choices.
 
+Notifications:
+
+```toml
+[notifications]
+enabled = true
+cooldown_ticks = 3
+backends = ["alerter", "notify-send", "osascript"]
+active_profile = "all" # all | completion-only | attention-only
+sound_profile = "default"
+
+[notifications.sound_profiles.default]
+completion = "Tink"
+needs_attention = "Ping"
+cycle = "random" # random | sequential
+```
+
+On macOS, install `alerter` for clickable notifications. When `alerter` reports
+a content or action click, Foreman asks tmux to select the notification's window
+and pane. Sound entries can be system sound names, audio files, audio
+directories, or `none`.
+
+With VoiceOver, use the VoiceOver Notifications menu (`VO-N`) to navigate to a
+Foreman notification, then open the notification actions menu
+(`VO-Command-Space`) and choose `Open tmux pane`.
+
 Contributor docs:
 - [`docs/tour.md`](docs/tour.md) — repo quickstart and reading order
 - [`docs/workflows.md`](docs/workflows.md) — durable workflow and validation notes
@@ -184,7 +209,8 @@ Contributor docs:
   Gemini CLI and OpenCode compatibility detection, and header-level system
   stats once the first inventory refresh lands.
 - Config now controls notification cooldowns, backend order, startup profile,
-  and per-harness native-vs-compatibility preference.
+  notification sound profiles, and per-harness native-vs-compatibility
+  preference.
 - `foreman-claude-hook` bridges official Claude Code hook events into Foreman's
   per-pane native status files, with a default state path and optional
   config-level override.
