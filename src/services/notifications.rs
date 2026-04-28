@@ -8,9 +8,9 @@ use std::fmt;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
 use std::thread;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotificationRequest {
@@ -565,128 +565,139 @@ impl NotificationBackend for AlerterNotificationBackend {
         let tmux_socket = self.tmux_socket.clone();
         let diagnostic_log_path = self.diagnostic_log_path.clone();
 
-        thread::spawn(move || {
+        write_notification_diagnostic(
+            diagnostic_log_path.as_deref(),
+            "INFO",
+            &format!(
+                "notification_alerter_started pane_id={} title={} subtitle={} sound={} tmux_socket={} tmux_env={}",
+                request.pane_id.as_str(),
+                log_field(&request.title),
+                log_field(&request.subtitle),
+                log_field(&sound_label(&sound)),
+                tmux_socket
+                    .as_deref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "default".to_string()),
+                std::env::var_os("TMUX").is_some()
+            ),
+        );
+
+        let mut command = Command::new(&alerter_program);
+        command
+            .arg("--title")
+            .arg(&request.title)
+            .arg("--subtitle")
+            .arg(&request.subtitle)
+            .arg("--message")
+            .arg(&request.body)
+            .arg("--group")
+            .arg(format!("foreman:{}", request.pane_id.as_str()))
+            .arg("--timeout")
+            .arg("10")
+            .arg("--actions")
+            .arg("Open tmux pane")
+            .arg("--close-label")
+            .arg("Dismiss")
+            .arg("--json")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        if let ResolvedNotificationSound::System(sound_name) = &sound {
+            command.arg("--sound").arg(sound_name);
+        }
+
+        let mut child = command.spawn().map_err(|error| {
             write_notification_diagnostic(
                 diagnostic_log_path.as_deref(),
-                "INFO",
+                "WARN",
                 &format!(
-                    "notification_alerter_started pane_id={} title={} subtitle={} sound={} tmux_socket={} tmux_env={}",
+                    "notification_alerter_failed_to_spawn pane_id={} program={} error={}",
                     request.pane_id.as_str(),
-                    log_field(&request.title),
-                    log_field(&request.subtitle),
-                    log_field(&sound_label(&sound)),
-                    tmux_socket
-                        .as_deref()
-                        .map(|path| path.display().to_string())
-                        .unwrap_or_else(|| "default".to_string()),
-                    std::env::var_os("TMUX").is_some()
+                    alerter_program.display(),
+                    log_field(&error.to_string())
                 ),
             );
-            match play_file_sound_if_needed(&sound, &afplay_program) {
-                Ok(true) => write_notification_diagnostic(
-                    diagnostic_log_path.as_deref(),
-                    "INFO",
-                    &format!(
-                        "notification_alerter_sound_spawned pane_id={} sound={}",
-                        request.pane_id.as_str(),
-                        log_field(&sound_label(&sound))
-                    ),
-                ),
-                Ok(false) => {}
-                Err(error) => write_notification_diagnostic(
-                    diagnostic_log_path.as_deref(),
-                    "WARN",
-                    &format!(
-                        "notification_alerter_sound_failed pane_id={} error={}",
-                        request.pane_id.as_str(),
-                        log_field(&error)
-                    ),
-                ),
+            if error.kind() == std::io::ErrorKind::NotFound {
+                NotificationError::Unavailable(format!(
+                    "{} is not installed",
+                    alerter_program.display()
+                ))
+            } else {
+                NotificationError::Io(error.to_string())
             }
+        })?;
 
-            let mut command = Command::new(&alerter_program);
-            command
-                .arg("--title")
-                .arg(&request.title)
-                .arg("--subtitle")
-                .arg(&request.subtitle)
-                .arg("--message")
-                .arg(&request.body)
-                .arg("--group")
-                .arg(format!("foreman:{}", request.pane_id.as_str()))
-                .arg("--timeout")
-                .arg("10")
-                .arg("--actions")
-                .arg("Open tmux pane")
-                .arg("--close-label")
-                .arg("Dismiss")
-                .arg("--json");
-
-            if let ResolvedNotificationSound::System(sound_name) = &sound {
-                command.arg("--sound").arg(sound_name);
+        let mut exited_early = false;
+        for _ in 0..20 {
+            if child
+                .try_wait()
+                .map_err(|error| NotificationError::Io(error.to_string()))?
+                .is_some()
+            {
+                exited_early = true;
+                break;
             }
+            thread::sleep(Duration::from_millis(10));
+        }
+        if exited_early {
+            let output = child
+                .wait_with_output()
+                .map_err(|error| NotificationError::Io(error.to_string()))?;
+            if output.status.success() {
+                log_alerter_sound_result(
+                    &request,
+                    &sound,
+                    &afplay_program,
+                    diagnostic_log_path.as_deref(),
+                );
+            }
+            let succeeded = handle_alerter_output(
+                &request,
+                &tmux_program,
+                tmux_socket.as_deref(),
+                diagnostic_log_path.as_deref(),
+                output,
+            );
+            return if succeeded {
+                Ok(())
+            } else {
+                Err(NotificationError::CommandFailed {
+                    backend: self.name().to_string(),
+                    stderr: "alerter exited before delivery completed".to_string(),
+                })
+            };
+        }
 
-            let output = match command.output() {
+        log_alerter_sound_result(
+            &request,
+            &sound,
+            &afplay_program,
+            diagnostic_log_path.as_deref(),
+        );
+
+        thread::spawn(move || {
+            let output = match child.wait_with_output() {
                 Ok(output) => output,
                 Err(error) => {
                     write_notification_diagnostic(
                         diagnostic_log_path.as_deref(),
                         "WARN",
                         &format!(
-                            "notification_alerter_failed_to_spawn pane_id={} program={} error={}",
+                            "notification_alerter_wait_failed pane_id={} error={}",
                             request.pane_id.as_str(),
-                            alerter_program.display(),
                             log_field(&error.to_string())
                         ),
                     );
                     return;
                 }
             };
-            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            write_notification_diagnostic(
+            handle_alerter_output(
+                &request,
+                &tmux_program,
+                tmux_socket.as_deref(),
                 diagnostic_log_path.as_deref(),
-                "INFO",
-                &format!(
-                    "notification_alerter_completed pane_id={} status={} stdout={} stderr={}",
-                    request.pane_id.as_str(),
-                    output.status,
-                    log_field(&stdout),
-                    log_field(&stderr)
-                ),
+                output,
             );
-            if !output.status.success() {
-                return;
-            }
-
-            if alerter_output_requests_focus(&stdout) {
-                write_notification_diagnostic(
-                    diagnostic_log_path.as_deref(),
-                    "INFO",
-                    &format!(
-                        "notification_alerter_focus_requested pane_id={} output={}",
-                        request.pane_id.as_str(),
-                        log_field(&stdout)
-                    ),
-                );
-                select_tmux_target(
-                    &tmux_program,
-                    tmux_socket.as_deref(),
-                    request.window_target.as_deref(),
-                    request.pane_id.as_str(),
-                    diagnostic_log_path.as_deref(),
-                );
-            } else {
-                write_notification_diagnostic(
-                    diagnostic_log_path.as_deref(),
-                    "INFO",
-                    &format!(
-                        "notification_alerter_no_focus pane_id={} output={}",
-                        request.pane_id.as_str(),
-                        log_field(&stdout)
-                    ),
-                );
-            }
         });
 
         Ok(())
@@ -804,6 +815,90 @@ fn write_notification_diagnostic(log_path: Option<&Path>, level: &str, message: 
     let _ = writeln!(file, "[{level}] {message}");
 }
 
+fn log_alerter_sound_result(
+    request: &NotificationRequest,
+    sound: &ResolvedNotificationSound,
+    afplay_program: &Path,
+    diagnostic_log_path: Option<&Path>,
+) {
+    match play_file_sound_if_needed(sound, afplay_program) {
+        Ok(true) => write_notification_diagnostic(
+            diagnostic_log_path,
+            "INFO",
+            &format!(
+                "notification_alerter_sound_spawned pane_id={} sound={}",
+                request.pane_id.as_str(),
+                log_field(&sound_label(sound))
+            ),
+        ),
+        Ok(false) => {}
+        Err(error) => write_notification_diagnostic(
+            diagnostic_log_path,
+            "WARN",
+            &format!(
+                "notification_alerter_sound_failed pane_id={} error={}",
+                request.pane_id.as_str(),
+                log_field(&error)
+            ),
+        ),
+    }
+}
+
+fn handle_alerter_output(
+    request: &NotificationRequest,
+    tmux_program: &Path,
+    tmux_socket: Option<&Path>,
+    diagnostic_log_path: Option<&Path>,
+    output: Output,
+) -> bool {
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    write_notification_diagnostic(
+        diagnostic_log_path,
+        "INFO",
+        &format!(
+            "notification_alerter_completed pane_id={} status={} stdout={} stderr={}",
+            request.pane_id.as_str(),
+            output.status,
+            log_field(&stdout),
+            log_field(&stderr)
+        ),
+    );
+    if !output.status.success() {
+        return false;
+    }
+
+    if alerter_output_requests_focus(&stdout) {
+        write_notification_diagnostic(
+            diagnostic_log_path,
+            "INFO",
+            &format!(
+                "notification_alerter_focus_requested pane_id={} output={}",
+                request.pane_id.as_str(),
+                log_field(&stdout)
+            ),
+        );
+        select_tmux_target(
+            tmux_program,
+            tmux_socket,
+            request.window_target.as_deref(),
+            request.pane_id.as_str(),
+            diagnostic_log_path,
+        );
+    } else {
+        write_notification_diagnostic(
+            diagnostic_log_path,
+            "INFO",
+            &format!(
+                "notification_alerter_no_focus pane_id={} output={}",
+                request.pane_id.as_str(),
+                log_field(&stdout)
+            ),
+        );
+    }
+    true
+}
+
 fn alerter_output_requests_focus(output: &str) -> bool {
     let trimmed = output.trim();
     matches!(
@@ -877,11 +972,22 @@ fn play_file_sound_if_needed(
         return Ok(false);
     };
 
-    Command::new(afplay_program)
+    let child = Command::new(afplay_program)
         .arg(path)
         .spawn()
-        .map(|_| true)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+
+    #[cfg(test)]
+    {
+        let mut child = child;
+        child.wait().map_err(|error| error.to_string())?;
+    }
+    #[cfg(not(test))]
+    {
+        let _ = child;
+    }
+
+    Ok(true)
 }
 
 fn apple_script_string(value: &str) -> String {
@@ -1530,6 +1636,61 @@ mod tests {
         assert!(diagnostics.contains("notification_alerter_completed"));
         assert!(diagnostics.contains("notification_alerter_focus_requested"));
         assert!(diagnostics.contains("notification_tmux_command"));
+    }
+
+    #[test]
+    fn dispatcher_falls_back_when_alerter_exits_immediately() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let afplay = temp_dir.path().join("afplay");
+        let capture_file = temp_dir.path().join("fallback.txt");
+        let diagnostic_log = temp_dir.path().join("latest.log");
+
+        write_executable(&afplay, "#!/bin/sh\nexit 0\n");
+        let fallback_script = temp_dir.path().join("fallback.sh");
+        write_executable(
+            &fallback_script,
+            &format!(
+                "#!/bin/sh\nprintf '%s|%s\\n' \"$FOREMAN_NOTIFY_KIND\" \"$FOREMAN_NOTIFY_TITLE\" > \"{}\"\n",
+                capture_file.display()
+            ),
+        );
+
+        let mut dispatcher = NotificationDispatcher::new(vec![
+            Box::new(super::AlerterNotificationBackend::with_programs(
+                "false",
+                "tmux",
+                &afplay,
+                None,
+                Some(diagnostic_log.clone()),
+            )),
+            Box::new(super::CommandNotificationBackend::new(
+                "fallback",
+                &fallback_script,
+                std::iter::empty::<String>(),
+            )),
+        ]);
+        let request = super::NotificationRequest {
+            pane_id: "%7".into(),
+            pane_title: "claude-main".to_string(),
+            kind: NotificationKind::Completion,
+            title: "Foreman: agent ready".to_string(),
+            subtitle: "claude-main".to_string(),
+            body: "alpha / @1 \"agents\" - Returned to idle".to_string(),
+            window_target: Some("@1".to_string()),
+            workspace_path: Some(PathBuf::from("/tmp/alpha")),
+        };
+
+        let receipt = dispatcher
+            .dispatch(&request)
+            .expect("fallback backend should be used");
+
+        assert_eq!(receipt.backend_name, "fallback");
+        let capture = fs::read_to_string(capture_file).expect("fallback should capture request");
+        assert_eq!(capture.trim(), "completion|Foreman: agent ready");
+        let diagnostics =
+            fs::read_to_string(diagnostic_log).expect("diagnostic log should be written");
+        assert!(diagnostics.contains("notification_alerter_completed"));
+        assert!(diagnostics.contains("status=exit status: 1"));
     }
 
     #[test]
