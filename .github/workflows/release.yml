@@ -16,10 +16,10 @@ jobs:
     name: Verify Release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install mise
-        uses: jdx/mise-action@v3
+        uses: jdx/mise-action@v4
         with:
           install: true
         env:
@@ -49,7 +49,7 @@ jobs:
 
       - name: Upload release validation evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-validation-evidence
           path: |
@@ -72,10 +72,10 @@ jobs:
           - os: macos-14
             archive_name: foreman-macos-aarch64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install mise
-        uses: jdx/mise-action@v3
+        uses: jdx/mise-action@v4
         with:
           install: true
         env:
@@ -118,7 +118,7 @@ jobs:
           shasum -a 256 "dist/${{ matrix.archive_name }}.tar.gz" > "dist/${{ matrix.archive_name }}.sha256"
 
       - name: Upload release bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.archive_name }}
           path: |
@@ -131,7 +131,7 @@ jobs:
     needs: build
     steps:
       - name: Download release bundles
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
