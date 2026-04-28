@@ -269,6 +269,12 @@ yet expose a stable contract.
 - Runtime muting and unmuting are supported.
 - Runtime notification-profile switching is supported.
 - Notification backend fallback is supported when a preferred path is unavailable.
+- Notification text is concise enough for desktop notification surfaces and does
+  not include full workspace paths in the visible body.
+- Notification backends that support actions may focus the relevant tmux
+  window/pane when the operator clicks the notification.
+- Configurable notification sounds are supported for completion and
+  needs-attention transitions.
 
 **R19. Validation framework**
 
@@ -324,6 +330,8 @@ yet expose a stable contract.
 - Config supports notification backend preference.
 - Config supports a small set of built-in named notification profiles.
 - Config supports selection of the active notification profile.
+- Config supports selecting a notification sound profile with per-event system
+  sound names, audio files, or audio-file directories.
 - Config supports selection of the default UI theme.
 - Config supports selection of the startup sort mode with `stable` and `attention-recent` values.
 - Runtime UI choices may persist across launches, including sort mode, theme, filters, collapsed sessions, and last selected target.
@@ -366,6 +374,10 @@ yet expose a stable contract.
 
 - Foreman supports automatic fallback across available notification backends.
 - Sound playback and richer notification backends are best-effort and do not destabilize the dashboard when unavailable.
+- Desktop notification copy includes the product/event, target label, and tmux
+  location, while verbose implementation details stay out of the visible body.
+- macOS `alerter` notifications can select the relevant tmux window and pane
+  after a content/action click when `alerter` and `tmux` are available.
 
 ### Task contract
 
@@ -598,6 +610,10 @@ mise run ci
 - Given notifications are enabled, entry into a `needs attention` state emits an attention notification unless suppression rules apply.
 - Given multiple notification backends are configured, Foreman uses configured backend order and falls back when an earlier backend fails.
 - Given the startup notification profile excludes a transition kind, that transition is suppressed until the operator changes profile at runtime.
+- Given a configured notification sound profile references an audio directory,
+  Foreman selects playable audio files from that directory for matching events.
+- Given the `alerter` backend reports a notification click, Foreman asks tmux to
+  select the notification's window and pane.
 - Muting and profile switching are reflected in the UI.
 
 **A19. Validation stack**

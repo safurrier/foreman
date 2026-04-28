@@ -216,7 +216,7 @@ export default function (pi: ExtensionAPI) {{
 
     wait_for_file_contents(&trace_file, "agent-start");
     wait_for_file_contents(&trace_file, "agent-end");
-    wait_for_file_contents(&notification_file, "completion|Agent ready:");
+    wait_for_file_contents(&notification_file, "completion|Foreman: agent ready");
     wait_for_file_contents(
         &native_dir.join(format!("{pane_id}.json")),
         r#""status":"idle""#,

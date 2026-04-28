@@ -1,0 +1,6 @@
+slug: notification-sound-click
+branch: feat/notification-sound-click
+created: 2026-04-27
+pr:
+status: implemented
+source: user request to fix macOS notification copy, add configurable sounds, and click-through tmux targeting after comparing tmuxcc

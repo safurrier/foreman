@@ -1,6 +1,7 @@
 use crate::app::{NotificationProfile, SortMode};
 use crate::ui::theme::ThemeName;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -18,9 +19,21 @@ fn default_enabled() -> bool {
 
 fn default_notification_backends() -> Vec<NotificationBackendName> {
     vec![
+        NotificationBackendName::Alerter,
         NotificationBackendName::NotifySend,
         NotificationBackendName::OsaScript,
     ]
+}
+
+fn default_notification_sound_profile() -> String {
+    "default".to_string()
+}
+
+fn default_notification_sound_profiles() -> BTreeMap<String, NotificationSoundProfile> {
+    BTreeMap::from([(
+        default_notification_sound_profile(),
+        NotificationSoundProfile::default(),
+    )])
 }
 
 #[derive(Debug)]
@@ -142,6 +155,10 @@ pub struct NotificationConfig {
     pub cooldown_ticks: u64,
     pub backends: Vec<NotificationBackendName>,
     pub active_profile: NotificationProfile,
+    #[serde(default = "default_notification_sound_profile")]
+    pub sound_profile: String,
+    #[serde(default = "default_notification_sound_profiles")]
+    pub sound_profiles: BTreeMap<String, NotificationSoundProfile>,
 }
 
 impl Default for NotificationConfig {
@@ -151,8 +168,36 @@ impl Default for NotificationConfig {
             cooldown_ticks: DEFAULT_NOTIFICATION_COOLDOWN_TICKS,
             backends: default_notification_backends(),
             active_profile: NotificationProfile::All,
+            sound_profile: default_notification_sound_profile(),
+            sound_profiles: default_notification_sound_profiles(),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NotificationSoundProfile {
+    pub completion: String,
+    pub needs_attention: String,
+    pub cycle: NotificationSoundCycle,
+}
+
+impl Default for NotificationSoundProfile {
+    fn default() -> Self {
+        Self {
+            completion: "Tink".to_string(),
+            needs_attention: "Ping".to_string(),
+            cycle: NotificationSoundCycle::Random,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum NotificationSoundCycle {
+    #[default]
+    Random,
+    Sequential,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -195,6 +240,7 @@ pub struct UiConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum NotificationBackendName {
+    Alerter,
     NotifySend,
     #[serde(rename = "osascript")]
     OsaScript,
@@ -203,6 +249,7 @@ pub enum NotificationBackendName {
 impl NotificationBackendName {
     pub fn label(self) -> &'static str {
         match self {
+            Self::Alerter => "alerter",
             Self::NotifySend => "notify-send",
             Self::OsaScript => "osascript",
         }
@@ -305,6 +352,8 @@ pub struct RuntimeConfig {
     pub notification_cooldown_ticks: u64,
     pub notification_backends: Vec<NotificationBackendName>,
     pub notification_profile: NotificationProfile,
+    pub notification_sound_profile: String,
+    pub notification_sound_profiles: BTreeMap<String, NotificationSoundProfile>,
     pub claude_integration_preference: IntegrationPreference,
     pub codex_integration_preference: IntegrationPreference,
     pub pi_integration_preference: IntegrationPreference,
@@ -365,6 +414,8 @@ impl RuntimeConfig {
             notification_cooldown_ticks: file_config.notifications.cooldown_ticks,
             notification_backends: file_config.notifications.backends,
             notification_profile: file_config.notifications.active_profile,
+            notification_sound_profile: file_config.notifications.sound_profile,
+            notification_sound_profiles: file_config.notifications.sound_profiles,
             claude_integration_preference: file_config.integrations.claude_code.mode,
             codex_integration_preference: file_config.integrations.codex_cli.mode,
             pi_integration_preference: file_config.integrations.pi.mode,
@@ -525,8 +576,9 @@ mod tests {
         default_claude_native_dir, default_codex_native_dir, default_config_toml,
         default_pi_native_dir, load_config, resolve_paths_with_env, write_default_config,
         AppConfig, ConfigError, IntegrationPreference, LoggingConfig, NotificationBackendName,
-        NotificationConfig, PathEnvironment, PullRequestConfig, RuntimeConfig, UiConfig,
-        DEFAULT_NOTIFICATION_COOLDOWN_TICKS, DEFAULT_STARTUP_CACHE_MAX_AGE_MS,
+        NotificationConfig, NotificationSoundProfile, PathEnvironment, PullRequestConfig,
+        RuntimeConfig, UiConfig, DEFAULT_NOTIFICATION_COOLDOWN_TICKS,
+        DEFAULT_STARTUP_CACHE_MAX_AGE_MS,
     };
     use crate::app::{NotificationProfile, SortMode};
     use crate::cli::Cli;
@@ -695,11 +747,20 @@ mod tests {
         assert_eq!(
             runtime.notification_backends,
             vec![
+                NotificationBackendName::Alerter,
                 NotificationBackendName::NotifySend,
                 NotificationBackendName::OsaScript
             ]
         );
         assert_eq!(runtime.notification_profile, NotificationProfile::All);
+        assert_eq!(runtime.notification_sound_profile, "default");
+        assert_eq!(
+            runtime
+                .notification_sound_profiles
+                .get("default")
+                .expect("default sound profile should exist"),
+            &NotificationSoundProfile::default()
+        );
         assert_eq!(
             runtime.claude_integration_preference,
             IntegrationPreference::Auto
@@ -736,6 +797,7 @@ enabled = false
         assert_eq!(
             parsed.notifications.backends,
             vec![
+                NotificationBackendName::Alerter,
                 NotificationBackendName::NotifySend,
                 NotificationBackendName::OsaScript
             ]
@@ -743,6 +805,11 @@ enabled = false
         assert_eq!(
             parsed.notifications.active_profile,
             NotificationProfile::All
+        );
+        assert_eq!(parsed.notifications.sound_profile, "default");
+        assert_eq!(
+            parsed.notifications.sound_profiles.get("default"),
+            Some(&NotificationSoundProfile::default())
         );
         assert_eq!(
             parsed.integrations.claude_code.mode,
