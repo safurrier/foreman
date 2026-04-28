@@ -196,7 +196,6 @@ That split is intentional:
 The release gauntlet expands that proof into three coherent compiled-binary
 journeys:
 - loading-first startup, discovery, theme, help, and harness filtering
-- startup, discovery, theme, scrollable help, and harness filtering
 - compose, focus, search, flash, sort, rename, spawn, and kill
 - PR state, notification policy, graceful degradation, and operator-alert logging
 
