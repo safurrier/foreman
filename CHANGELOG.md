@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.1.1 - 2026-04-28
+
+- Improve macOS notifications with `alerter` actions that can focus the
+  relevant tmux window and pane after a notification click.
+- Add configurable notification sound profiles, including audio-file and
+  directory-backed completion and needs-attention sounds.
+- Shorten desktop notification copy for notification surfaces and document the
+  macOS VoiceOver action-menu path.
+- Add notification diagnostics for `alerter`, sound playback, and tmux focus
+  commands, and fall back to later notification backends when `alerter` exits
+  early with an error.
+
 ## 1.1.0 - 2026-04-27
 
 - Release operator polish across popup startup cache reuse, stable default
