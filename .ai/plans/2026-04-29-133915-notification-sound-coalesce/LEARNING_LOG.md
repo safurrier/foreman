@@ -33,3 +33,24 @@ The new string assertions are intentional because notification copy is the
 observable behavior for this slice. The implementation keeps the existing
 policy/reducer/dispatcher split and does not add compatibility shims or hidden
 fallbacks.
+
+## 2026-04-29 14:18 — Review follow-up and retrospective
+
+Codex review correctly pointed out that mixed completion plus attention bursts
+needed an explicit sound priority. Updated the reducer so `needs attention`
+wins the single audible slot, then added a regression test for that exact
+sequence. The sequence matters because completion notifications are debounced
+until the second idle observation while attention notifications fire
+immediately.
+
+Also updated root `SPEC.md` because grouped notifications and audio priority
+are durable user-visible behavior, not just plan-local notes.
+
+**What matched the plan:** Coalescing fit cleanly in the reducer and sound
+gating fit cleanly in the dispatcher request model.
+
+**What diverged:** Mixed-kind bursts needed explicit priority, and the root spec
+needed an update. Both were review findings rather than initial scope bullets.
+
+**One-shot next time:** Include mixed-kind notification cases and canonical spec
+updates in the first implementation plan for user-visible behavior changes.

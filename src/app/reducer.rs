@@ -3,6 +3,7 @@ use crate::app::state::{
     AppState, FlashNavigateKind, Focus, ModalState, Mode, OperatorAlert, OperatorAlertLevel,
     OperatorAlertSource, PaneId, SearchState, SelectionTarget, SessionId, WindowId,
 };
+use crate::app::NotificationKind;
 use crate::integrations::stabilize_inventory;
 use crate::services::notifications::{
     coalesce_notification_requests, evaluate_inventory_notifications, NotificationDecision,
@@ -825,11 +826,13 @@ fn notification_effects_for_refresh(
         effects.push(Effect::LogNotificationDecision { decision });
     }
 
-    for (index, mut request) in coalesce_notification_requests(notification_requests)
-        .into_iter()
-        .enumerate()
-    {
-        request.audible = index == 0;
+    let notification_requests = coalesce_notification_requests(notification_requests);
+    let audible_request_index = notification_requests
+        .iter()
+        .position(|request| request.kind == NotificationKind::NeedsAttention)
+        .unwrap_or(0);
+    for (index, mut request) in notification_requests.into_iter().enumerate() {
+        request.audible = index == audible_request_index;
         effects.insert(index, Effect::Notify { request });
     }
 
@@ -2061,6 +2064,100 @@ mod tests {
                 }
             ));
         }
+    }
+
+    #[test]
+    fn replace_inventory_prioritizes_attention_sound_for_mixed_notification_bursts() {
+        let initial_inventory = inventory([SessionBuilder::new("alpha")
+            .window(
+                WindowBuilder::new("alpha:agents")
+                    .pane(
+                        PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
+                            .working_dir("/tmp/alpha")
+                            .status(AgentStatus::Working),
+                    )
+                    .pane(
+                        PaneBuilder::agent("alpha:codex", HarnessKind::CodexCli)
+                            .working_dir("/tmp/beta")
+                            .status(AgentStatus::Idle),
+                    ),
+            )
+            .window(
+                WindowBuilder::new("alpha:side").pane(
+                    PaneBuilder::agent("alpha:helper", HarnessKind::ClaudeCode)
+                        .working_dir("/tmp/helper")
+                        .status(AgentStatus::Idle),
+                ),
+            )]);
+        let mut state = AppState::with_inventory(initial_inventory);
+        state.selection = Some(SelectionTarget::Pane("alpha:helper".into()));
+
+        let first_idle_inventory = inventory([SessionBuilder::new("alpha")
+            .window(
+                WindowBuilder::new("alpha:agents")
+                    .pane(
+                        PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
+                            .working_dir("/tmp/alpha")
+                            .status(AgentStatus::Idle),
+                    )
+                    .pane(
+                        PaneBuilder::agent("alpha:codex", HarnessKind::CodexCli)
+                            .working_dir("/tmp/beta")
+                            .status(AgentStatus::Idle),
+                    ),
+            )
+            .window(
+                WindowBuilder::new("alpha:side").pane(
+                    PaneBuilder::agent("alpha:helper", HarnessKind::ClaudeCode)
+                        .working_dir("/tmp/helper")
+                        .status(AgentStatus::Idle),
+                ),
+            )]);
+        let mixed_burst_inventory = inventory([SessionBuilder::new("alpha")
+            .window(
+                WindowBuilder::new("alpha:agents")
+                    .pane(
+                        PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
+                            .working_dir("/tmp/alpha")
+                            .status(AgentStatus::Idle),
+                    )
+                    .pane(
+                        PaneBuilder::agent("alpha:codex", HarnessKind::CodexCli)
+                            .working_dir("/tmp/beta")
+                            .status(AgentStatus::NeedsAttention),
+                    ),
+            )
+            .window(
+                WindowBuilder::new("alpha:side").pane(
+                    PaneBuilder::agent("alpha:helper", HarnessKind::ClaudeCode)
+                        .working_dir("/tmp/helper")
+                        .status(AgentStatus::Idle),
+                ),
+            )]);
+
+        let first_effects = reduce(&mut state, Action::ReplaceInventory(first_idle_inventory));
+        assert!(first_effects.is_empty());
+
+        let effects = reduce(&mut state, Action::ReplaceInventory(mixed_burst_inventory));
+        let requests = effects
+            .iter()
+            .filter_map(|effect| match effect {
+                super::Effect::Notify { request } => Some(request),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(requests.len(), 2);
+        let completion = requests
+            .iter()
+            .find(|request| request.kind == crate::app::NotificationKind::Completion)
+            .expect("completion request should be emitted");
+        let attention = requests
+            .iter()
+            .find(|request| request.kind == crate::app::NotificationKind::NeedsAttention)
+            .expect("attention request should be emitted");
+        assert!(!completion.audible);
+        assert!(attention.audible);
     }
 
     #[test]

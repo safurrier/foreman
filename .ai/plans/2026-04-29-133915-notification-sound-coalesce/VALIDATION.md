@@ -55,3 +55,25 @@ Coverage included:
 - `cargo check`
 - full Rust test suite
 - doc tests
+
+## 2026-04-29 — Codex review follow-up
+
+Codex review found no critical issues and no bug-hunter correctness findings.
+It suggested making mixed-kind burst audio priority explicit and updating the
+canonical notification spec.
+
+Follow-up validation:
+
+```bash
+cargo test replace_inventory_prioritizes_attention_sound_for_mixed_notification_bursts
+```
+
+Result: passed. This covers a refresh that emits completion and
+needs-attention notifications together, with `needs attention` as the only
+audible request.
+
+```bash
+mise run check
+```
+
+Result: passed after the review follow-up.

@@ -29,7 +29,7 @@ description: >
 ## Validation
 - [x] Run `mise run check`
 - [x] Update `VALIDATION.md`
-- [ ] Update `LEARNING_LOG.md` retrospective
+- [x] Update `LEARNING_LOG.md` retrospective
 
 ## PR
 - [x] Commit branch changes

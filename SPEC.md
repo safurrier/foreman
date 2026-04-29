@@ -266,6 +266,10 @@ yet expose a stable contract.
 - When notifications are enabled, Foreman notifies when an agent enters a `needs attention` state.
 - Notifications are suppressed when the operator is already looking at the relevant pane or already focused on that agent in the dashboard, except popup mode may still notify for the selected pane because the dashboard is transient.
 - Per-agent cooldowns reduce noise.
+- Same-refresh notifications of the same kind are coalesced into one concise
+  notification.
+- When one refresh emits multiple notification kinds, only one notification
+  plays sound and `needs attention` takes audio priority over completion.
 - Runtime muting and unmuting are supported.
 - Runtime notification-profile switching is supported.
 - Notification backend fallback is supported when a preferred path is unavailable.
@@ -608,6 +612,10 @@ mise run ci
 
 - Given notifications are enabled, agent completion emits a completion notification unless suppression rules apply.
 - Given notifications are enabled, entry into a `needs attention` state emits an attention notification unless suppression rules apply.
+- Given multiple agents complete in the same refresh, Foreman emits one grouped
+  completion notification and records cooldowns for each contributing pane.
+- Given completion and `needs attention` notifications are both emitted in one
+  refresh, only the `needs attention` notification plays sound.
 - Given multiple notification backends are configured, Foreman uses configured backend order and falls back when an earlier backend fails.
 - Given the startup notification profile excludes a transition kind, that transition is suppressed until the operator changes profile at runtime.
 - Given a configured notification sound profile references an audio directory,
