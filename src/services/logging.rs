@@ -692,6 +692,7 @@ mod tests {
             title: "Agent ready: claude-main".to_string(),
             subtitle: "claude-main".to_string(),
             body: "The agent returned to an idle state.".to_string(),
+            audible: true,
             window_target: Some("alpha:0".to_string()),
             workspace_path: None,
         };
