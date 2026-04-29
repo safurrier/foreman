@@ -32,7 +32,7 @@ description: >
 - [ ] Update `LEARNING_LOG.md` retrospective
 
 ## PR
-- [ ] Commit branch changes
-- [ ] Push branch
-- [ ] Open PR
+- [x] Commit branch changes
+- [x] Push branch
+- [x] Open PR
 - [ ] Poll CI and reviews
