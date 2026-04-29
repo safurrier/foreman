@@ -77,3 +77,17 @@ mise run check
 ```
 
 Result: passed after the review follow-up.
+
+## 2026-04-29 — PR checks and reviews
+
+PR: https://github.com/safurrier/foreman/pull/9
+
+Latest checked commit: `7f079ddfeb6a88c3f728f212317f47a762bdbfd0`
+
+GitHub checks:
+- `Quality Gate`: passed
+- `Full Validation`: passed
+
+Review polling:
+- Latest-commit inline comments: none
+- Top-level PR reviews: none

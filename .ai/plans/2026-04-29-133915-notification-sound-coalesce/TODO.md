@@ -35,4 +35,4 @@ description: >
 - [x] Commit branch changes
 - [x] Push branch
 - [x] Open PR
-- [ ] Poll CI and reviews
+- [x] Poll CI and reviews
