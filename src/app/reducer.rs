@@ -5,8 +5,8 @@ use crate::app::state::{
 };
 use crate::integrations::stabilize_inventory;
 use crate::services::notifications::{
-    evaluate_inventory_notifications, NotificationDecision, NotificationPolicyContext,
-    NotificationRequest,
+    coalesce_notification_requests, evaluate_inventory_notifications, NotificationDecision,
+    NotificationPolicyContext, NotificationRequest,
 };
 use crate::services::pull_requests::PullRequestLookup;
 
@@ -810,6 +810,7 @@ fn notification_effects_for_refresh(
     );
 
     let mut effects = Vec::new();
+    let mut notification_requests = Vec::new();
     for decision in decisions {
         if let Some(request) = decision.request.clone() {
             state.notifications.cooldowns.insert(
@@ -819,9 +820,17 @@ fn notification_effects_for_refresh(
                 },
                 state.notifications.refresh_tick,
             );
-            effects.push(Effect::Notify { request });
+            notification_requests.push(request);
         }
         effects.push(Effect::LogNotificationDecision { decision });
+    }
+
+    for (index, mut request) in coalesce_notification_requests(notification_requests)
+        .into_iter()
+        .enumerate()
+    {
+        request.audible = index == 0;
+        effects.insert(index, Effect::Notify { request });
     }
 
     effects
@@ -1966,6 +1975,92 @@ mod tests {
                 pane_id: "alpha:claude".into(),
                 kind: crate::app::NotificationKind::Completion,
             }));
+    }
+
+    #[test]
+    fn replace_inventory_coalesces_multiple_completion_notifications() {
+        let initial_inventory = inventory([SessionBuilder::new("alpha")
+            .window(
+                WindowBuilder::new("alpha:agents")
+                    .pane(
+                        PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
+                            .working_dir("/tmp/alpha")
+                            .title("claude-main")
+                            .status(AgentStatus::Working),
+                    )
+                    .pane(
+                        PaneBuilder::agent("alpha:codex", HarnessKind::CodexCli)
+                            .working_dir("/tmp/beta")
+                            .title("codex-main")
+                            .status(AgentStatus::Working),
+                    ),
+            )
+            .window(
+                WindowBuilder::new("alpha:side").pane(
+                    PaneBuilder::agent("alpha:helper", HarnessKind::ClaudeCode)
+                        .working_dir("/tmp/helper")
+                        .status(AgentStatus::Idle),
+                ),
+            )]);
+        let mut state = AppState::with_inventory(initial_inventory);
+        state.selection = Some(SelectionTarget::Pane("alpha:helper".into()));
+
+        let refreshed_inventory = inventory([SessionBuilder::new("alpha")
+            .window(
+                WindowBuilder::new("alpha:agents")
+                    .pane(
+                        PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
+                            .working_dir("/tmp/alpha")
+                            .title("claude-main")
+                            .status(AgentStatus::Idle),
+                    )
+                    .pane(
+                        PaneBuilder::agent("alpha:codex", HarnessKind::CodexCli)
+                            .working_dir("/tmp/beta")
+                            .title("codex-main")
+                            .status(AgentStatus::Idle),
+                    ),
+            )
+            .window(
+                WindowBuilder::new("alpha:side").pane(
+                    PaneBuilder::agent("alpha:helper", HarnessKind::ClaudeCode)
+                        .working_dir("/tmp/helper")
+                        .status(AgentStatus::Idle),
+                ),
+            )]);
+
+        let first_effects = reduce(
+            &mut state,
+            Action::ReplaceInventory(refreshed_inventory.clone()),
+        );
+        assert!(first_effects.is_empty());
+
+        let effects = reduce(&mut state, Action::ReplaceInventory(refreshed_inventory));
+
+        assert_eq!(effects.len(), 3);
+        let super::Effect::Notify { request } = &effects[0] else {
+            panic!("first effect should be coalesced notification");
+        };
+        assert_eq!(request.title, "Foreman: 2 agents ready");
+        assert!(request.audible);
+        assert!(request.body.contains("alpha"));
+        assert!(request.body.contains("beta"));
+        assert!(matches!(
+            effects[1],
+            super::Effect::LogNotificationDecision { .. }
+        ));
+        assert!(matches!(
+            effects[2],
+            super::Effect::LogNotificationDecision { .. }
+        ));
+        for pane_id in ["alpha:claude", "alpha:codex"] {
+            assert!(state.notifications.cooldowns.contains_key(
+                &crate::app::NotificationCooldownKey {
+                    pane_id: pane_id.into(),
+                    kind: crate::app::NotificationKind::Completion,
+                }
+            ));
+        }
     }
 
     #[test]

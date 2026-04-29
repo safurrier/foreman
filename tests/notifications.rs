@@ -50,6 +50,7 @@ fn shell_backed_notification_dispatcher_falls_back_and_logs_selection() {
         title: "Agent ready: claude-main".to_string(),
         subtitle: "claude-main".to_string(),
         body: "The agent returned to an idle state.".to_string(),
+        audible: true,
         window_target: Some("alpha:0".to_string()),
         workspace_path: Some(temp_dir.path().to_path_buf()),
     };
@@ -83,4 +84,41 @@ fn shell_backed_notification_dispatcher_falls_back_and_logs_selection() {
     assert!(logs.contains("notification_decision"));
     assert!(logs.contains("notification_backend_selected"));
     assert!(logs.contains("backend=fallback"));
+}
+
+#[test]
+fn inaudible_notification_dispatches_without_sound() {
+    let temp_dir = tempdir().expect("temp dir should exist");
+    let success_script = temp_dir.path().join("success.sh");
+    let capture_file = temp_dir.path().join("notification.txt");
+
+    write_executable_script(
+        &success_script,
+        "#!/bin/sh\nprintf 'sound=%s\\n' \"$FOREMAN_NOTIFY_SOUND\" > \"$1\"\n",
+    );
+
+    let mut dispatcher =
+        NotificationDispatcher::new(vec![Box::new(CommandNotificationBackend::new(
+            "capture",
+            &success_script,
+            [capture_file.display().to_string()],
+        ))]);
+    let request = NotificationRequest {
+        pane_id: "alpha:claude".into(),
+        pane_title: "claude-main".to_string(),
+        kind: NotificationKind::Completion,
+        title: "Agent ready: claude-main".to_string(),
+        subtitle: "claude-main".to_string(),
+        body: "The agent returned to an idle state.".to_string(),
+        audible: false,
+        window_target: Some("alpha:0".to_string()),
+        workspace_path: Some(temp_dir.path().to_path_buf()),
+    };
+
+    dispatcher
+        .dispatch(&request)
+        .expect("notification should still dispatch");
+
+    let capture = fs::read_to_string(&capture_file).expect("capture file should exist");
+    assert_eq!(capture.trim(), "sound=");
 }

@@ -20,6 +20,7 @@ pub struct NotificationRequest {
     pub title: String,
     pub subtitle: String,
     pub body: String,
+    pub audible: bool,
     pub window_target: Option<String>,
     pub workspace_path: Option<PathBuf>,
 }
@@ -147,7 +148,11 @@ impl NotificationDispatcher {
         request: &NotificationRequest,
     ) -> Result<NotificationDispatchReceipt, NotificationError> {
         let mut attempts = Vec::new();
-        let sound = self.sounds.resolve(request.kind);
+        let sound = if request.audible {
+            self.sounds.resolve(request.kind)
+        } else {
+            ResolvedNotificationSound::None
+        };
 
         for backend in &self.backends {
             let delivery = NotificationDelivery {
@@ -504,6 +509,25 @@ pub fn evaluate_inventory_notifications(
     }
 
     decisions
+}
+
+pub fn coalesce_notification_requests(
+    requests: Vec<NotificationRequest>,
+) -> Vec<NotificationRequest> {
+    let mut groups: Vec<(NotificationKind, Vec<NotificationRequest>)> = Vec::new();
+
+    for request in requests {
+        if let Some((_, existing)) = groups.iter_mut().find(|(kind, _)| *kind == request.kind) {
+            existing.push(request);
+        } else {
+            groups.push((request.kind, vec![request]));
+        }
+    }
+
+    groups
+        .into_iter()
+        .map(|(kind, requests)| grouped_notification_request(kind, requests))
+        .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -1213,17 +1237,60 @@ fn notification_request(
         title,
         subtitle,
         body: format!("{location} - {detail}"),
+        audible: true,
         window_target,
         workspace_path: pane.working_dir.clone(),
+    }
+}
+
+fn grouped_notification_request(
+    kind: NotificationKind,
+    mut requests: Vec<NotificationRequest>,
+) -> NotificationRequest {
+    if requests.len() == 1 {
+        return requests.remove(0);
+    }
+
+    const BODY_LINE_LIMIT: usize = 5;
+
+    let first = requests
+        .first()
+        .expect("grouped request should have at least one item")
+        .clone();
+    let total = requests.len();
+    let title = match kind {
+        NotificationKind::Completion => format!("Foreman: {total} agents ready"),
+        NotificationKind::NeedsAttention => format!("Foreman: {total} need attention"),
+    };
+    let subtitle = "Multiple agents".to_string();
+    let mut body_lines = requests
+        .iter()
+        .take(BODY_LINE_LIMIT)
+        .map(|request| format!("{} - {}", request.subtitle, request.body))
+        .collect::<Vec<_>>();
+    if total > BODY_LINE_LIMIT {
+        body_lines.push(format!("and {} more", total - BODY_LINE_LIMIT));
+    }
+
+    NotificationRequest {
+        pane_id: first.pane_id,
+        pane_title: first.pane_title,
+        kind,
+        title,
+        subtitle,
+        body: body_lines.join("\n"),
+        audible: true,
+        window_target: first.window_target,
+        workspace_path: first.workspace_path,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        build_notification_dispatcher, evaluate_inventory_notifications, NotificationBackend,
-        NotificationDecisionReason, NotificationDispatcher, NotificationError,
-        NotificationPolicyContext,
+        build_notification_dispatcher, coalesce_notification_requests,
+        evaluate_inventory_notifications, NotificationBackend, NotificationDecisionReason,
+        NotificationDispatcher, NotificationError, NotificationPolicyContext,
     };
     use crate::app::{
         inventory, AgentStatus, HarnessKind, NotificationCooldownKey, NotificationKind,
@@ -1327,6 +1394,70 @@ mod tests {
         assert!(request.body.contains("alpha / alpha:agents"));
         assert!(!request.body.contains("/tmp/alpha"));
         assert_eq!(request.window_target.as_deref(), Some("alpha:agents"));
+    }
+
+    #[test]
+    fn coalesce_notification_requests_groups_same_kind_bursts() {
+        let previous = inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:agents")
+                .pane(
+                    PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
+                        .working_dir("/tmp/alpha")
+                        .title("claude-main")
+                        .status(AgentStatus::Working),
+                )
+                .pane(
+                    PaneBuilder::agent("alpha:codex", HarnessKind::CodexCli)
+                        .working_dir("/tmp/beta")
+                        .title("codex-main")
+                        .status(AgentStatus::Working),
+                ),
+        )]);
+        let current = inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:agents")
+                .pane(
+                    PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
+                        .working_dir("/tmp/alpha")
+                        .title("claude-main")
+                        .status(AgentStatus::Idle),
+                )
+                .pane(
+                    PaneBuilder::agent("alpha:codex", HarnessKind::CodexCli)
+                        .working_dir("/tmp/beta")
+                        .title("codex-main")
+                        .status(AgentStatus::Idle),
+                ),
+        )]);
+
+        let decisions = evaluate_inventory_notifications(
+            &previous,
+            &current,
+            NotificationPolicyContext {
+                selected_pane_id: None,
+                muted: false,
+                profile: NotificationProfile::All,
+                refresh_tick: 4,
+                cooldown_ticks: 3,
+            },
+            &Default::default(),
+        );
+        let requests = decisions
+            .into_iter()
+            .filter_map(|decision| decision.request)
+            .collect::<Vec<_>>();
+
+        let coalesced = coalesce_notification_requests(requests);
+
+        assert_eq!(coalesced.len(), 1);
+        assert_eq!(coalesced[0].title, "Foreman: 2 agents ready");
+        assert_eq!(coalesced[0].subtitle, "Multiple agents");
+        assert_eq!(coalesced[0].pane_id.as_str(), "alpha:claude");
+        assert_eq!(coalesced[0].window_target.as_deref(), Some("alpha:agents"));
+        assert!(coalesced[0].audible);
+        assert!(coalesced[0].body.contains("alpha"));
+        assert!(coalesced[0].body.contains("beta"));
+        assert!(!coalesced[0].body.contains("/tmp/alpha"));
+        assert!(!coalesced[0].body.contains("/tmp/beta"));
     }
 
     #[test]
@@ -1512,6 +1643,7 @@ mod tests {
             title: "Agent ready: claude-main".to_string(),
             subtitle: "claude-main".to_string(),
             body: "The agent returned to an idle state.".to_string(),
+            audible: true,
             window_target: Some("alpha:0".to_string()),
             workspace_path: Some(PathBuf::from("/tmp/alpha")),
         };
@@ -1545,6 +1677,7 @@ mod tests {
             title: "Needs attention: claude-main".to_string(),
             subtitle: "claude-main".to_string(),
             body: "The agent is waiting for input or intervention.".to_string(),
+            audible: true,
             window_target: Some("alpha:0".to_string()),
             workspace_path: Some(PathBuf::from("/tmp/alpha")),
         };
@@ -1628,6 +1761,7 @@ mod tests {
             title: "Foreman: needs attention".to_string(),
             subtitle: "claude-main".to_string(),
             body: "alpha / @1 \"agents\" - Waiting for input".to_string(),
+            audible: true,
             window_target: Some("@1".to_string()),
             workspace_path: Some(PathBuf::from("/tmp/alpha")),
         };
@@ -1692,6 +1826,7 @@ mod tests {
             title: "Foreman: agent ready".to_string(),
             subtitle: "claude-main".to_string(),
             body: "alpha / @1 \"agents\" - Returned to idle".to_string(),
+            audible: true,
             window_target: Some("@1".to_string()),
             workspace_path: Some(PathBuf::from("/tmp/alpha")),
         };
@@ -1787,6 +1922,7 @@ mod tests {
             title: "Foreman: needs attention".to_string(),
             subtitle: "claude-main".to_string(),
             body: "notify-target / @1 \"agents\" - Waiting for input".to_string(),
+            audible: true,
             window_target: None,
             workspace_path: Some(PathBuf::from("/tmp/alpha")),
         };
