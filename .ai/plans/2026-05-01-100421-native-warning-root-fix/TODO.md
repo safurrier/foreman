@@ -14,5 +14,6 @@ description: >
 - [x] Keep native `working` hook status from being overridden by terminal text.
 - [x] Add pane-level doctor evidence for missing native signal warnings.
 - [x] Add simulated tmux E2E coverage for false Claude warnings and native purity.
+- [x] Address Codex PR review: allow native signal correction when runtime identity is unavailable.
 - [x] Run focused native/tmux tests.
 - [x] Run `mise run check`.

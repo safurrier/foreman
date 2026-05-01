@@ -31,3 +31,7 @@ description: >
   `confirm`, or `waiting for input`. The root fix is to remove terminal
   heuristics from native overlays entirely; unsupported attention states should
   remain unsupported until providers emit hook events for them.
+- A native signal should still be allowed to correct a compatibility-only
+  mislabel when runtime identity is unavailable. Runtime identity remains the
+  hard guard: if process/title identity says a pane is Pi, a Codex native file
+  must not override it.

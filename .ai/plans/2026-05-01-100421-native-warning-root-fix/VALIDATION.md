@@ -7,3 +7,11 @@ description: >
 ---
 
 # Validation
+
+## Automated
+
+- `cargo fmt --check` — passed.
+- `cargo test -q apply_native_signals_does_not_override_different_harness -- --nocapture` — passed.
+- `cargo test -q apply_native_signals_can_correct_compatibility_mislabel_without_runtime_identity -- --nocapture` — passed.
+- `cargo test -q codex_native_signal_corrects_compatibility_mislabel_without_runtime_identity -- --nocapture` — passed.
+- `mise run check` — passed.

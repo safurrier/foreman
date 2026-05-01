@@ -184,11 +184,13 @@ pub fn apply_native_signals<S: NativeSignalSource>(
                     pane.runtime_command.as_deref(),
                     &pane.title,
                 );
-                let native_candidate = pane
-                    .agent
-                    .as_ref()
-                    .is_none_or(|agent| agent.harness == harness)
-                    && runtime_identity.is_none_or(|identity| identity == harness);
+                let native_candidate = match runtime_identity {
+                    Some(identity) => identity == harness,
+                    None => pane.agent.as_ref().is_none_or(|agent| {
+                        agent.harness == harness
+                            || agent.integration_mode == IntegrationMode::Compatibility
+                    }),
+                };
                 let fallback_candidate = matches!(
                     pane.agent.as_ref(),
                     Some(agent)
@@ -392,7 +394,7 @@ mod tests {
         let mut inventory = inventory(vec![SessionBuilder::new("s1").window(
             WindowBuilder::new("w1").name("main").pane(
                 PaneBuilder::agent("%4", HarnessKind::Pi)
-                    .title("pi")
+                    .title("π - pi")
                     .status(AgentStatus::Working),
             ),
         )]);
@@ -407,6 +409,36 @@ mod tests {
         assert_eq!(agent.integration_mode, IntegrationMode::Compatibility);
         assert_eq!(agent.status, AgentStatus::Working);
         assert_eq!(summary.applied, 0);
+        assert_eq!(summary.fallback_to_compatibility, 0);
+    }
+
+    #[test]
+    fn apply_native_signals_can_correct_compatibility_mislabel_without_runtime_identity() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        std::fs::write(
+            temp_dir.path().join("%5.json"),
+            r#"{"status":"idle","activity_score":44}"#,
+        )
+        .expect("signal should exist");
+        let source = FileNativeSignalSource::new(temp_dir.path().to_path_buf());
+        let mut inventory = inventory(vec![SessionBuilder::new("s1").window(
+            WindowBuilder::new("w1").name("main").pane(
+                PaneBuilder::agent("%5", HarnessKind::ClaudeCode)
+                    .title("plain shell")
+                    .status(AgentStatus::Working),
+            ),
+        )]);
+
+        let summary = apply_native_signals(&mut inventory, HarnessKind::CodexCli, &source);
+
+        let agent = inventory
+            .pane(&"%5".into())
+            .and_then(|pane| pane.agent.as_ref())
+            .expect("pane should remain an agent");
+        assert_eq!(agent.harness, HarnessKind::CodexCli);
+        assert_eq!(agent.integration_mode, IntegrationMode::Native);
+        assert_eq!(agent.status, AgentStatus::Idle);
+        assert_eq!(summary.applied, 1);
         assert_eq!(summary.fallback_to_compatibility, 0);
     }
 

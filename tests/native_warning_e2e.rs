@@ -54,6 +54,41 @@ fn codex_runtime_identity_prevents_false_claude_native_warnings() {
 }
 
 #[test]
+fn codex_native_signal_corrects_compatibility_mislabel_without_runtime_identity() {
+    let fixture = TmuxFixture::new();
+    let temp_dir = tempfile::tempdir().expect("temp dir should exist");
+    let codex_native = temp_dir.path().join("codex-native");
+    let claude_native = temp_dir.path().join("claude-native");
+    std::fs::create_dir_all(&codex_native).expect("codex native dir should exist");
+    std::fs::create_dir_all(&claude_native).expect("claude native dir should exist");
+
+    let pane_id = fixture.new_session(
+        "codex-mislabel",
+        &fixture.shell_command("Claude Code ready in old scrollback\nCodex CLI waiting"),
+    );
+    fixture.wait_for_capture(&pane_id, "Codex CLI waiting");
+    write_signal(
+        &codex_native,
+        &pane_id,
+        r#"{"status":"idle","activity_score":40}"#,
+    );
+
+    let summary =
+        bootstrap_with_native_dirs(&fixture, &temp_dir, &claude_native, &codex_native, None);
+    let agent = summary
+        .state
+        .inventory
+        .pane(&PaneId::new(&pane_id))
+        .and_then(|pane| pane.agent.as_ref())
+        .expect("agent should exist");
+
+    assert_eq!(agent.harness, HarnessKind::CodexCli);
+    assert_eq!(agent.integration_mode, IntegrationMode::Native);
+    assert_eq!(agent.status, AgentStatus::Idle);
+    assert_eq!(summary.codex_native.applied, 1);
+}
+
+#[test]
 fn mixed_native_fixture_reports_only_real_claude_missing_signals() {
     let fixture = TmuxFixture::new();
     let temp_dir = tempfile::tempdir().expect("temp dir should exist");
