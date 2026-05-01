@@ -246,6 +246,11 @@ impl Default for NotificationSoundSelector {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum NotificationSoundSource {
     System(String),
+    NotificationSounds {
+        names: Vec<String>,
+        cycle: NotificationSoundCycle,
+        index: usize,
+    },
     Directory {
         files: Vec<PathBuf>,
         cycle: NotificationSoundCycle,
@@ -260,6 +265,10 @@ impl NotificationSoundSource {
         let trimmed = value.trim();
         if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("none") {
             return Self::None;
+        }
+
+        if let Some(prefix) = trimmed.strip_prefix("notification-sounds:") {
+            return Self::notification_sounds(prefix, cycle, &user_notification_sounds_dir());
         }
 
         let path = expand_sound_path(trimmed, config_dir);
@@ -301,10 +310,75 @@ impl NotificationSoundSource {
         Self::System(trimmed.to_string())
     }
 
+    fn notification_sounds(
+        name_prefix: &str,
+        cycle: NotificationSoundCycle,
+        sounds_dir: &Path,
+    ) -> Self {
+        let name_prefix = name_prefix.trim();
+        if name_prefix.is_empty() {
+            return Self::None;
+        }
+
+        let mut names = std::fs::read_dir(sounds_dir)
+            .ok()
+            .into_iter()
+            .flat_map(|entries| entries.filter_map(Result::ok))
+            .map(|entry| entry.path())
+            .filter(|candidate| {
+                candidate.is_file()
+                    && candidate
+                        .extension()
+                        .and_then(|extension| extension.to_str())
+                        .is_some_and(is_notification_sound_extension)
+            })
+            .filter_map(|candidate| {
+                candidate
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .map(str::to_string)
+            })
+            .filter(|name| name.starts_with(name_prefix))
+            .collect::<Vec<_>>();
+        names.sort();
+
+        if names.is_empty() {
+            return Self::None;
+        }
+
+        Self::NotificationSounds {
+            names,
+            cycle,
+            index: 0,
+        }
+    }
+
     fn resolve(&mut self) -> ResolvedNotificationSound {
         match self {
             Self::System(name) => ResolvedNotificationSound::System(name.clone()),
             Self::File(path) => ResolvedNotificationSound::File(path.clone()),
+            Self::NotificationSounds {
+                names,
+                cycle,
+                index,
+            } => {
+                if names.is_empty() {
+                    return ResolvedNotificationSound::None;
+                }
+                let selected = match cycle {
+                    NotificationSoundCycle::Sequential => {
+                        let selected = *index % names.len();
+                        *index = index.saturating_add(1);
+                        selected
+                    }
+                    NotificationSoundCycle::Random => {
+                        let selected = pseudo_random_index(names.len(), *index);
+                        *index = index.saturating_add(1);
+                        selected
+                    }
+                };
+                ResolvedNotificationSound::System(names[selected].clone())
+            }
             Self::Directory {
                 files,
                 cycle,
@@ -319,7 +393,11 @@ impl NotificationSoundSource {
                         *index = index.saturating_add(1);
                         selected
                     }
-                    NotificationSoundCycle::Random => pseudo_random_index(files.len(), *index),
+                    NotificationSoundCycle::Random => {
+                        let selected = pseudo_random_index(files.len(), *index);
+                        *index = index.saturating_add(1);
+                        selected
+                    }
                 };
                 ResolvedNotificationSound::File(files[selected].clone())
             }
@@ -969,6 +1047,14 @@ fn expand_sound_path(value: &str, config_dir: Option<&Path>) -> PathBuf {
     config_dir.map(|dir| dir.join(&path)).unwrap_or(path)
 }
 
+fn user_notification_sounds_dir() -> PathBuf {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("Library")
+        .join("Sounds")
+}
+
 fn looks_like_path(value: &str) -> bool {
     value.contains('/') || value.contains('\\') || value.starts_with('.')
 }
@@ -977,6 +1063,13 @@ fn is_audio_extension(extension: &str) -> bool {
     matches!(
         extension.to_ascii_lowercase().as_str(),
         "aiff" | "aif" | "caf" | "wav" | "mp3"
+    )
+}
+
+fn is_notification_sound_extension(extension: &str) -> bool {
+    matches!(
+        extension.to_ascii_lowercase().as_str(),
+        "aiff" | "aif" | "caf" | "wav"
     )
 }
 
@@ -1587,6 +1680,71 @@ mod tests {
         );
     }
 
+    #[test]
+    fn notification_sound_source_resolves_user_sound_names() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let sound_dir = temp_dir.path().join("Library").join("Sounds");
+        fs::create_dir_all(&sound_dir).expect("sound dir should exist");
+        fs::write(sound_dir.join("foreman-completed-b.aiff"), "").expect("sound should exist");
+        fs::write(sound_dir.join("foreman-completed-a.aiff"), "").expect("sound should exist");
+        fs::write(sound_dir.join("foreman-completed-c.mp3"), "")
+            .expect("direct-playback sound should be ignored here");
+        fs::write(sound_dir.join("foreman-other.aiff"), "").expect("ignored sound should exist");
+
+        let mut source = super::NotificationSoundSource::notification_sounds(
+            "foreman-completed-",
+            NotificationSoundCycle::Sequential,
+            &sound_dir,
+        );
+
+        assert_eq!(
+            source.resolve(),
+            super::ResolvedNotificationSound::System("foreman-completed-a".to_string())
+        );
+        assert_eq!(
+            source.resolve(),
+            super::ResolvedNotificationSound::System("foreman-completed-b".to_string())
+        );
+    }
+
+    #[test]
+    fn random_sound_sources_advance_selection_salt() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let sound_file = temp_dir.path().join("a.aiff");
+        fs::write(&sound_file, "").expect("sound should exist");
+
+        let mut file_source = super::NotificationSoundSource::Directory {
+            files: vec![sound_file],
+            cycle: NotificationSoundCycle::Random,
+            index: 0,
+        };
+        let mut notification_source = super::NotificationSoundSource::NotificationSounds {
+            names: vec!["foreman-completed-a".to_string()],
+            cycle: NotificationSoundCycle::Random,
+            index: 0,
+        };
+
+        let _ = file_source.resolve();
+        let _ = notification_source.resolve();
+
+        assert_eq!(
+            file_source,
+            super::NotificationSoundSource::Directory {
+                files: vec![temp_dir.path().join("a.aiff")],
+                cycle: NotificationSoundCycle::Random,
+                index: 1,
+            }
+        );
+        assert_eq!(
+            notification_source,
+            super::NotificationSoundSource::NotificationSounds {
+                names: vec!["foreman-completed-a".to_string()],
+                cycle: NotificationSoundCycle::Random,
+                index: 1,
+            }
+        );
+    }
+
     #[derive(Clone)]
     struct FakeBackend {
         name: String,
@@ -1786,6 +1944,56 @@ mod tests {
         assert!(diagnostics.contains("notification_alerter_completed"));
         assert!(diagnostics.contains("notification_alerter_focus_requested"));
         assert!(diagnostics.contains("notification_tmux_command"));
+    }
+
+    #[test]
+    fn alerter_system_sound_uses_notification_sound_without_afplay() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let alerter = temp_dir.path().join("alerter");
+        let tmux = temp_dir.path().join("tmux");
+        let afplay = temp_dir.path().join("afplay");
+        let alerter_args = temp_dir.path().join("alerter-args.txt");
+        let afplay_log = temp_dir.path().join("afplay.txt");
+
+        write_executable(
+            &alerter,
+            &format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"{}\"\nprintf '{{\"activationType\":\"timeout\"}}\\n'\n",
+                alerter_args.display()
+            ),
+        );
+        write_executable(&tmux, "#!/bin/sh\nexit 0\n");
+        write_executable(
+            &afplay,
+            &format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$1\" > \"{}\"\n",
+                afplay_log.display()
+            ),
+        );
+
+        let backend =
+            super::AlerterNotificationBackend::with_programs(&alerter, &tmux, &afplay, None, None);
+        let request = super::NotificationRequest {
+            pane_id: "%7".into(),
+            pane_title: "claude-main".to_string(),
+            kind: NotificationKind::Completion,
+            title: "Foreman: agent ready".to_string(),
+            subtitle: "claude-main".to_string(),
+            body: "alpha / @1 \"agents\" - Returned to idle".to_string(),
+            audible: true,
+            window_target: Some("@1".to_string()),
+            workspace_path: Some(PathBuf::from("/tmp/alpha")),
+        };
+
+        backend
+            .send(&super::NotificationDelivery {
+                request: &request,
+                sound: super::ResolvedNotificationSound::System("foreman-completed-a".to_string()),
+            })
+            .expect("alerter should dispatch");
+
+        wait_for_file_contains(&alerter_args, "--sound foreman-completed-a");
+        assert!(!afplay_log.exists());
     }
 
     #[test]

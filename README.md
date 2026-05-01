@@ -180,12 +180,25 @@ sound_profile = "default"
 completion = "Tink"
 needs_attention = "Ping"
 cycle = "random" # random | sequential
+
+[notifications.sound_profiles.custom_macos]
+completion = "notification-sounds:foreman-completed-"
+needs_attention = "notification-sounds:foreman-needs-input-"
+cycle = "random"
 ```
 
 On macOS, install `alerter` for clickable notifications. When `alerter` reports
 a content or action click, Foreman asks tmux to select the notification's window
 and pane. Sound entries can be system sound names, audio files, audio
-directories, or `none`.
+directories, notification sound prefixes, or `none`.
+
+For Do Not Disturb / Focus-friendly custom sounds on macOS, copy AIFF/CAF/WAV
+files into `~/Library/Sounds` and reference them with
+`notification-sounds:<prefix>`. Foreman randomly or sequentially selects a file
+whose basename starts with the prefix and passes that basename to
+`alerter --sound`, so playback stays on the macOS notification path instead of
+using direct `afplay` audio. Plain file and directory paths still use `afplay`
+and may bypass Focus.
 
 With VoiceOver, use the VoiceOver Notifications menu (`VO-N`) to navigate to a
 Foreman notification, then open the notification actions menu
