@@ -36,7 +36,13 @@ fn wait_for_file_contents(path: &std::path::Path, needle: &str) {
         thread::sleep(Duration::from_millis(50));
     }
 
-    panic!("file {} never contained {}", path.display(), needle);
+    let contents = fs::read_to_string(path).unwrap_or_default();
+    panic!(
+        "file {} never contained {}\nlast contents:\n{}",
+        path.display(),
+        needle,
+        contents
+    );
 }
 
 #[test]
@@ -197,6 +203,7 @@ active_profile = "attention-only"
 
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman");
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
+    fixture.wait_for_alt_capture(&dashboard_pane, "▾ alpha");
 
     write_atomic(
         &native_dir.join(format!("{pane_id}.json")),

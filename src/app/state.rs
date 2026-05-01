@@ -315,6 +315,7 @@ pub struct Pane {
     pub id: PaneId,
     pub title: String,
     pub current_command: Option<String>,
+    pub runtime_command: Option<String>,
     pub working_dir: Option<PathBuf>,
     pub preview: String,
     pub preview_provenance: PreviewProvenance,

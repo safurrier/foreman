@@ -31,6 +31,10 @@ pub use native::{
 };
 
 pub(crate) fn recognizes(observation: CompatibilityObservation<'_>) -> bool {
+    recognizes_runtime_identity(observation) || matches_any(observation, RECOGNITION_TOKENS)
+}
+
+pub(crate) fn recognizes_runtime_identity(observation: CompatibilityObservation<'_>) -> bool {
     if observation
         .current_command
         .and_then(|command| command.split_whitespace().next())
@@ -40,7 +44,7 @@ pub(crate) fn recognizes(observation: CompatibilityObservation<'_>) -> bool {
         return true;
     }
 
-    matches_any(observation, RECOGNITION_TOKENS)
+    observation.title.contains('π')
 }
 
 pub(crate) fn compatibility_status(observation: CompatibilityObservation<'_>) -> AgentStatus {
@@ -89,7 +93,7 @@ mod tests {
         title: &'a str,
         preview: &'a str,
     ) -> CompatibilityObservation<'a> {
-        CompatibilityObservation::new(current_command, title, preview)
+        CompatibilityObservation::new(current_command, None, title, preview)
     }
 
     #[test]

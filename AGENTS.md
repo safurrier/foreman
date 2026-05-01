@@ -1,96 +1,74 @@
 # foreman
 
-TUI for managing AI agents across tmux
+**When a user corrects you or gives repo-specific tribal knowledge, document it
+in the closest `AGENTS.md` before continuing.**
 
-## WHY
+Foreman is a Rust/Ratatui operator console for AI agents running in tmux. Treat
+`SPEC.md` as the product contract, `docs/architecture.md` as the architecture
+record, and `docs/workflows.md` as the validation/process guide.
 
-Foreman gives the operator one keyboard-first surface for watching and
-controlling AI harnesses running in tmux. Work here is done when the behavior
-matches `SPEC.md`, the architecture stays honest, and both `mise run check` and
-the intended test layer for the slice are green.
+## How to Work Here
 
-Correctness invariants live in [`SPEC.md`](SPEC.md). System design and durable
-boundaries live in [`docs/architecture.md`](docs/architecture.md).
+For meaningful work, create a feature branch, run `mise run plan -- <slug>`, and
+keep the active plan current as scope changes. Use the smallest validation layer
+that proves the slice, then run `mise run check` before push and `mise run
+verify` before merge or runtime/release-sensitive changes.
 
-## WHAT
+## Commands
 
-Key code paths:
-- `src/app/` — commands, actions, reducer, state, and selection invariants
-- `src/ui/` — pure Ratatui rendering
-- `src/adapters/` — tmux transport and subprocess seams
-- `src/integrations/` — harness recognition plus native-over-compatibility overlays
-- `src/services/` — notifications, pull requests, logging, and system stats
-- `tests/` — unit, contract, tmux smoke, runtime smoke, and opt-in real harness E2E
-- `.ai/plans/` — task-local working memory, validation evidence, and retrospectives
+**Setup**: `mise run setup`.
 
-Key steering files:
-- `AGENTS.md` — this file
-- `SPEC.md` — correctness envelope
-- `docs/tour.md` — repo quickstart and reading order
-- `docs/workflows.md` — plan, validation, and non-code rough edges
-- `docs/architecture.md` — architecture record
-- `.ai/plans/AGENTS.md` — plan artifact contract
+**Fast gate**: `mise run check`.
 
-## HOW
+**Heavy gate**: `mise run verify`.
 
-```bash
-mise run setup      # install tools and dependencies
-mise run check      # fast gate: fmt + lint + typecheck + test
-mise run verify     # heavy gate: integration + release gauntlet + docker
-mise run verify-release  # compiled-binary release-confidence walkthroughs
-mise run native-preflight  # local readiness check for real Claude/Codex/Pi E2Es
-mise run dev        # run the app locally
-```
+**Release confidence**: `mise run verify-release`.
 
-Normal workflow:
-1. `git checkout -b feat/<slug>`
-2. `mise run plan -- <slug>`
-3. Keep the slice narrow and update the active plan as you work
-4. Run `mise run check`
-5. Before pushing: `/plan-sync`, `/spec-sync`, `/context-engineering update`, `/docs-workflow update`
-6. Run `mise run verify` before merge
-7. If the slice changes native hooks or real harness flows, run `mise run native-preflight`
-   and then strict native verification before calling it done
-8. Use `mise run verify-release` when you want the standalone release report artifact
+**Native harness proof**: run `mise run native-preflight`, then require the real
+Claude, Codex, and Pi E2Es with `mise run verify-native`.
 
-CI mirrors `mise run ci` for the fast gate. Pull requests also run
-`mise run verify`.
-
-## Stack: rust
-
-- Formatter: `cargo fmt`
-- Linter: `cargo clippy -- -D warnings`
-- Type checker: `cargo check`
-- Tests: `cargo test`
+**Local app**: `mise run dev`.
 
 ## Gotchas
 
-- **DO** use portable `sh` in tmux smoke tests. **NOT** `zsh`. **BECAUSE** GitHub
-  Linux runners do not guarantee `zsh`, and panes can exit immediately.
+- **DO** use portable `sh` in tmux smoke tests. **NOT** `zsh`. **BECAUSE**
+  GitHub Linux runners do not guarantee `zsh`, and panes can exit immediately.
+
 - **DO** write native-signal fixtures atomically. **NOT** overwrite them
   in-place. **BECAUSE** partial reads create false compatibility fallback and
   flaky runtime tests.
-- **DO** promote durable workflow lessons out of `.ai/plans/*` into `docs/` or
-  `AGENTS.md`. **NOT** treat historical plan logs as canonical truth.
+
+- **DO** promote recurring workflow lessons out of `.ai/plans/*` into `docs/`
+  or `AGENTS.md`. **NOT** treat historical plan logs as canonical truth.
   **BECAUSE** plan artifacts are evidence for a slice, not long-term onboarding.
+
 - **DO** commit structured `.ai/plans/` and `.ai/validation/` paths that the
   workflow depends on. **NOT** commit `.ai/handoffs/`, `.ai/research/`, or
-  plan-local `artifacts/` scratch. **BECAUSE** only the structured plan and
-  validation roots are intended as durable repo context.
+  plan-local artifact scratch. **BECAUSE** only the structured plan and
+  validation roots are durable repo context.
+
 - **DO** check the active Docker context when `mise run verify` fails in the
   Docker phase. **NOT** assume the Rust app regressed first. **BECAUSE** the
   common failure mode here has been local Colima or Docker runtime state.
-- **DO** treat strict native verification as part of done when you touch real
+
+- **DO** treat strict native verification as part of done when touching real
   harness or hook behavior. **NOT** count skip-only `mise run verify-native`
   runs as done. **BECAUSE** the real-provider E2Es are the only proof that
-  native Claude/Codex/Pi wiring still works end to end.
+  native Claude, Codex, and Pi wiring still works end to end.
 
-## Further Reading
+- **DO** keep native integration status pure to provider hook/file signals.
+  **NOT** promote native panes with terminal text heuristics. **BECAUSE**
+  heuristics are intentionally compatibility behavior; mixing them into native
+  provenance makes Foreman look precise while it is guessing.
 
-| Document | Purpose |
+## Related Context
+
+| Path | What's there |
 |---|---|
-| [`docs/tour.md`](docs/tour.md) | First read for repo onboarding and code map |
-| [`docs/workflows.md`](docs/workflows.md) | Durable workflow, validation ladder, and rough edges |
-| [`docs/architecture.md`](docs/architecture.md) | System boundaries, invariants, and module map |
-| [`.ai/plans/AGENTS.md`](.ai/plans/AGENTS.md) | Plan file contract and lifecycle |
-| [`README.md`](README.md) | Human-oriented product quick start |
+| `docs/tour.md` | First read, repo map, and daily loop |
+| `docs/workflows.md` | Plan artifacts, validation ladder, and environment notes |
+| `docs/architecture.md` | System boundaries, invariants, and module map |
+| `.ai/plans/AGENTS.md` | Plan artifact contract and lifecycle |
+| `README.md` | Human quickstart, install, dashboard keys, and status matrix |
+
+<!-- generated-by: context-engineering@2.2.0 | last-updated: 2026-04-30 -->

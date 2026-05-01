@@ -396,7 +396,10 @@ fn setup_user_writes_global_provider_files() {
     assert!(output.status.success());
     assert!(home_dir.path().join(".claude/settings.local.json").exists());
     assert!(home_dir.path().join(".codex/hooks.json").exists());
-    assert!(home_dir.path().join(".pi/extensions/foreman.ts").exists());
+    assert!(home_dir
+        .path()
+        .join(".pi/agent/extensions/foreman.ts")
+        .exists());
     assert!(!temp_dir.path().join(".codex/hooks.json").exists());
     assert!(!temp_dir.path().join(".pi/extensions/foreman.ts").exists());
 }

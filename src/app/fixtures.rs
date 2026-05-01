@@ -69,6 +69,7 @@ pub struct PaneBuilder {
     id: PaneId,
     title: String,
     current_command: Option<String>,
+    runtime_command: Option<String>,
     working_dir: Option<PathBuf>,
     preview: String,
     preview_provenance: PreviewProvenance,
@@ -82,6 +83,7 @@ impl PaneBuilder {
             title: id.clone(),
             id: PaneId::new(id),
             current_command: None,
+            runtime_command: None,
             working_dir: None,
             preview: String::new(),
             preview_provenance: PreviewProvenance::Captured,
@@ -105,6 +107,11 @@ impl PaneBuilder {
 
     pub fn current_command(mut self, current_command: impl Into<String>) -> Self {
         self.current_command = Some(current_command.into());
+        self
+    }
+
+    pub fn runtime_command(mut self, runtime_command: impl Into<String>) -> Self {
+        self.runtime_command = Some(runtime_command.into());
         self
     }
 
@@ -154,6 +161,7 @@ impl PaneBuilder {
             id: self.id,
             title: self.title,
             current_command: self.current_command,
+            runtime_command: self.runtime_command,
             working_dir: self.working_dir,
             preview: self.preview,
             preview_provenance: self.preview_provenance,

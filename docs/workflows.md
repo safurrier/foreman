@@ -34,7 +34,7 @@ Foreman keeps a narrow set of `.ai/` paths in git on purpose.
 
 Commit these:
 
-- `.ai/plans/AGENTS.md`, `_templates/`, and `_example/`
+- `.ai/plans/AGENTS.md`, `.ai/plans/_templates/`, and `.ai/plans/_example/`
 - completed slice plan directories under `.ai/plans/`
 - stable validation roots under `.ai/validation/`
 
@@ -42,7 +42,7 @@ Do not commit these:
 
 - `.ai/handoffs/`
 - `.ai/research/`
-- plan-local `artifacts/` folders under `.ai/plans/**/artifacts/`
+- plan-local artifact folders under `.ai/plans/`
 - ad hoc scratch dumps or temporary debug files under `.ai/`
 
 Why:
@@ -160,7 +160,7 @@ In CI and release runs, those validation artifacts are required. Missing UX or
 release evidence is a real failure, not a skipped upload.
 
 `mise run verify-ux` also runs the ignored `runtime_profiling` smokes so lag
-regressions caused by synchronous lookup work or repeated `j/k` navigation under
+regressions caused by synchronous lookup work or repeated j/k navigation under
 load show up in the heavy lane instead of only in manual UX testing. That lane
 now also checks staged tmux refresh behavior so full-inventory capture regressions
 show up before they reach manual tmux testing.
