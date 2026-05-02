@@ -116,22 +116,9 @@ That guide includes both macOS custom sound routes: direct file playback and
 the `alerter --sound` notification-sound prefix path that better respects Focus
 / Do Not Disturb.
 
-## Demo Source
+## Demo
 
 ![Foreman dashboard demo](demos/readme-quickstart.gif)
-
-The README demo source lives at:
-
-- [`demos/readme-quickstart.tape`](demos/readme-quickstart.tape)
-- [`demos/setup-readme-demo.sh`](demos/setup-readme-demo.sh)
-
-Render it with VHS when refreshing product media:
-
-```bash
-vhs demos/readme-quickstart.tape
-```
-
-Generated GIFs should be refreshed from the tape and checked before commit.
 
 ## Docs
 
