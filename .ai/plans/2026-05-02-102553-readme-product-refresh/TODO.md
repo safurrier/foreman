@@ -17,3 +17,6 @@ description: >
 - [x] Update docs indexes.
 - [x] Run validation.
 - [x] Update learning log and plan status.
+- [x] Update README demo to show real tmux popup workflow.
+- [x] Add operator docs for tmux popup binding.
+- [x] Re-render and validate popup demo.

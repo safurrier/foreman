@@ -155,6 +155,27 @@ panes can also show setup hints that point back to
 `foreman --setup --user --project` or `foreman --doctor` when compatibility
 fallback looks suspicious.
 
+### tmux Popup
+
+Foreman can run as a floating tmux popup so it does not consume a pane or
+window. Bind it in tmux with `display-popup` and pass `--popup` so Foreman
+knows jump-to-pane actions should close the popup after a successful focus.
+
+Example `~/.tmux.conf` binding:
+
+```tmux
+# <prefix>a opens Foreman as a floating operator console.
+bind a display-popup -h 80% -w 80% -E -- "$HOME/.cargo/bin/foreman" --popup
+```
+
+If popup startup feels slow, use direct argv form as shown above. Avoid wrapping
+the command in a shell string unless you need shell expansion, because
+`display-popup -E "foreman --popup"` starts the user's shell first.
+
+On macOS, unsigned or quarantined binaries can flash and close when launched
+inside `display-popup`. Reinstalling from a trusted build path or clearing the
+quarantine attribute for the installed binary fixes that environment issue.
+
 ## Configuration
 
 Show resolved config, UI state, popup cache, and runtime values:

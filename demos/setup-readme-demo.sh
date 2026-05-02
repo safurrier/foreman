@@ -14,6 +14,7 @@ config_home="$demo_root/config"
 state_home="$demo_root/state"
 work_root="$demo_root/work"
 runner="$demo_root/agent-runner.sh"
+operator_rc="$demo_root/operator-bashrc"
 config_file="$config_home/foreman/config.toml"
 claude_native_dir="$log_dir/../claude-native"
 codex_native_dir="$log_dir/../codex-native"
@@ -28,7 +29,7 @@ fi
 
 cat >"$config_file" <<'TOML'
 [ui]
-theme = "terminal"
+theme = "tokyo-night"
 default_sort = "stable"
 
 [notifications]
@@ -50,6 +51,14 @@ done
 SH
 chmod +x "$runner"
 
+cat >"$operator_rc" <<'SH'
+export PS1='$ '
+caption() {
+  printf '\033[38;5;%sm%s\033[0m\n' "$1" "$2"
+}
+clear
+SH
+
 tmux -f /dev/null -S "$socket" start-server
 
 shell_quote() {
@@ -66,8 +75,7 @@ new_agent_session() {
 
   mkdir -p "$workdir"
   command="$runner $(shell_quote "$workdir") $(shell_quote "$banner") $(shell_quote "$prefix")"
-  pane_id="$(tmux -S "$socket" new-session -d -P -F "#{pane_id}" -c "$workdir" -s "$session" "$command")"
-  tmux -S "$socket" rename-window -t "$session:0" "$window"
+  pane_id="$(tmux -S "$socket" new-session -d -P -F "#{pane_id}" -c "$workdir" -s "$session" -n "$window" "$command")"
   tmux -S "$socket" select-pane -t "$pane_id" -T "$window"
   printf '%s\n' "$pane_id"
 }
@@ -104,6 +112,21 @@ pi_pane="$(new_agent_session \
 write_signal "$claude_native_dir" "$claude_pane" "needs_attention" 95
 write_signal "$codex_native_dir" "$codex_pane" "working" 120
 write_signal "$pi_native_dir" "$pi_pane" "idle" 40
+
+tmux -S "$socket" new-session -d -s operator -n console -c "$repo_root" \
+  "env BASH_SILENCE_DEPRECATION_WARNING=1 bash --noprofile --rcfile '$operator_rc' -i"
+tmux -S "$socket" bind-key a display-popup -h 80% -w 80% -E -- \
+  "$repo_root/target/debug/foreman" \
+  --popup \
+  --no-notify \
+  --tmux-socket "$socket" \
+  --log-dir "$log_dir" \
+  --config-file "$config_file" \
+  --claude-native-dir "$claude_native_dir" \
+  --codex-native-dir "$codex_native_dir" \
+  --pi-native-dir "$pi_native_dir" \
+  --poll-interval-ms 250 \
+  --capture-lines 40
 
 export FOREMAN_CONFIG_HOME="$config_home"
 export XDG_STATE_HOME="$state_home"

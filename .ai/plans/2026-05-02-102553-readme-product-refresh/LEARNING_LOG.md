@@ -26,3 +26,10 @@ description: >
 - The built-in RGB app themes looked too muted in VHS frames. For README media,
   Foreman's `terminal` theme plus a brighter VHS palette made the real dashboard
   read more clearly.
+- User feedback corrected that the README demo should use a real Foreman theme,
+  not a VHS-driven terminal palette. The next iteration uses Foreman's
+  `tokyo-night` theme and records the tmux popup path documented in the user's
+  dotfiles.
+- The popup demo initially assumed tmux window `0`, but this environment's tmux
+  server starts windows at `1`. Targeting named windows in the isolated demo
+  script made the harness independent of tmux base-index settings.
