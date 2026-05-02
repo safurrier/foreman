@@ -12,5 +12,6 @@ description: >
 
 - PASS: docs workflow verifier against the repo root
 - PASS: `vhs demos/readme-quickstart.tape`
-- PASS: extracted and inspected a frame from `demos/readme-quickstart.gif`; the demo uses `/tmp/foreman-readme-demo/...` paths instead of local user paths.
+- PASS: extracted and inspected a frame from `demos/readme-quickstart.gif`; the demo uses an isolated tmux socket and `/tmp/foreman-readme-demo/...` paths.
+- PASS: extracted and inspected search and flash-jump frames from `demos/readme-quickstart.gif`.
 - PASS: `mise run check`

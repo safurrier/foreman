@@ -13,19 +13,29 @@ Set PlaybackSpeed 1
 Set Shell "bash"
 Set WindowBar Colorful
 
-Type@0ms "export PATH=$HOME/.cargo/bin:$PATH && cd ~/git_repositories/foreman && export PS1='$ ' && export FOREMAN_CONFIG_HOME=/tmp/foreman-readme-demo/config && export XDG_STATE_HOME=/tmp/foreman-readme-demo/state && export FOREMAN_LOG_DIR=/tmp/foreman-readme-demo/logs && rm -rf /tmp/foreman-readme-demo && mkdir -p /tmp/foreman-readme-demo"
+Type@0ms "export PATH=$HOME/.cargo/bin:$PATH && cd ~/git_repositories/foreman && export PS1='$ ' && source demos/setup-readme-demo.sh"
 Enter
-Sleep 1s
+Sleep 1500ms
 Ctrl+L
 
-Type "foreman --help | sed -n '1,32p'"
+Type@0ms "target/debug/foreman --no-notify --tmux-socket $FOREMAN_DEMO_SOCKET --log-dir $FOREMAN_DEMO_LOG_DIR --config-file $FOREMAN_DEMO_CONFIG --claude-native-dir $FOREMAN_DEMO_CLAUDE_NATIVE_DIR --codex-native-dir $FOREMAN_DEMO_CODEX_NATIVE_DIR --pi-native-dir $FOREMAN_DEMO_PI_NATIVE_DIR --poll-interval-ms 250 --capture-lines 40"
 Enter
-Sleep 3s
+Sleep 2600ms
 
-Type "foreman --config-show | sed -n '1,28p'"
-Enter
-Sleep 3s
+Type "/"
+Sleep 800ms
+Type "pi-dots"
+Sleep 2400ms
+Escape
+Sleep 900ms
 
-Type "foreman --doctor --doctor-fix --doctor-dry-run"
-Enter
-Sleep 5s
+Type "s"
+Sleep 2400ms
+Escape
+Sleep 900ms
+
+Type "h"
+Sleep 1000ms
+Type "h"
+Sleep 1000ms
+Type "q"

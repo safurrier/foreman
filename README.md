@@ -115,11 +115,12 @@ See [Operator Guide](docs/operator-guide.md#notifications) for the full config.
 
 ## Demo Source
 
-![Foreman quickstart demo](demos/readme-quickstart.gif)
+![Foreman dashboard demo](demos/readme-quickstart.gif)
 
 The README demo source lives at:
 
 - [`demos/readme-quickstart.tape`](demos/readme-quickstart.tape)
+- [`demos/setup-readme-demo.sh`](demos/setup-readme-demo.sh)
 
 Render it with VHS when refreshing product media:
 

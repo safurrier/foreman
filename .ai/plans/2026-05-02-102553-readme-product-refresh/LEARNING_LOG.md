@@ -16,3 +16,7 @@ description: >
 - The first VHS render captured local config paths. Setting `FOREMAN_CONFIG_HOME`,
   `XDG_STATE_HOME`, and `FOREMAN_LOG_DIR` in the tape made the GIF safe to
   commit and easier to reproduce.
+- The first demo showed setup/config output, which was the wrong product signal
+  for the README. A better demo creates an isolated tmux world with fake
+  Claude, Codex, and Pi panes plus native signal files, then records the real
+  dashboard search and flash-jump surfaces.
