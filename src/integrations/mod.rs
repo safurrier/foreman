@@ -40,14 +40,21 @@ const EDITOR_COMMANDS: &[&str] = &["emacs", "hx", "nano", "nvim", "vi", "vim"];
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CompatibilityObservation<'a> {
     pub current_command: Option<&'a str>,
+    pub runtime_command: Option<&'a str>,
     pub title: &'a str,
     pub preview: &'a str,
 }
 
 impl<'a> CompatibilityObservation<'a> {
-    pub fn new(current_command: Option<&'a str>, title: &'a str, preview: &'a str) -> Self {
+    pub fn new(
+        current_command: Option<&'a str>,
+        runtime_command: Option<&'a str>,
+        title: &'a str,
+        preview: &'a str,
+    ) -> Self {
         Self {
             current_command,
+            runtime_command,
             title,
             preview,
         }
@@ -55,8 +62,9 @@ impl<'a> CompatibilityObservation<'a> {
 
     fn haystack(self) -> String {
         format!(
-            "{}\n{}\n{}",
+            "{}\n{}\n{}\n{}",
             self.current_command.unwrap_or_default(),
+            self.runtime_command.unwrap_or_default(),
             self.title,
             self.preview
         )
@@ -75,6 +83,7 @@ pub(crate) struct StatusHints {
 pub fn compatibility_snapshot(observation: CompatibilityObservation<'_>) -> Option<AgentSnapshot> {
     let harness = recognize_harness(
         observation.current_command,
+        observation.runtime_command,
         observation.title,
         observation.preview,
     )?;
@@ -180,13 +189,19 @@ pub fn apply_configured_pi_signals(
 
 pub fn recognize_harness(
     current_command: Option<&str>,
+    runtime_command: Option<&str>,
     title: &str,
     preview: &str,
 ) -> Option<HarnessKind> {
-    let observation = CompatibilityObservation::new(current_command, title, preview);
+    let observation =
+        CompatibilityObservation::new(current_command, runtime_command, title, preview);
 
     if is_foreman_surface(observation) {
         return None;
+    }
+
+    if let Some(harness) = recognize_runtime_identity(observation) {
+        return Some(harness);
     }
 
     if is_shell_surface(observation) || is_editor_surface(observation) {
@@ -214,6 +229,37 @@ pub fn recognize_harness(
     }
 
     None
+}
+
+pub(crate) fn recognize_runtime_identity(
+    observation: CompatibilityObservation<'_>,
+) -> Option<HarnessKind> {
+    if pi::recognizes_runtime_identity(observation) {
+        return Some(HarnessKind::Pi);
+    }
+
+    if command_matches_agent(observation.runtime_command, &["claude", "claude.exe"]) {
+        return Some(HarnessKind::ClaudeCode);
+    }
+
+    if runtime_contains_codex(observation.runtime_command) {
+        return Some(HarnessKind::CodexCli);
+    }
+
+    None
+}
+
+pub(crate) fn recognize_pane_runtime_identity(
+    current_command: Option<&str>,
+    runtime_command: Option<&str>,
+    title: &str,
+) -> Option<HarnessKind> {
+    recognize_runtime_identity(CompatibilityObservation::new(
+        current_command,
+        runtime_command,
+        title,
+        "",
+    ))
 }
 
 pub fn compatibility_status(
@@ -266,8 +312,9 @@ pub(crate) fn status_from_recent_preview_lines(
         .collect::<Vec<_>>()
         .join("\n");
     let haystack = format!(
-        "{}\n{}\n{}",
+        "{}\n{}\n{}\n{}",
         observation.current_command.unwrap_or_default(),
+        observation.runtime_command.unwrap_or_default(),
         observation.title,
         tail
     )
@@ -377,6 +424,20 @@ fn foreground_command_basename(current_command: Option<&str>) -> Option<&str> {
         .map(command_basename)
 }
 
+fn command_matches_agent(command: Option<&str>, names: &[&str]) -> bool {
+    foreground_command_basename(command).is_some_and(|basename| names.contains(&basename))
+}
+
+fn runtime_contains_codex(command: Option<&str>) -> bool {
+    let Some(command) = command else {
+        return false;
+    };
+    let lower = command.to_ascii_lowercase();
+    foreground_command_basename(Some(command))
+        .is_some_and(|basename| matches!(basename, "codex" | "codex-cli"))
+        || lower.contains("@openai/codex")
+}
+
 fn command_basename(command: &str) -> &str {
     command.rsplit('/').next().unwrap_or(command)
 }
@@ -408,7 +469,7 @@ mod tests {
         title: &'a str,
         preview: &'a str,
     ) -> CompatibilityObservation<'a> {
-        CompatibilityObservation::new(current_command, title, preview)
+        CompatibilityObservation::new(current_command, None, title, preview)
     }
 
     fn single_pane_inventory(
@@ -431,34 +492,73 @@ mod tests {
     #[test]
     fn recognizes_supported_harnesses_from_command_title_and_preview() {
         assert_eq!(
-            recognize_harness(Some("claude"), "shell", ""),
+            recognize_harness(Some("claude"), None, "shell", ""),
             Some(HarnessKind::ClaudeCode)
         );
         assert_eq!(
-            recognize_harness(None, "codex-main", ""),
+            recognize_harness(None, None, "codex-main", ""),
             Some(HarnessKind::CodexCli)
         );
         assert_eq!(
-            recognize_harness(Some("pi"), "shell", ""),
+            recognize_harness(Some("pi"), None, "shell", ""),
             Some(HarnessKind::Pi)
         );
         assert_eq!(
-            recognize_harness(None, "shell", "Gemini CLI ready"),
+            recognize_harness(None, None, "shell", "Gemini CLI ready"),
             Some(HarnessKind::GeminiCli)
         );
         assert_eq!(
-            recognize_harness(None, "shell", "OpenCode interactive shell"),
+            recognize_harness(None, None, "shell", "OpenCode interactive shell"),
             Some(HarnessKind::OpenCode)
         );
         assert_eq!(
-            recognize_harness(Some("node"), "shell", "Codex CLI waiting for your input"),
+            recognize_harness(
+                Some("node"),
+                None,
+                "shell",
+                "Codex CLI waiting for your input"
+            ),
             Some(HarnessKind::CodexCli)
+        );
+        assert_eq!(
+            recognize_harness(
+                Some("node"),
+                None,
+                "⠙ π - obsidian-vault",
+                "Codex CLI waiting for your input",
+            ),
+            Some(HarnessKind::Pi)
+        );
+    }
+
+    #[test]
+    fn runtime_identity_beats_stale_scrollback_tokens() {
+        assert_eq!(
+            recognize_harness(
+                Some("node"),
+                Some("npm exec @openai/codex --model gpt-5.5"),
+                "worktree",
+                "Claude Code ready in old scrollback",
+            ),
+            Some(HarnessKind::CodexCli)
+        );
+        assert_eq!(
+            recognize_harness(
+                Some("zsh"),
+                Some("claude --dangerously-skip-permissions"),
+                "✳ Claude Code",
+                "Codex CLI waiting in old scrollback",
+            ),
+            Some(HarnessKind::ClaudeCode)
         );
     }
 
     #[test]
     fn returns_none_for_unrecognized_panes() {
-        assert_eq!(recognize_harness(Some("zsh"), "notes", "plain shell"), None);
+        assert_eq!(
+            recognize_harness(Some("zsh"), None, "notes", "plain shell"),
+            None
+        );
     }
 
     #[test]
@@ -466,6 +566,7 @@ mod tests {
         assert_eq!(
             recognize_harness(
                 Some("sh"),
+                None,
                 "dashboard",
                 "Foreman | NORMAL | cpu=? mem=? | 3 targets | pr=NONE | notify=MUTED\n* Targets\nCompose"
             ),
@@ -476,11 +577,21 @@ mod tests {
     #[test]
     fn returns_none_for_shell_panes_with_stale_harness_breadcrumbs() {
         assert_eq!(
-            recognize_harness(Some("zsh"), "claude", "Claude Code ready for the next task",),
+            recognize_harness(
+                Some("zsh"),
+                None,
+                "claude",
+                "Claude Code ready for the next task",
+            ),
             None
         );
         assert_eq!(
-            recognize_harness(Some("bash"), "shell", "Codex CLI waiting for your input",),
+            recognize_harness(
+                Some("bash"),
+                None,
+                "shell",
+                "Codex CLI waiting for your input",
+            ),
             None
         );
     }
@@ -488,12 +599,18 @@ mod tests {
     #[test]
     fn returns_none_for_editor_panes_with_stale_harness_breadcrumbs() {
         assert_eq!(
-            recognize_harness(Some("nvim"), "notes", "Claude Code ready for the next task",),
+            recognize_harness(
+                Some("nvim"),
+                None,
+                "notes",
+                "Claude Code ready for the next task",
+            ),
             None
         );
         assert_eq!(
             recognize_harness(
                 Some("/usr/bin/vim"),
+                None,
                 "scratch",
                 "Codex CLI waiting for your input",
             ),

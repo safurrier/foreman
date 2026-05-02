@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Instant;
 
-const LIST_PANES_FORMAT: &str = "#{session_id}\t#{session_name}\t#{window_id}\t#{window_name}\t#{pane_id}\t#{pane_title}\t#{pane_current_command}\t#{pane_current_path}";
+const LIST_PANES_FORMAT: &str = "#{session_id}\t#{session_name}\t#{window_id}\t#{window_name}\t#{pane_id}\t#{pane_title}\t#{pane_current_command}\t#{pane_pid}\t#{pane_current_path}";
 
 #[derive(Debug)]
 pub enum TmuxError {
@@ -47,6 +47,8 @@ pub struct TmuxPaneRecord {
     pub pane_id: PaneId,
     pub pane_title: String,
     pub current_command: Option<String>,
+    pub pane_pid: Option<u32>,
+    pub runtime_command: Option<String>,
     pub current_path: Option<PathBuf>,
 }
 
@@ -248,8 +250,10 @@ impl<B: TmuxBackend> TmuxAdapter<B> {
                 };
             let pane_title = record.pane_title.clone();
             let current_command = record.current_command.clone();
+            let runtime_command = record.runtime_command.clone();
             let agent = compatibility_snapshot(CompatibilityObservation::new(
                 current_command.as_deref(),
+                runtime_command.as_deref(),
                 &pane_title,
                 &preview,
             ));
@@ -257,6 +261,7 @@ impl<B: TmuxBackend> TmuxAdapter<B> {
                 id: record.pane_id.clone(),
                 title: non_empty(pane_title, record.pane_id.as_str()),
                 current_command,
+                runtime_command,
                 working_dir: record.current_path.clone(),
                 preview,
                 preview_provenance,
@@ -358,6 +363,7 @@ fn preview_resolution(
 fn pane_metadata_changed(previous_pane: &Pane, record: &TmuxPaneRecord) -> bool {
     previous_pane.title != non_empty(record.pane_title.clone(), record.pane_id.as_str())
         || previous_pane.current_command != record.current_command
+        || previous_pane.runtime_command != record.runtime_command
         || previous_pane.working_dir != record.current_path
 }
 
@@ -431,10 +437,17 @@ impl SystemTmuxBackend {
 impl TmuxBackend for SystemTmuxBackend {
     fn list_panes(&self) -> Result<Vec<TmuxPaneRecord>, TmuxError> {
         let output = self.run_tmux(&["list-panes", "-a", "-F", LIST_PANES_FORMAT])?;
+        let processes = process_table().unwrap_or_default();
         output
             .lines()
             .filter(|line| !line.trim().is_empty())
-            .map(parse_pane_record)
+            .map(|line| {
+                let mut record = parse_pane_record(line)?;
+                record.runtime_command = record
+                    .pane_pid
+                    .and_then(|pane_pid| foreground_command_from_processes(pane_pid, &processes));
+                Ok(record)
+            })
             .collect()
     }
 
@@ -536,7 +549,7 @@ impl TmuxBackend for SystemTmuxBackend {
 }
 
 fn parse_pane_record(line: &str) -> Result<TmuxPaneRecord, TmuxError> {
-    let mut fields = line.splitn(8, '\t');
+    let mut fields = line.splitn(9, '\t');
     let session_id = fields
         .next()
         .ok_or_else(|| TmuxError::Parse(format!("missing session_id in pane record: {line}")))?;
@@ -558,6 +571,9 @@ fn parse_pane_record(line: &str) -> Result<TmuxPaneRecord, TmuxError> {
     let current_command = fields.next().ok_or_else(|| {
         TmuxError::Parse(format!("missing current_command in pane record: {line}"))
     })?;
+    let pane_pid = fields
+        .next()
+        .ok_or_else(|| TmuxError::Parse(format!("missing pane_pid in pane record: {line}")))?;
     let current_path = fields
         .next()
         .ok_or_else(|| TmuxError::Parse(format!("missing current_path in pane record: {line}")))?;
@@ -570,8 +586,62 @@ fn parse_pane_record(line: &str) -> Result<TmuxPaneRecord, TmuxError> {
         pane_id: PaneId::new(pane_id),
         pane_title: pane_title.to_string(),
         current_command: (!current_command.trim().is_empty()).then(|| current_command.to_string()),
+        pane_pid: pane_pid.trim().parse().ok(),
+        runtime_command: None,
         current_path: (!current_path.trim().is_empty()).then(|| PathBuf::from(current_path)),
     })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProcessRow {
+    pid: u32,
+    ppid: u32,
+    stat: String,
+    command: String,
+}
+
+fn process_table() -> Result<Vec<ProcessRow>, TmuxError> {
+    let output = Command::new("ps")
+        .args(["-axo", "pid=,ppid=,stat=,command="])
+        .output()
+        .map_err(TmuxError::Io)?;
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(stdout.lines().filter_map(parse_process_row).collect())
+}
+
+fn parse_process_row(line: &str) -> Option<ProcessRow> {
+    let mut parts = line.split_whitespace();
+    let pid = parts.next()?.parse::<u32>().ok()?;
+    let ppid = parts.next()?.parse::<u32>().ok()?;
+    let stat = parts.next()?.to_string();
+    let command = parts.collect::<Vec<_>>().join(" ");
+    if command.is_empty() {
+        return None;
+    }
+    Some(ProcessRow {
+        pid,
+        ppid,
+        stat,
+        command,
+    })
+}
+
+fn foreground_command_from_processes(pane_pid: u32, processes: &[ProcessRow]) -> Option<String> {
+    let pane_command = processes
+        .iter()
+        .find(|process| process.pid == pane_pid)
+        .map(|process| process.command.clone());
+
+    processes
+        .iter()
+        .filter(|process| process.ppid == pane_pid && process.stat.contains('+'))
+        .max_by_key(|process| process.pid)
+        .map(|process| process.command.clone())
+        .or(pane_command)
 }
 
 fn render_tmux_command(socket_path: Option<&Path>, args: &[&str]) -> String {
@@ -753,6 +823,8 @@ mod tests {
             pane_id: PaneId::new(pane_id),
             pane_title: pane_title.to_string(),
             current_command: current_command.map(str::to_string),
+            pane_pid: Some(1234),
+            runtime_command: None,
             current_path: Some(PathBuf::from("/workspace")),
         }
     }

@@ -10,6 +10,9 @@ const STATUS_HINTS: StatusHints = StatusHints {
         "approval required",
         "approve",
         "confirm",
+        "question ",
+        "unanswered",
+        "enter to submit answer",
         "ready for review",
     ],
     error: &["error", "failed", "panic", "traceback", "exception"],
@@ -80,7 +83,7 @@ mod tests {
         title: &'a str,
         preview: &'a str,
     ) -> CompatibilityObservation<'a> {
-        CompatibilityObservation::new(current_command, title, preview)
+        CompatibilityObservation::new(current_command, None, title, preview)
     }
 
     #[test]

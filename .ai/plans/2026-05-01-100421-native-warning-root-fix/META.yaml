@@ -1,0 +1,6 @@
+slug: native-warning-root-fix
+branch: feat/context-improve-refresh
+created: 2026-05-01
+pr: https://github.com/safurrier/foreman/pull/10
+status: in-progress
+source: false native warning investigation

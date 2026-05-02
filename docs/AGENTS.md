@@ -23,3 +23,5 @@
 | Doc | Topic |
 |---|---|
 | [`decisions/0001-stack-choice.md`](decisions/0001-stack-choice.md) | Stack choice ADR |
+
+<!-- generated-by: context-engineering@2.2.0 | last-updated: 2026-04-30 -->

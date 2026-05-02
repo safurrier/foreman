@@ -1226,6 +1226,13 @@ fn provider_runtime_findings(
                 finding.push_evidence(format!("native_dir={}", native_dir.display()));
             }
         }
+        for pane in affected_panes.iter().filter(|pane| {
+            pane.agent
+                .as_ref()
+                .is_some_and(|agent| agent.integration_mode == IntegrationMode::Compatibility)
+        }) {
+            finding.push_evidence(format!("pane={}", runtime_pane_evidence(pane)));
+        }
         findings.push(finding);
     } else if applied > 0 {
         findings.push(
@@ -1296,6 +1303,26 @@ fn provider_runtime_findings(
     }
 
     findings
+}
+
+fn runtime_pane_evidence(pane: &Pane) -> String {
+    let cwd = pane
+        .working_dir
+        .as_ref()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "?".to_string());
+    format!(
+        "{} title={} command={} runtime={} cwd={}",
+        pane.id.as_str(),
+        shellish_quote(&pane.title),
+        shellish_quote(pane.current_command.as_deref().unwrap_or("?")),
+        shellish_quote(pane.runtime_command.as_deref().unwrap_or("?")),
+        shellish_quote(&cwd)
+    )
+}
+
+fn shellish_quote(value: &str) -> String {
+    format!("{value:?}")
 }
 
 fn runtime_repo_degradation_findings(
@@ -1713,7 +1740,7 @@ fn provider_fix_targets(
             targets.push(ProviderFixTarget {
                 provider: HarnessKind::Pi,
                 kind: ProviderFixKind::Pi,
-                path: home.join(".pi").join("extensions").join("foreman.ts"),
+                path: pi_user_extension_path(home),
             });
         }
     }
@@ -2273,12 +2300,16 @@ fn pi_candidate_paths(repo_path: &Path) -> Vec<PathBuf> {
         repo_path.join(".pi").join("extensions").join("foreman.ts"),
     );
     if let Some(home) = home_dir() {
-        push_unique_path(
-            &mut paths,
-            home.join(".pi").join("extensions").join("foreman.ts"),
-        );
+        push_unique_path(&mut paths, pi_user_extension_path(&home));
     }
     paths
+}
+
+fn pi_user_extension_path(home: &Path) -> PathBuf {
+    home.join(".pi")
+        .join("agent")
+        .join("extensions")
+        .join("foreman.ts")
 }
 
 fn push_unique_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
@@ -2395,11 +2426,11 @@ fn pi_extension_template() -> String {
 import { spawnSync } from "node:child_process";
 
 function runHook(event: string) {
-  const args = ["--event", event];
   const paneId = process.env.TMUX_PANE;
-  if (paneId) {
-    args.push("--pane-id", paneId);
+  if (!paneId) {
+    return;
   }
+  const args = ["--event", event, "--pane-id", paneId];
   const result = spawnSync("foreman-pi-hook", args, { stdio: "inherit" });
   if ((result.status ?? 1) !== 0) {
     throw new Error(`foreman-pi-hook failed for ${event}`);

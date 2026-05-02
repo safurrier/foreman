@@ -94,7 +94,7 @@ mod tests {
         title: &'a str,
         preview: &'a str,
     ) -> CompatibilityObservation<'a> {
-        CompatibilityObservation::new(current_command, title, preview)
+        CompatibilityObservation::new(current_command, None, title, preview)
     }
 
     #[test]

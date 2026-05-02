@@ -51,7 +51,7 @@ foreman
 
 Setup model:
 - `foreman --setup` is meant to be safe to rerun.
-- `--user` writes home-directory wiring under `~/.claude`, `~/.codex`, and `~/.pi`.
+- `--user` writes home-directory wiring under `~/.claude`, `~/.codex`, and Pi's `~/.pi/agent/extensions`.
 - `--project` writes repo-local wiring for the current checkout, or the repo passed with `--repo`.
 - Without explicit scope flags, `foreman --setup` defaults to `project` when the current directory looks like a repo, and `user` otherwise.
 - Setup only targets one repo at a time. Run it again for other checkouts:
@@ -80,7 +80,7 @@ Safe fixes today:
 - create the default native signal directories under `~/.local/state/foreman/`
 - merge Claude hook wiring into `.claude/settings.local.json` or `~/.claude/settings.local.json`
 - scaffold or merge `.codex/hooks.json` or `~/.codex/hooks.json`
-- scaffold `.pi/extensions/foreman.ts` or `~/.pi/extensions/foreman.ts`
+- scaffold `.pi/extensions/foreman.ts` or `~/.pi/agent/extensions/foreman.ts`
 
 Use `--repo` when you want to target another checkout:
 
@@ -372,10 +372,11 @@ import { spawnSync } from "node:child_process";
 
 export default function (pi: ExtensionAPI) {
   const runHook = (event: string) => {
-    const args = ["--event", event];
-    if (process.env.TMUX_PANE) {
-      args.push("--pane-id", process.env.TMUX_PANE);
+    const paneId = process.env.TMUX_PANE;
+    if (!paneId) {
+      return;
     }
+    const args = ["--event", event, "--pane-id", paneId];
     spawnSync("foreman-pi-hook", args, { stdio: "inherit" });
   };
 
