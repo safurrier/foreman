@@ -2,7 +2,7 @@
 
 TUI for managing AI agents across tmux
 
-Current crate version: `1.1.1`
+Current crate version: `1.2.0`
 
 ## Quick Start
 
