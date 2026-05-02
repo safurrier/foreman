@@ -1,0 +1,18 @@
+---
+id: plan-learning-log
+title: Learning Log
+description: >
+  Dev diary. Append timestamped entries for problems, adaptations,
+  user feedback, and surprises. See _example/ for a reference.
+---
+
+# Learning Log
+
+## 2026-05-02
+
+- The README had accurate material, but it mixed too many reader jobs in one
+  file. Splitting an operator guide gives the README room to sell the tool
+  without deleting reference details.
+- The first VHS render captured local config paths. Setting `FOREMAN_CONFIG_HOME`,
+  `XDG_STATE_HOME`, and `FOREMAN_LOG_DIR` in the tape made the GIF safe to
+  commit and easier to reproduce.
