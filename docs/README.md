@@ -6,6 +6,7 @@ description: >
   deeper design references.
 index:
   - id: start-here
+  - id: operate-foreman
   - id: understand-the-system
   - id: decisions
 ---
@@ -16,6 +17,10 @@ index:
 
 - [Repo Tour](tour.md) — first read for onboarding, reading order, and the code map
 - [Workflow Guide](workflows.md) — plan hygiene, validation layers, and common rough edges
+
+## Operate Foreman
+
+- [Operator Guide](operator-guide.md) — install, setup, dashboard, config, hooks, notifications, and troubleshooting
 
 ## Understand the System
 

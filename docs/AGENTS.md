@@ -11,6 +11,7 @@
 | Doc | Topic |
 |---|---|
 | [`workflows.md`](workflows.md) | Plan workflow, validation ladder, and recurring non-code rough edges |
+| [`operator-guide.md`](operator-guide.md) | Install, setup, dashboard, config, hooks, notifications, and troubleshooting |
 
 ## Explanation
 
