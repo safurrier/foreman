@@ -33,3 +33,14 @@ description: >
 - The popup demo initially assumed tmux window `0`, but this environment's tmux
   server starts windows at `1`. Targeting named windows in the isolated demo
   script made the harness independent of tmux base-index settings.
+- The final README demo should be ad hoc but realistic: an isolated tmux socket
+  running real Codex, Pi, and Claude panes, with synthetic native signal files
+  only for deterministic Foreman statuses. Fake echo panes looked staged.
+- The "theme is black and white" issue was not Foreman config loading. The
+  recording environment had `NO_COLOR=1`, and Ratatui/crossterm respected it.
+  `tmux capture-pane -e` proved Foreman emitted no SGR styles until the demo
+  explicitly unset `NO_COLOR` and set truecolor env vars.
+- Demo fixtures must avoid private-context leaks even when the tmux socket is
+  isolated. Do not copy real session/window names into the fixture, run real
+  agents from `/tmp` workdirs, isolate Pi's agent/session dirs, and override the
+  tmux status bar so hostnames do not appear in the GIF.
