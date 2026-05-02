@@ -28,7 +28,7 @@ fi
 
 cat >"$config_file" <<'TOML'
 [ui]
-theme = "catppuccin"
+theme = "terminal"
 default_sort = "stable"
 
 [notifications]

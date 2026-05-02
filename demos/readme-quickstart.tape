@@ -6,7 +6,7 @@ Set Height 700
 Set FontFamily "Menlo"
 Set LetterSpacing 0
 Set LineHeight 1.2
-Set Theme "Catppuccin Mocha"
+Set Theme "Cobalt Neon"
 Set Padding 20
 Set TypingSpeed 20ms
 Set PlaybackSpeed 1

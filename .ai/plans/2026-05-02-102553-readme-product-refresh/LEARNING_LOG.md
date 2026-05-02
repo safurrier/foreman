@@ -23,3 +23,6 @@ description: >
 - The notification docs needed an operator recipe, not just the TOML reference.
   The useful split is direct file/directory playback for simple local sounds
   versus `notification-sounds:<prefix>` for the macOS notification path.
+- The built-in RGB app themes looked too muted in VHS frames. For README media,
+  Foreman's `terminal` theme plus a brighter VHS palette made the real dashboard
+  read more clearly.

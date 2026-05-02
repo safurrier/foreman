@@ -14,4 +14,5 @@ description: >
 - PASS: `vhs demos/readme-quickstart.tape`
 - PASS: extracted and inspected a frame from `demos/readme-quickstart.gif`; the demo uses an isolated tmux socket and `/tmp/foreman-readme-demo/...` paths.
 - PASS: extracted and inspected search and flash-jump frames from `demos/readme-quickstart.gif`.
+- PASS: refreshed demo with Foreman `terminal` theme under VHS `Cobalt Neon` and inspected rendered search/flash frames for color.
 - PASS: `mise run check`
