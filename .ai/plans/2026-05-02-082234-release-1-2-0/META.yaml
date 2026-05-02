@@ -1,0 +1,6 @@
+slug: release-1-2-0
+branch: release/1.2.0
+created: 2026-05-02
+pr: https://github.com/safurrier/foreman/pull/12
+status: in-progress
+source: release prep after PR #10 and PR #11
