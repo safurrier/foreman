@@ -376,6 +376,68 @@ whose basename starts with the prefix and passes that basename to
 `alerter --sound`, so playback stays on the macOS notification path. Plain file
 and directory paths still use `afplay` and may bypass Focus.
 
+### macOS Custom Sound Profiles
+
+There are two useful ways to configure custom sounds on macOS.
+
+The easy route is a direct file or directory path. Foreman plays these with
+`afplay`.
+
+```toml
+[notifications]
+enabled = true
+backends = ["alerter", "osascript"]
+sound_profile = "custom-files"
+
+[notifications.sound_profiles.custom-files]
+completion = "~/Sounds/foreman/completed"
+needs_attention = "~/Sounds/foreman/needs-input"
+cycle = "random"
+```
+
+This is simple and works with any local audio files Foreman can read. The trade
+off is that direct `afplay` playback may ignore macOS Focus / Do Not Disturb.
+
+The Focus-aware route is to install sounds into macOS notification sounds and
+let `alerter --sound` play them:
+
+```bash
+mkdir -p ~/Library/Sounds
+cp ~/Sounds/foreman/completed/*.aiff ~/Library/Sounds/
+cp ~/Sounds/foreman/needs-input/*.aiff ~/Library/Sounds/
+```
+
+Name files with stable prefixes:
+
+```text
+foreman-completed-soft.aiff
+foreman-completed-bright.aiff
+foreman-needs-input-soft.aiff
+foreman-needs-input-urgent.aiff
+```
+
+Then reference those prefixes:
+
+```toml
+[notifications]
+enabled = true
+backends = ["alerter", "osascript"]
+sound_profile = "macos-notification-sounds"
+
+[notifications.sound_profiles.macos-notification-sounds]
+completion = "notification-sounds:foreman-completed-"
+needs_attention = "notification-sounds:foreman-needs-input-"
+cycle = "random"
+```
+
+With this profile, Foreman chooses a matching basename from `~/Library/Sounds`
+and passes it to `alerter --sound`. macOS owns playback, so Focus / Do Not
+Disturb behavior matches normal notification sounds as closely as `alerter`
+allows.
+
+Use `cycle = "sequential"` when you want predictable rotation instead of random
+selection.
+
 With VoiceOver, use the VoiceOver Notifications menu (`VO-N`) to navigate to a
 Foreman notification, then open the notification actions menu
 (`VO-Command-Space`) and choose `Open tmux pane`.

@@ -20,3 +20,6 @@ description: >
   for the README. A better demo creates an isolated tmux world with fake
   Claude, Codex, and Pi panes plus native signal files, then records the real
   dashboard search and flash-jump surfaces.
+- The notification docs needed an operator recipe, not just the TOML reference.
+  The useful split is direct file/directory playback for simple local sounds
+  versus `notification-sounds:<prefix>` for the macOS notification path.

@@ -11,6 +11,7 @@ description: >
 - [x] Create slice plan on fresh branch.
 - [x] Audit README and docs routing.
 - [x] Add operator reference docs.
+- [x] Add macOS custom notification sound recipe.
 - [x] Rewrite README as product entry point.
 - [x] Add VHS tape source.
 - [x] Update docs indexes.

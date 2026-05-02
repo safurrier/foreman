@@ -112,6 +112,9 @@ focus the related tmux pane. Custom macOS notification sounds can use
 instead of direct `afplay` audio.
 
 See [Operator Guide](docs/operator-guide.md#notifications) for the full config.
+That guide includes both macOS custom sound routes: direct file playback and
+the `alerter --sound` notification-sound prefix path that better respects Focus
+/ Do Not Disturb.
 
 ## Demo Source
 
