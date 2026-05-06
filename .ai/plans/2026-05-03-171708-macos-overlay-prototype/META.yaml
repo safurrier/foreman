@@ -1,0 +1,6 @@
+slug: macos-overlay-prototype
+branch: spec/macos-popup-raycast-spike
+created: 2026-05-03
+pr:
+status: in-progress
+source: user-request-swift-overlay-prototype-validation-ux-hardening

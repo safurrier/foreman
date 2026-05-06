@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# MISE description="Install Foreman.app to ~/Applications"
+set -euo pipefail
+"$MISE_PROJECT_ROOT/scripts/install-macos-overlay-app.sh"

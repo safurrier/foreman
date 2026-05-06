@@ -1,0 +1,17 @@
+id: 2026-05-05-macos-settings-snapshot-polish
+slug: macos-settings-snapshot-polish
+title: macOS Settings Snapshot and Polish
+status: in_progress
+created: 2026-05-05
+branch: spec/macos-popup-raycast-spike
+paths:
+  - apps/macos-overlay/Sources/ForemanOverlay/main.swift
+  - apps/macos-overlay/Sources/ForemanOverlayCore/Core.swift
+  - apps/macos-overlay/Sources/ForemanOverlaySnapshot/main.swift
+  - scripts/verify-macos-overlay-snapshot-text.swift
+  - scripts/verify-macos-overlay.sh
+validation:
+  - swift test --package-path apps/macos-overlay
+  - mise run render-macos-overlay-snapshots
+  - mise run verify-macos-overlay
+  - mise run install-macos-overlay-app

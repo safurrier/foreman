@@ -1,0 +1,36 @@
+Q Search Agent Sessions
+foreman
+Pi • foreman
+• sample-to
+Pi • sample-tc
+• dotfiles
+Codex CLI • d
+Foreman Help
+T/d scroll • Esc close
+ATTENTION
+• Status source shows native, compatibility, or unknown provenance
+• Preview text is selectable with the pointer
+Compose
+• Use Compose to send text to the selected agent
+• Cd+Enter sends
+• Esc cancels compose without sending
+Status Legend
+• Working means the agent is actively running
+• Needs attention means the agent is likely waiting for you
+• Idle means no active work was detected
+• Error means Foreman detected a broken or failed state
+Parity Scope
+• This overlay targets quick global control, not every Foreman TUI command
+• Flash jump uses Cmd+J so plain typing still searches
+• Deferred TUI features include full PR actions, spawn, rename, kill, and notification controls
+Open PR
+reenshots
+capture,
+exposes
+Region: List
+Focus
+Refresh
+Compose
+Settings
+Help • T/v or j/k scroll • Esc close
+Theme: System

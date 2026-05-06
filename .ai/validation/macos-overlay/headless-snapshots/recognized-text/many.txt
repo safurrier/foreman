@@ -1,0 +1,51 @@
+• Search Agent Sessions
+workspace-01
+Pi • agent-01 • work-01
+• workspace-02
+Codex CLI • agent-02 • work-02
+• workspace-03
+Claude Code • agent-03 • work-03
+• workspace-04
+Pi • agent-04 • work-04
+workspace-05
+Codex CLI • agent-05 • work-05
+workspace-06
+Claude Code • agent-06 • work-06
+workspace-07
+Pi • agent-07 • work-07
+• workspace-08
+Codex CLI • agent-08 • work-08
+workspace-09
+Claude Code • agent-09 • work-09
+ATTENTION
+WORKING
+IDLE
+ERROR
+agent 19
+agent-19 / work-19
+/ %219
+Harness
+Pi
+Source
+native hook
+Command
+pi
+Workspace
+/workspace/workspace-19
+Recent Output
+Fixture agent 19 preview. Status IDLE from
+Pi.
+IDLE
+ATTENTION
+WORKING
+IDLE
+ERROR
+ATTENTION
+Region: List
+Focus
+Refresh
+Compose
+Settings
+List • type search • T/J move • Enter focus • Cmd+J jump • ?
+help • Cmdt, settings • Cmd+T theme
+Theme: System

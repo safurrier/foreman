@@ -1,0 +1,17 @@
+Foreman Settings
+Tune the macOS control surface without changing Foreman's tmux runtime.
+General
+View
+Focus
+Notifications
+Shortcut
+Toggle Foreman
+Reset Shortcut
+^F
+Default: CtrI+F
+Popup Size
+Size • Compact — 760 × 500
+• Default — 900 × 600
+• Large — 1100 × 720
+• Extra Large — 1280 × 840
+Reset Popup Size

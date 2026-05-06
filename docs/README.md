@@ -21,10 +21,14 @@ index:
 ## Operate Foreman
 
 - [Operator Guide](operator-guide.md) — install, setup, dashboard, config, hooks, notifications, and troubleshooting
+- [macOS App Bundle](macos-overlay/app-bundle.md) — build, install, launch, and smoke-test `Foreman.app`
+- [macOS Overlay Validation](macos-overlay/validation.md) — required overlay change lane, snapshots, gauntlet, and manual smoke checks
 
 ## Understand the System
 
 - [Architecture](architecture.md) — invariants, boundaries, and cross-cutting design
+- [macOS Overlay Architecture](macos-overlay/architecture.md) — Swift modules, app-shell seams, hotkey routing, and control API boundaries
+- [macOS Overlay UX Checklist](macos-overlay/ux-checklist.md) — command-palette and good-Mac-citizen UX expectations
 
 ## Decisions
 

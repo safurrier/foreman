@@ -317,6 +317,7 @@ pub struct Pane {
     pub current_command: Option<String>,
     pub runtime_command: Option<String>,
     pub working_dir: Option<PathBuf>,
+    pub activity_unix_millis: Option<u64>,
     pub preview: String,
     pub preview_provenance: PreviewProvenance,
     pub agent: Option<AgentSnapshot>,
@@ -339,9 +340,8 @@ impl Pane {
     }
 
     pub fn recent_activity(&self) -> u64 {
-        self.agent
-            .as_ref()
-            .map(|agent| agent.activity_score)
+        self.activity_unix_millis
+            .or_else(|| self.agent.as_ref().map(|agent| agent.activity_score))
             .unwrap_or_default()
     }
 

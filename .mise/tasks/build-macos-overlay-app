@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# MISE description="Build Foreman.app for local Spotlight/Raycast launching"
+set -euo pipefail
+"$MISE_PROJECT_ROOT/scripts/build-macos-overlay-app.sh"

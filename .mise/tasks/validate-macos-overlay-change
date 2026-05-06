@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# MISE description="Required validation lane for macOS overlay behavior changes"
+set -euo pipefail
+"$MISE_PROJECT_ROOT/scripts/verify-macos-overlay.sh"

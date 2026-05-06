@@ -163,6 +163,7 @@ impl PaneBuilder {
             current_command: self.current_command,
             runtime_command: self.runtime_command,
             working_dir: self.working_dir,
+            activity_unix_millis: None,
             preview: self.preview,
             preview_provenance: self.preview_provenance,
             agent: self.agent,

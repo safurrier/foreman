@@ -1,0 +1,37 @@
+• Search Agent Sessions
+foreman
+Pi • foreman
+• sample-to
+Pi • sample-tc
+• dotfiles
+Codex CLI • d
+Foreman Help
+T/V scroll • Esc close
+ATTENTION
+Global
+• Default hotkey CtrI+F toggles the overlay
+• Esc closes help, cancels compose, then closes the overlay
+• Cmdt, opens Settings
+• Cmd+R refreshes agents
+• Cmd+J shows flash jump labels
+• Cmd+Shift+J jumps and focuses
+• Cmd+T cycles themes
+• ? opens this help
+List / Search
+• Type anywhere to search while compose is inactive
+• T/d moves the selected agent
+• Cmd+J then a visible label jumps directly to a row
+• Enter focuses the selected tmux pane
+• Double-click focuses the clicked row
+Regions
+Open PR
+reenshots
+capture,
+exposes
+Region: List
+Focus
+Refresh
+Compose
+Settings
+Help • T/v or j/k scroll • Esc close
+Theme: System

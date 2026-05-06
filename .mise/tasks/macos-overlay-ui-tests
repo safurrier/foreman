@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# MISE description="Run local macOS overlay UI event XCTest target"
+set -euo pipefail
+FOREMAN_OVERLAY_RUN_UI_TESTS=1 swift test --package-path "$MISE_PROJECT_ROOT/apps/macos-overlay" --filter ForemanOverlayUITests

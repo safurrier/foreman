@@ -202,10 +202,10 @@ default_sort = "stable" # stable | attention-recent
 ```
 
 Foreman persists runtime UI choices such as theme, sort mode, filters,
-collapsed sessions, and the last selected target in `ui-state.json` next to the
-resolved config file. Explicit `[ui].theme` and `[ui].default_sort` config
-values win over persisted values. Persisted values fill in only when those keys
-are omitted.
+collapsed sessions, and the last selected target in a UI state file next to the
+resolved config file. Explicit theme and default sort config values in the
+`[ui]` table win over persisted values. Persisted values fill in only when those
+keys are omitted.
 
 ## Native Hooks
 

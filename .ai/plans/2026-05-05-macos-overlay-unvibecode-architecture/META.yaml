@@ -1,0 +1,23 @@
+id: 2026-05-05-macos-overlay-unvibecode-architecture
+slug: macos-overlay-unvibecode-architecture
+title: macOS Overlay Un-vibecode Architecture Pass
+status: complete
+created: 2026-05-05
+branch: spec/macos-popup-raycast-spike
+checkpoint_goal: preserve working native Foreman app behavior while deepening modules one slice at a time
+validation:
+  narrow:
+    - swift test --package-path apps/macos-overlay
+    - mise run render-macos-overlay-snapshots
+  full:
+    - mise run verify-macos-overlay
+    - mise run install-macos-overlay-app
+slices:
+  - settings-ui-module
+  - split-main-app-shell
+  - hotkey-diagnostics
+  - keyboard-event-adapter
+  - terminal-activation-module
+  - snapshot-registry
+  - split-overlay-view
+  - narrow-overlay-store

@@ -1,0 +1,44 @@
+Q Search Agent Sessions
+foreman
+Pi • foreman
+• sample-toolkit
+Pi • sample-toolkit
+•
+dotfiles
+Codex CLI • dotfiles • skills
+ATTENTION
+WORKING
+IDLE
+foreman
+foreman / foreman
+/ %101
+Harness
+Source
+Command
+Pi
+native hook
+pi
+Workspace
+/workspace/foreman
+ATTENTION
+Pull Request #123
+OPEN
+Polish native Foreman overlay controls
+foreman • spec/macos-overlay → main • @example-user
+Open PR
+Recent Output
+Need input: choose whether the Swift overlay
+validation lane should capture full-screen
+screenshots first or window-scoped captures.
+Recommended next step: start with full-screen
+capture, then tighten to window capture once the
+panel exposes a stable accessibility identifier.
+Can you summarize the current validation failure?
+Send
+Region: Compose
+Focus
+Refresh
+Send
+Settings
+Compose • Cd+Enter send • Esc cancel • Shift+Tab details
+Theme: System

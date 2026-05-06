@@ -1,0 +1,13 @@
+• Search Agent Sessions
+No Foreman agents
+No agent panes matched Foreman's agent detector.
+Try Refresh, start an agent in tmux, or launch with FOREMAN_OVERLAY_ALL_PANES=1 to include non-
+agent panes while debugging.
+Region: List
+Focus
+Refresh
+Compose
+Settings
+List • type search • T/J move • Enter focus • Cmd+J jump • ?
+help • Cmd+, settings • Cmd+T theme
+Theme: System

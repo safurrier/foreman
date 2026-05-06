@@ -15,14 +15,21 @@ use crate::integrations::{
     apply_configured_claude_signals, apply_configured_codex_signals, apply_configured_pi_signals,
     ClaudeNativeOverlaySummary, CodexNativeOverlaySummary, PiNativeOverlaySummary,
 };
+use crate::services::control_api::{
+    agents_response, attach_pull_request, focus_response, send_response,
+};
 use crate::services::logging::{RunLogSummary, RunLogger};
+use crate::services::pull_requests::{
+    PullRequestLookup, PullRequestService, SystemPullRequestBackend,
+};
 use crate::services::startup_cache::{load_startup_cache, StartupCacheLoadResult};
 use crate::services::system_stats::{SysinfoSystemStatsBackend, SystemStatsService};
 use crate::services::ui_preferences::{
     apply_preferences_to_runtime, load_ui_preferences, reset_ui_preferences, PersistedUiPreferences,
 };
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use std::fmt;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -235,6 +242,51 @@ pub struct Cli {
 
     #[arg(long, hide = true)]
     pub bootstrap_only: bool,
+
+    #[command(subcommand)]
+    pub command: Option<CliCommand>,
+}
+
+#[derive(Debug, Subcommand, Clone, PartialEq, Eq)]
+pub enum CliCommand {
+    /// Print the current Foreman agent inventory as JSON for external clients.
+    Agents {
+        #[arg(long, help = "Print the current agent inventory as JSON.")]
+        json: bool,
+        #[arg(long, help = "Include non-agent tmux panes in the output.")]
+        all_panes: bool,
+        #[arg(
+            long,
+            help = "Attach best-effort GitHub pull request metadata for each workspace."
+        )]
+        pull_requests: bool,
+    },
+    /// Focus tmux on a pane.
+    Focus {
+        #[arg(
+            long,
+            value_name = "PANE_ID",
+            help = "tmux pane id to focus, e.g. %42."
+        )]
+        pane: String,
+        #[arg(long, help = "Print a JSON action result.")]
+        json: bool,
+    },
+    /// Send text to a pane and press Enter.
+    Send {
+        #[arg(
+            long,
+            value_name = "PANE_ID",
+            help = "tmux pane id to send input to, e.g. %42."
+        )]
+        pane: String,
+        #[arg(long, conflicts_with = "stdin", help = "Text to send to the pane.")]
+        text: Option<String>,
+        #[arg(long, help = "Read text to send from stdin.")]
+        stdin: bool,
+        #[arg(long, help = "Print a JSON action result.")]
+        json: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -245,6 +297,7 @@ pub enum RunOutcome {
     Doctor(Box<DoctorReport>),
     Setup(Box<DoctorReport>),
     ResetUiState { path: PathBuf, removed: bool },
+    ControlJson(serde_json::Value),
     Bootstrapped(Box<BootstrapSummary>),
 }
 
@@ -346,6 +399,9 @@ pub fn run(cli: Cli) -> Result<RunOutcome, RunError> {
     }
 
     let paths = resolve_paths(cli.config_file.as_deref(), cli.log_dir.as_deref())?;
+    if let Some(outcome) = maybe_handle_control_command(&cli, &paths)? {
+        return Ok(outcome);
+    }
     if let Some(outcome) = maybe_handle_utility_command(&cli, &paths)? {
         return Ok(outcome);
     }
@@ -363,6 +419,9 @@ pub fn run_main(cli: Cli) -> Result<(), RunError> {
     }
 
     let paths = resolve_paths(cli.config_file.as_deref(), cli.log_dir.as_deref())?;
+    if maybe_handle_control_command(&cli, &paths)?.is_some() {
+        return Ok(());
+    }
     if maybe_handle_utility_command(&cli, &paths)?.is_some() {
         return Ok(());
     }
@@ -370,6 +429,164 @@ pub fn run_main(cli: Cli) -> Result<(), RunError> {
     let prepared = prepare_runtime_bootstrap(&cli, paths)?;
     crate::runtime::run(prepared)?;
     Ok(())
+}
+
+fn maybe_handle_control_command(
+    cli: &Cli,
+    paths: &crate::config::AppPaths,
+) -> Result<Option<RunOutcome>, RunError> {
+    let Some(command) = cli.command.as_ref() else {
+        return Ok(None);
+    };
+    if let Some(flag) = control_command_conflict(cli) {
+        return Err(RunError::Usage(format!(
+            "control subcommands cannot be combined with {flag}"
+        )));
+    }
+
+    match command {
+        CliCommand::Agents {
+            all_panes,
+            pull_requests,
+            ..
+        } => {
+            let file_config = load_config(&paths.config_file)?;
+            let runtime = RuntimeConfig::from_sources(paths.clone(), file_config, cli);
+            let (state, ..) = bootstrap_state(&runtime);
+            let mut response = agents_response(&state, *all_panes);
+            if *pull_requests {
+                attach_pull_requests_to_response(&mut response);
+            }
+            let value = serde_json::to_value(&response).map_err(|error| {
+                RunError::Usage(format!("failed to encode agents JSON: {error}"))
+            })?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&response).map_err(|error| {
+                    RunError::Usage(format!("failed to encode agents JSON: {error}"))
+                })?
+            );
+            Ok(Some(RunOutcome::ControlJson(value)))
+        }
+        CliCommand::Focus { pane, json } => {
+            let adapter = TmuxAdapter::new(SystemTmuxBackend::new(cli.tmux_socket.clone()));
+            let pane_id = crate::app::PaneId::new(pane.clone());
+            adapter.focus_pane(&pane_id).map_err(|error| {
+                RunError::Usage(format!(
+                    "failed to focus pane {}: {error}",
+                    pane_id.as_str()
+                ))
+            })?;
+            let response = focus_response(pane_id.as_str());
+            let value = serde_json::to_value(&response).map_err(|error| {
+                RunError::Usage(format!("failed to encode focus JSON: {error}"))
+            })?;
+            if *json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&response).map_err(|error| {
+                        RunError::Usage(format!("failed to encode focus JSON: {error}"))
+                    })?
+                );
+            } else {
+                println!("Focused pane {}", pane_id.as_str());
+            }
+            Ok(Some(RunOutcome::ControlJson(value)))
+        }
+        CliCommand::Send {
+            pane,
+            text,
+            stdin,
+            json,
+        } => {
+            let input = if *stdin {
+                let mut input = String::new();
+                std::io::stdin()
+                    .read_to_string(&mut input)
+                    .map_err(|error| RunError::Usage(format!("failed to read stdin: {error}")))?;
+                input
+            } else {
+                text.clone().ok_or_else(|| {
+                    RunError::Usage("send requires --text <TEXT> or --stdin".to_string())
+                })?
+            };
+            let adapter = TmuxAdapter::new(SystemTmuxBackend::new(cli.tmux_socket.clone()));
+            let pane_id = crate::app::PaneId::new(pane.clone());
+            let result = adapter.send_input(&pane_id, &input).map_err(|error| {
+                RunError::Usage(format!(
+                    "failed to send input to pane {}: {error}",
+                    pane_id.as_str()
+                ))
+            })?;
+            let response = send_response(pane_id.as_str(), result.bytes_sent);
+            let value = serde_json::to_value(&response)
+                .map_err(|error| RunError::Usage(format!("failed to encode send JSON: {error}")))?;
+            if *json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&response).map_err(|error| {
+                        RunError::Usage(format!("failed to encode send JSON: {error}"))
+                    })?
+                );
+            } else {
+                println!(
+                    "Sent {} byte(s) to pane {}",
+                    result.bytes_sent,
+                    pane_id.as_str()
+                );
+            }
+            Ok(Some(RunOutcome::ControlJson(value)))
+        }
+    }
+}
+
+fn attach_pull_requests_to_response(response: &mut crate::services::control_api::AgentsResponse) {
+    use std::collections::BTreeMap;
+    use std::path::PathBuf;
+
+    let service = PullRequestService::new(SystemPullRequestBackend::new());
+    let mut cache = BTreeMap::<PathBuf, PullRequestLookup>::new();
+
+    for entry in &mut response.entries {
+        let Some(working_dir) = entry.working_dir.as_ref() else {
+            continue;
+        };
+        let path = PathBuf::from(working_dir);
+        let lookup = cache.entry(path.clone()).or_insert_with(|| {
+            service
+                .lookup(&path)
+                .unwrap_or(PullRequestLookup::Unavailable {
+                    message: "pull request lookup failed".to_string(),
+                })
+        });
+        if let PullRequestLookup::Available(pull_request) = lookup {
+            attach_pull_request(entry, pull_request);
+        }
+    }
+}
+
+fn control_command_conflict(cli: &Cli) -> Option<&'static str> {
+    [
+        ("--setup", cli.setup),
+        ("--dry-run", cli.dry_run),
+        ("--user", cli.user),
+        ("--project", cli.project),
+        ("--claude", cli.claude),
+        ("--codex", cli.codex),
+        ("--pi", cli.pi),
+        ("--config-path", cli.config_path),
+        ("--config-show", cli.config_show),
+        ("--init-config", cli.init_config),
+        ("--reset-ui-state", cli.reset_ui_state),
+        ("--doctor", cli.doctor),
+        ("--doctor-json", cli.doctor_json),
+        ("--doctor-strict", cli.doctor_strict),
+        ("--doctor-fix", cli.doctor_fix),
+        ("--doctor-dry-run", cli.doctor_dry_run),
+        ("--repo", cli.repo.is_some()),
+    ]
+    .into_iter()
+    .find_map(|(flag, present)| present.then_some(flag))
 }
 
 fn maybe_handle_utility_command(
@@ -1246,6 +1463,29 @@ mod tests {
             }
             other => panic!("expected config readout, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn control_subcommands_reject_top_level_modes() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let cli = Cli::parse_from([
+            "foreman",
+            "--doctor",
+            "--config-file",
+            temp_dir
+                .path()
+                .join("config.toml")
+                .to_str()
+                .expect("utf-8 path"),
+            "agents",
+            "--json",
+        ]);
+
+        let error = run(cli).expect_err("control command should reject top-level modes");
+
+        assert!(error
+            .to_string()
+            .contains("control subcommands cannot be combined with --doctor"));
     }
 
     #[test]
