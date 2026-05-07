@@ -7,6 +7,8 @@ description: >
 index:
   - id: plan-artifacts
   - id: validation-ladder
+  - id: large-feature-pr-preflight
+  - id: release-after-merge
   - id: tmux-e2e-rules
   - id: native-harness-notes
   - id: environment-and-release-notes
@@ -208,6 +210,75 @@ FOREMAN_REAL_CLAUDE_E2E=1 cargo test --test claude_real_e2e -- --ignored --nocap
 FOREMAN_REAL_CODEX_E2E=1 cargo test --test codex_real_e2e -- --ignored --nocapture
 FOREMAN_REAL_PI_E2E=1 cargo test --test pi_real_e2e -- --ignored --nocapture
 ```
+
+## Large Feature PR Preflight
+
+Run the lightweight checklist task before opening or updating a large PR:
+
+```bash
+mise run pr-preflight
+```
+
+This task is intentionally not part of `mise run check`; it is a human-facing
+merge-prep reminder plus a few cheap guardrails. Use it when a branch touches
+multiple areas such as product code, docs, validation artifacts, fixtures, app
+bundles, screenshots, or release metadata.
+
+Checklist:
+
+- Read this section before final push.
+- Inspect `git status --short`; do not stage unrelated local files such as
+  `.pi/`.
+- Decide which `.ai/validation/` artifacts are durable evidence and restore
+  volatile logs before commit unless they are intentionally updated.
+- Remove oversized live screenshots or one-off desktop captures. Keep only
+  deterministic validation artifacts that the workflow depends on.
+- Run a privacy grep over the changed files for local paths, personal names,
+  repo names, tmux sockets, and stale fixture values before force-pushing.
+- Update durable docs and context when behavior changes: `README.md`,
+  `SPEC.md`, `CHANGELOG.md`, `docs/`, and relevant `AGENTS.md` files.
+- Run docs/context validators when docs or context files changed.
+- Run the narrowest validation lane that proves the slice, then the required
+  lane for touched surfaces. For macOS overlay, app-bundle, keyboard/focus,
+  screenshot, or control API changes, run:
+
+  ```bash
+  mise run validate-macos-overlay-change
+  ```
+
+- Update the PR body with a short summary, validation, and a line-count
+  breakdown when the diff is large or includes many generated/evidence files.
+- Decide whether the change needs a version bump and changelog entry before
+  merge.
+
+The `pr-preflight` task fails on obvious hazards such as staged `.pi/` paths,
+large PNGs outside approved validation/logo locations, and version changes that
+forget README or changelog updates. It also prints changed-file category counts
+to help explain large PRs.
+
+## Release After Merge
+
+Foreman releases are tag-triggered. After a version-bump PR is squash-merged:
+
+```bash
+git checkout main
+git pull --ff-only origin main
+rg -n '^version = "|Current crate version|## <version>' Cargo.toml README.md CHANGELOG.md
+git tag -a v<version> -m "Release <version>"
+git push origin v<version>
+gh run list --workflow Release --limit 3
+gh run watch <run-id> --exit-status
+gh release view v<version>
+```
+
+The release workflow checks that the pushed tag exactly matches the version in
+`Cargo.toml`. For example, package version `1.3.1` must be tagged `v1.3.1`.
+
+The tag workflow runs the release validation lane, builds release archives for
+Linux and macOS targets, publishes checksums, and creates the GitHub release.
+If the workflow fails before publishing, fix the release issue on `main`, move
+or recreate the tag deliberately, and rerun the tag workflow rather than making
+manual release assets.
 
 ## tmux E2E Rules
 

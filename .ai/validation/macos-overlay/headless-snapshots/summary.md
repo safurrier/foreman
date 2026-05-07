@@ -1,6 +1,6 @@
 # macOS Overlay Headless Snapshots
 
-- Started: 2026-05-06T20:56:18Z
+- Started: 2026-05-07T18:32:25Z
 - Output: .ai/validation/macos-overlay/headless-snapshots
 
 ## Files
@@ -21,4 +21,4 @@
 - theme-indigo: .ai/validation/macos-overlay/headless-snapshots/theme-indigo.png
 - theme-terminal: .ai/validation/macos-overlay/headless-snapshots/theme-terminal.png
 - settings-general: .ai/validation/macos-overlay/headless-snapshots/settings-general.png
-- Finished: 2026-05-06T20:56:23Z
+- Finished: 2026-05-07T18:32:30Z

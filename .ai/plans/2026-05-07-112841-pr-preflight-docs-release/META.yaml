@@ -1,0 +1,6 @@
+slug: pr-preflight-docs-release
+branch: fix/pr-preflight-docs-release
+created: 2026-05-07
+pr: 15
+status: complete
+source: post-1.3.0 follow-up to encode Foreman macOS app/release lessons and PR preflight guardrails

@@ -8,6 +8,7 @@ index:
   - id: install-and-setup
   - id: doctor
   - id: dashboard
+  - id: attention-recent-sort
   - id: configuration
   - id: native-hooks
   - id: notifications
@@ -154,6 +155,25 @@ The help overlay includes tree, status, and harness glyph legends. Selected
 panes can also show setup hints that point back to
 `foreman --setup --user --project` or `foreman --doctor` when compatibility
 fallback looks suspicious.
+
+## Attention Recent Sort
+
+Foreman's `attention->recent` / `Attention → Recent` sort keeps urgent work at
+the top without losing recent context among otherwise similar sessions. The
+ordering is:
+
+1. attention/status rank: `needs attention`, `error`, `working`, `idle`, then
+   `unknown`
+2. real pane/native-signal recency, newest first
+3. stable fallback by title and ID
+
+Do not read this mode as a pure "most recent first" list. A less-recent pane
+that needs attention still sorts above a newer idle pane.
+
+The recency tiebreaker must use actual pane/native-signal activity rather than
+only status-derived scores. Idle native signals can share the same static score,
+so sorting idle rows by that score alone falls back to title order and makes
+recently active idle sessions appear stale.
 
 ### tmux Popup
 

@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.3.1 - 2026-05-07
+
+### Added
+
+- Added `mise run pr-preflight`, a lightweight large-PR checklist task with
+  cheap guardrails for staged local state, large screenshots, version metadata,
+  and touched validation lanes.
+
+### Changed
+
+- Documented the `Attention → Recent` sort semantics for operators, including
+  the real-recency tiebreaker for idle native sessions.
+- Documented the post-merge release tag workflow and large-feature PR preflight
+  checklist in the workflow guide.
+- Ensured the macOS overlay verifier builds the overlay executable before the
+  UI event gauntlet uses `FOREMAN_OVERLAY_SKIP_BUILD=1`.
+
 ## 1.3.0 - 2026-05-06
 
 ### Added

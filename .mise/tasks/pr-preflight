@@ -1,0 +1,165 @@
+#!/usr/bin/env -S uv run python
+# MISE description="Print large-PR checklist and run cheap preflight guardrails"
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+
+sys.path.insert(0, os.path.join(os.environ["MISE_PROJECT_ROOT"], "scripts"))
+from lib import PROJECT_ROOT, log_error, log_ok, log_step, log_warn  # noqa: E402
+
+DOC = "docs/workflows.md#large-feature-pr-preflight"
+MAX_PNG_BYTES = 1_000_000
+ALLOWED_LARGE_PNG_PREFIXES = (
+    ".ai/validation/macos-overlay/headless-snapshots/",
+    ".ai/validation/macos-overlay/",
+)
+ALLOWED_LARGE_PNG_NAMES = {"foreman-logo.png"}
+
+
+def run_capture(args: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(args, cwd=PROJECT_ROOT, capture_output=True, text=True)
+
+
+def git_lines(*args: str) -> list[str]:
+    result = run_capture(["git", *args])
+    if result.returncode != 0:
+        log_error(result.stderr.strip() or f"git {' '.join(args)} failed")
+        sys.exit(result.returncode)
+    return [line for line in result.stdout.splitlines() if line]
+
+
+def category(path: str) -> str:
+    if path.startswith(("apps/macos-overlay/Sources/", "src/")):
+        return "product-code"
+    if path.startswith(("apps/macos-overlay/Tests/", "tests/")):
+        return "tests"
+    if path.startswith("apps/macos-overlay/Fixtures/"):
+        return "fixtures"
+    if path.startswith(".ai/plans/"):
+        return "plans"
+    if path.startswith(".ai/validation/"):
+        return "validation-artifacts"
+    if path.startswith(("scripts/", ".mise/tasks/")):
+        return "scripts-tasks"
+    if path.startswith("docs/") or path in {"README.md", "SPEC.md", "CHANGELOG.md", "AGENTS.md"} or path.startswith(".agent/skills/"):
+        return "docs-context"
+    if path in {"Cargo.toml", "Cargo.lock"}:
+        return "version-metadata"
+    if path == "foreman-logo.png":
+        return "assets"
+    return "other"
+
+
+def package_version_from_toml(text: str) -> str | None:
+    try:
+        return tomllib.loads(text)["package"]["version"]
+    except Exception:
+        return None
+
+
+def cargo_version() -> str | None:
+    cargo = PROJECT_ROOT / "Cargo.toml"
+    if not cargo.exists():
+        return None
+    return package_version_from_toml(cargo.read_text())
+
+
+def base_cargo_version() -> str | None:
+    if run_capture(["git", "rev-parse", "--verify", "origin/main"]).returncode != 0:
+        return None
+    result = run_capture(["git", "show", "origin/main:Cargo.toml"])
+    if result.returncode != 0:
+        return None
+    return package_version_from_toml(result.stdout)
+
+
+log_step("Large PR preflight")
+print(f"Read and follow: {DOC}\n")
+print("Required closeout reminders:")
+print("- Keep unrelated local files such as .pi/ out of commits.")
+print("- Restore volatile validation logs unless intentionally updating durable evidence.")
+print("- Run privacy grep before final push for local paths, personal names, stale fixtures, and tmux sockets.")
+print("- Update README/SPEC/CHANGELOG/docs/AGENTS when behavior or release metadata changes.")
+print("- Run the validation lane for the touched surface; macOS overlay/control API changes need `mise run validate-macos-overlay-change`.")
+print("- Update the PR body with validation and a line-count breakdown when the diff is large.\n")
+
+status = git_lines("status", "--short")
+if status:
+    log_step("Working tree status")
+    print("\n".join(status))
+else:
+    log_ok("Working tree clean")
+
+staged = git_lines("diff", "--cached", "--name-only")
+untracked = [
+    path for path in git_lines("ls-files", "--others", "--exclude-standard")
+    if path != ".pi" and not path.startswith(".pi/")
+]
+changed = sorted(set(git_lines("diff", "--name-only", "HEAD") + staged + untracked))
+against_main = git_lines("diff", "--name-only", "origin/main...HEAD") if run_capture(["git", "rev-parse", "--verify", "origin/main"]).returncode == 0 else []
+all_paths = sorted(set(changed + against_main))
+
+errors: list[str] = []
+warnings: list[str] = []
+
+for path in staged:
+    if path == ".pi" or path.startswith(".pi/"):
+        errors.append(f"staged local agent state path: {path}")
+
+for path in all_paths:
+    if not path.endswith(".png"):
+        continue
+    file_path = PROJECT_ROOT / path
+    if not file_path.exists():
+        continue
+    allowed = path in ALLOWED_LARGE_PNG_NAMES or path.startswith(ALLOWED_LARGE_PNG_PREFIXES)
+    size = file_path.stat().st_size
+    if size > MAX_PNG_BYTES and not allowed:
+        errors.append(f"large PNG outside approved validation/assets paths: {path} ({size} bytes)")
+
+changed_set = set(all_paths)
+current_version = cargo_version()
+previous_version = base_cargo_version()
+version_changed = (
+    "Cargo.toml" in changed_set
+    and current_version is not None
+    and previous_version is not None
+    and current_version != previous_version
+)
+if version_changed:
+    readme = (PROJECT_ROOT / "README.md").read_text() if (PROJECT_ROOT / "README.md").exists() else ""
+    changelog = (PROJECT_ROOT / "CHANGELOG.md").read_text() if (PROJECT_ROOT / "CHANGELOG.md").exists() else ""
+    if "README.md" not in changed_set or f"Current crate version: `{current_version}`" not in readme:
+        errors.append("Cargo package version changed but README current crate version was not updated")
+    if "CHANGELOG.md" not in changed_set or f"## {current_version}" not in changelog:
+        errors.append("Cargo package version changed but CHANGELOG.md does not contain an entry for that version")
+
+if changed_set & {"README.md", "SPEC.md", "CHANGELOG.md"} or any(path.startswith("docs/") or path.endswith("AGENTS.md") for path in changed_set):
+    warnings.append("docs/context changed: run docs_verify.py, validate_frontmatter.py, and verify_references.py")
+
+if any(path.startswith(("apps/macos-overlay/", "scripts/verify-macos-overlay", "scripts/macos-overlay", "src/services/control_api.rs")) for path in changed_set):
+    warnings.append("macOS overlay/control API changed: run `mise run validate-macos-overlay-change`")
+
+if all_paths:
+    log_step("Changed-file categories")
+    counts: dict[str, int] = {}
+    for path in all_paths:
+        counts[category(path)] = counts.get(category(path), 0) + 1
+    for name in sorted(counts):
+        print(f"- {name}: {counts[name]} file(s)")
+else:
+    log_ok("No changed files relative to HEAD/origin-main")
+
+for warning in warnings:
+    log_warn(warning)
+
+if errors:
+    for error in errors:
+        log_error(error)
+    sys.exit(1)
+
+log_ok("Preflight guardrails passed")

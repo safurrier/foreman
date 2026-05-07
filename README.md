@@ -7,7 +7,7 @@
 Foreman is a terminal console and native macOS control app for supervising AI
 agents that are running in tmux.
 
-Current crate version: `1.3.0`
+Current crate version: `1.3.1`
 
 It gives one operator view over Claude Code, Codex CLI, Pi, Gemini CLI, and
 OpenCode panes. The dashboard groups tmux sessions, shows which panes are
@@ -208,6 +208,7 @@ Useful tasks:
 | `mise run check` | Fast quality gate |
 | `mise run verify` | Heavy validation |
 | `mise run verify-release` | Release-confidence operator gauntlet |
+| `mise run pr-preflight` | Large-PR checklist and cheap merge-prep guardrails |
 | `mise run validate-macos-overlay-change` | Required validation for macOS overlay/app/control-API changes |
 | `mise run install-macos-overlay-app` | Build, install, and reset `~/Applications/Foreman.app` |
 | `mise run verify-macos-overlay-app` | Non-activating app-bundle smoke test |

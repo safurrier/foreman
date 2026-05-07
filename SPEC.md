@@ -435,6 +435,7 @@ yet expose a stable contract.
 | `mise run check` | Fast quality gate for format, lint, typecheck, and test |
 | `mise run verify` | Heavier validation beyond the fast gate |
 | `mise run verify-release` | Release-confidence compiled-binary tmux gauntlet with checklist/report artifact |
+| `mise run pr-preflight` | Large-PR checklist and cheap guardrails for merge/release preparation |
 | `mise run validate-macos-overlay-change` | Required validation lane for Swift overlay, app bundle, keyboard/focus, screenshots, and control API changes |
 | `mise run build-macos-overlay-app` | Build the local `Foreman.app` bundle under the app dist directory |
 | `mise run install-macos-overlay-app` | Install/reset `~/Applications/Foreman.app` and clean stale macOS launcher registrations |
