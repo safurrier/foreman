@@ -15,6 +15,7 @@ run_step() {
 
 run_step "Rust control API unit tests" cargo test --manifest-path "$ROOT/Cargo.toml" control_api --lib
 run_step "Swift overlay unit tests" swift test --package-path "$ROOT/apps/macos-overlay"
+run_step "Build macOS overlay executable" swift build --package-path "$ROOT/apps/macos-overlay" --product foreman-overlay
 run_step "macOS overlay UI event XCTest gauntlet" env FOREMAN_OVERLAY_RUN_UI_TESTS=1 FOREMAN_OVERLAY_SKIP_BUILD=1 swift test --package-path "$ROOT/apps/macos-overlay" --filter ForemanOverlayUITests
 run_step "Control API real tmux smoke" "$ROOT/scripts/smoke-control-api-tmux.sh"
 run_step "macOS overlay headless snapshots" "$ROOT/scripts/render-macos-overlay-snapshots.sh"
