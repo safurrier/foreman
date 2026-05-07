@@ -1,0 +1,19 @@
+id: 2026-05-05-macos-foreman-ux-polish
+slug: macos-foreman-ux-polish
+title: macOS Foreman UX Polish
+status: planned
+created: 2026-05-05
+branch: spec/macos-popup-raycast-spike
+paths:
+  - apps/macos-overlay/Sources/ForemanOverlayUI/OverlayView.swift
+  - apps/macos-overlay/Sources/ForemanOverlay/main.swift
+  - scripts/build-macos-overlay-app.sh
+  - scripts/install-macos-overlay-app.sh
+  - scripts/verify-macos-overlay-app.sh
+  - scripts/verify-macos-overlay-snapshot-text.swift
+  - docs/macos-overlay/app-bundle.md
+validation:
+  - swift test --package-path apps/macos-overlay
+  - mise run render-macos-overlay-snapshots
+  - mise run verify-macos-overlay-app
+  - mise run verify-macos-overlay

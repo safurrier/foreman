@@ -1,0 +1,15 @@
+• Search Agent Sessions
+Foreman control diagnostic
+tmux unavailable: no server running on /tmp/tmux-
+example/default
+Try: foreman --doctor
+Foreman returned no agent panes and reported a error diagnostic. Fix the local tmux/control environment,
+then Refresh.
+Region: List
+Focus
+Refresh
+Compose
+Settings
+List • type search • T/J move • Enter focus • Cmd+J jump • ?
+help • Cmd+, settings • Cmd+T theme
+Theme: System

@@ -24,6 +24,15 @@ Each skill follows this structure:
 └── scripts/          # Automation scripts used by the skill
 ```
 
+## Current Skills
+
+| Skill | Purpose |
+|---|---|
+| `macos-design-guidelines` | Vendored Apple HIG-oriented macOS design rules from `ehmo/platform-design-skills` |
+| `macos-app-design` | Vendored native macOS app checklist/reference from `petekp/agent-skills` |
+| `foreman-swift-overlay-ux` | Foreman-specific UX review workflow for the Swift macOS overlay |
+| `foreman-swift-overlay-validation` | Foreman-specific validation workflow for overlay fixtures, fake Foreman, and screenshots |
+
 ## Adding a Skill
 
 A starter template is in `example-skill/SKILL.md`. Copy it:

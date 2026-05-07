@@ -1,0 +1,48 @@
+Q Search Agent Sessions
+foreman
+Pi • foreman
+• sample-toolkit
+Pi • sample-toolkit
+•
+dotfiles
+Codex CLI • dotfiles • skills
+ATTENTION
+WORKING
+IDLE
+foreman
+foreman / foreman
+/ %101
+Harness
+Source
+Command
+Pi
+native hook
+pi
+Workspace
+/workspace/foreman
+ATTENTION
+Pull Request #123
+OPEN
+Polish native Foreman overlay controls
+foreman • spec/macos-overlay → main • @example-user
+Open PR
+Recent Output
+19: overlay preview line used to prove keyboard
+scrolling and bounded visual layout in the detail
+pane.
+20: overlay preview line used to prove keyboard
+scrolling and bounded visual layout in the detail
+pane.
+21: overlay preview line used to prove keyboard
+scrolling and bounded visual layout in the detail
+pane.
+22: overlay preview line used to prove keyboard
+scrolling and bounded visual layout in the detail
+Region: Details
+Focus
+Refresh
+Compose
+Settings
+Details • T/ scroll preview • Enter focus • Cmd+J jump •
+Tab compose • Cmd+, settings • Cmd+T theme
+Theme: System

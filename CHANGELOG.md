@@ -1,5 +1,53 @@
 # Changelog
 
+## 1.3.0 - 2026-05-06
+
+### Added
+
+- Added a native macOS control app packaged as `Foreman.app`, installable to
+  `~/Applications` and launchable through Spotlight, Raycast, Finder, `open -a
+  Foreman`, a menu/status item, or a configurable global shortcut.
+- Added a Rust control API for non-TUI clients:
+  - `foreman agents --json`
+  - `foreman agents --json --all-panes`
+  - `foreman agents --json --pull-requests`
+  - `foreman focus --pane <pane-id> --json`
+  - `foreman send --pane <pane-id> --stdin --json`
+  - `foreman send --pane <pane-id> --text <text> --json`
+- Added macOS overlay UX for type-to-search, keyboard navigation, double-click
+  focus, detail preview, compose/send, pull request cards/actions, flash jump,
+  help, themes, filters, sort, Settings, and native text-editing preservation.
+- Added deterministic macOS overlay validation with Swift unit tests,
+  fake-Foreman UI gauntlet, real tmux smoke, headless snapshots/OCR, app-bundle
+  smoke, and the `mise run validate-macos-overlay-change` validation lane.
+- Added app bundle build/install/verify tasks, including generated app icon
+  wiring from `foreman-logo.png`.
+
+### Changed
+
+- Updated `Attention → Recent` ordering so idle native sessions use real
+  pane/native-signal recency instead of tying on static idle status scores.
+- Hardened the macOS app install/reset flow so `mise run install-macos-overlay-app`
+  unregisters/removes stale build and prototype bundles before registering only
+  `~/Applications/Foreman.app`.
+- Made app-bundle smoke validation non-activating so routine validation does not
+  pop the overlay in front of the user's desktop.
+- Updated docs, README, SPEC, and agent context for the macOS app, control API,
+  validation lane, install workflow, and LaunchServices/Raycast/Spotlight gotchas.
+
+### Fixed
+
+- Fixed stale local app launches where Spotlight/Raycast could rediscover a
+  repo-local dist app or old `Foreman Overlay.app` prototype after validation.
+- Fixed macOS overlay lifecycle edges around Carbon hotkey registration,
+  Settings/key-window routing, deterministic reload cancellation, stale response
+  handling, selection normalization, subprocess cancellation, and PR lookup
+  timeout fallback.
+- Fixed overlay keyboard regressions so arrow navigation, help/flash shortcuts,
+  comma search text, and AppKit text editing coexist correctly.
+- Fixed Esc dismissal so hiding the overlay returns focus to the previous
+  non-launcher app when possible, while pane focus still returns to the terminal.
+
 ## 1.2.0 - 2026-05-02
 
 ### Added

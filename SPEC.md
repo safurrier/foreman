@@ -54,6 +54,8 @@ yet expose a stable contract.
 - **notification profile**: A named notification-behavior preset that determines which status transitions emit alerts.
 - **native mode**: An integration path that consumes structured events, hooks, or machine-readable output from a supported agent harness.
 - **compatibility mode**: A fallback integration path that infers state from tmux-visible process and terminal behavior when no structured integration is available.
+- **macOS control app**: A native `Foreman.app` wrapper and overlay that exposes Foreman's core control plane from outside the terminal.
+- **control API**: Machine-readable CLI subcommands used by GUI clients and automation to list agents, focus panes, and send text without parsing the TUI.
 
 ## Goals / Non-Goals
 
@@ -289,6 +291,27 @@ yet expose a stable contract.
 - `mise run check` is the fast quality gate.
 - `mise run ci` delegates to the same quality gate as local checks.
 
+**R20. Control API for non-TUI clients**
+
+- Foreman exposes machine-readable agent inventory for GUI clients.
+- The control API can include or exclude non-agent panes.
+- The control API can attach pull request metadata when requested and degrades gracefully when pull request lookup fails or times out.
+- The control API can focus a pane by tmux pane ID and report the action as JSON.
+- The control API can send text to a pane by tmux pane ID and report the action as JSON.
+- Control API preview output is bounded so GUI clients and pipes do not hang on very large terminal captures.
+
+**R21. Native macOS control app**
+
+- Foreman ships a native macOS app bundle named `Foreman.app` for local installation.
+- The app is discoverable through Spotlight, Raycast, Finder, and `open -a Foreman` after installation.
+- The app provides a global configurable shortcut, menu/status-item entry points, and normal app activation/reopen behavior.
+- The app shows Foreman/tmux agent panes through the control API rather than reimplementing tmux discovery in Swift.
+- The app supports type-to-search, keyboard navigation, double-click-to-focus, detail preview, compose/send, pull request actions, flash jump, help, filters, sort, themes, and Settings.
+- The app preserves native AppKit text editing in text fields while retaining overlay-owned navigation shortcuts outside compose mode.
+- Focusing a pane through the app returns the operator to the configured terminal app.
+- Hiding the overlay without focusing returns the operator to the previous non-launcher app when possible.
+- The installed app path is `~/Applications/Foreman.app` by default, and the install workflow prevents stale build/prototype app bundles from poisoning Spotlight/Raycast/LaunchServices.
+
 ### SHOULD
 
 - Foreman should keep the common path fully usable without a mouse.
@@ -318,8 +341,29 @@ yet expose a stable contract.
 - It supports debug logging mode.
 - It supports notification suppression for a single run.
 - It supports runtime overrides for monitoring cadence and capture depth.
+- It supports control subcommands for JSON agent listing, pane focus, and pane send.
+- Control subcommands reject conflicting top-level interactive modes such as doctor mode.
 - Hook-based native integrations may ship companion helper commands when the
   main dashboard process is not the right place to consume hook stdin directly.
+
+### Control API contract
+
+- `foreman agents --json` returns schema-versioned JSON with inventory summary, entries, and diagnostics.
+- `foreman agents --json --all-panes` includes non-agent panes.
+- `foreman agents --json --pull-requests` includes best-effort pull request metadata.
+- `foreman focus --pane <pane-id> --json` focuses the requested tmux pane and reports success or failure in machine-readable form.
+- `foreman send --pane <pane-id> --stdin --json` sends stdin to the requested pane and reports bytes sent.
+- `foreman send --pane <pane-id> --text <text> --json` sends explicit text to the requested pane and reports bytes sent.
+- Control API diagnostics are visible to clients when tmux or runtime inventory is unavailable.
+
+### macOS app contract
+
+- The Swift app remains a GUI client of the Rust control API.
+- Swift views do not spawn tmux commands directly and do not parse terminal state.
+- AppKit owns app lifecycle, panel/window behavior, menu/status items, global hotkey registration, and terminal/previous-app activation adapters.
+- SwiftUI owns the overlay list, search, details, compose, settings, and snapshot-rendered UI.
+- `mise run install-macos-overlay-app` is the supported local install/reset command and leaves only `~/Applications/Foreman.app` discoverable by macOS launchers.
+- Routine app-bundle validation runs in a non-activating mode so it does not interrupt the operator's desktop.
 
 ### Config contract
 
@@ -391,6 +435,10 @@ yet expose a stable contract.
 | `mise run check` | Fast quality gate for format, lint, typecheck, and test |
 | `mise run verify` | Heavier validation beyond the fast gate |
 | `mise run verify-release` | Release-confidence compiled-binary tmux gauntlet with checklist/report artifact |
+| `mise run validate-macos-overlay-change` | Required validation lane for Swift overlay, app bundle, keyboard/focus, screenshots, and control API changes |
+| `mise run build-macos-overlay-app` | Build the local `Foreman.app` bundle under the app dist directory |
+| `mise run install-macos-overlay-app` | Install/reset `~/Applications/Foreman.app` and clean stale macOS launcher registrations |
+| `mise run verify-macos-overlay-app` | Non-activating smoke test for app-bundle shape, plist values, embedded binaries, and ready-file launch |
 | `mise run ci` | CI entrypoint, aligned with local quality checks |
 
 ## Invariants
@@ -427,6 +475,14 @@ yet expose a stable contract.
 
 - If a pull request detail panel auto-opens on first discovery for a workspace, it does not repeatedly re-open for that same workspace after the operator closes it.
 
+### macOS app invariants
+
+- The native macOS app is a control-plane client, not a second source of tmux truth.
+- The installed app bundle, not repo-local build artifacts, is the only Foreman app macOS launchers should discover after the install task completes.
+- Overlay keyboard handling preserves normal text editing in search and compose fields while keeping overlay navigation responsive.
+- Settings and other foreground windows do not leak overlay keyboard handling.
+- App launch, global hotkey, and app reactivation restore a visible control surface rather than leaving a hidden active app.
+
 ### Failure modes and edge cases
 
 - tmux may be missing or not running.
@@ -439,6 +495,7 @@ yet expose a stable contract.
 - The selected workspace may not be a repository with a pull request.
 - Browser or clipboard actions may be unavailable on the current machine.
 - A notification backend or richer sound path may be unavailable.
+- macOS LaunchServices, Spotlight, Raycast, or icon caches may retain stale app bundle metadata after local development builds.
 - Mouse hit-testing may be approximate rather than exact in some layouts.
 - Some panel combinations may force a summary surface to remain visible even when a toggle suggests otherwise.
 - In all of these cases, Foreman fails soft rather than fail closed.
@@ -646,6 +703,18 @@ mise run ci
   release-gauntlet report are uploaded as reviewable artifacts.
 - Those review artifacts come from a stable validation root under `.ai/validation/`
   and missing evidence is treated as a failure.
+
+**A20. Control API and macOS app**
+
+- Given tmux contains recognized agent panes, `foreman agents --json` returns bounded, schema-versioned entries suitable for a GUI client.
+- Given a pane ID from the control API, `foreman focus --pane <pane-id> --json` focuses that pane and returns a machine-readable action result.
+- Given text and a pane ID from the control API, `foreman send --pane <pane-id> --stdin --json` sends the text and reports bytes sent.
+- Given the macOS app is installed, Spotlight, Raycast, Finder, and `open -a Foreman` launch `~/Applications/Foreman.app` rather than stale repo-local or prototype bundles.
+- Given the overlay is open, single-click selects a row and double-click focuses the clicked row through the same focus path as the Focus button or Enter.
+- Given the overlay is hidden with Esc, Foreman returns focus to the previous non-launcher app when possible.
+- Given the overlay focuses a tmux pane, it hides and activates the configured or most recently active terminal app.
+- Given idle agent panes have equal status rank, `Attention → Recent` ordering uses real pane/native-signal recency before falling back to title or ID.
+- Given app-bundle validation runs, it does not show the overlay in front of the operator's desktop and does not leave the repo-local dist app registered as a launcher candidate.
 
 ### Definition of done
 

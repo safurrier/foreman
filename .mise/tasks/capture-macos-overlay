@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# MISE description="Capture deterministic Swift macOS overlay screenshot evidence"
+set -euo pipefail
+"$MISE_PROJECT_ROOT/scripts/capture-macos-overlay.sh"

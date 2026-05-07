@@ -1,0 +1,31 @@
+Q Search Agent Sessions
+project-alpha startup
+Pi • notes • notes-vault • %35
+• project-alpha review
+Pi • notes • notes-vault • %33
+WORKING
+WORKING
+• project-alpha skill
+Pi • notes • notes-vault • %36
+IDLE
+notes-vault
+notes / project-alpha startup / %35
+Harness
+Source
+Command
+Workspace
+Recent Output
+Pi
+native hook
+pi
+/workspace/notes-vault
+WORKING
+Working on startup notes.
+Region: List
+Focus
+Refresh
+Compose
+Settings
+List • type search • T/J move • Enter focus • Cmd+J jump • ?
+help • Cmdt, settings • Cmd+T theme
+Theme: System

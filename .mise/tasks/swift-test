@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# MISE description="Run Swift macOS overlay tests"
+set -euo pipefail
+swift test --package-path "$MISE_PROJECT_ROOT/apps/macos-overlay"

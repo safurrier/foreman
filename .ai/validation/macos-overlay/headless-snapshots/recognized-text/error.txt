@@ -1,0 +1,13 @@
+• Search Agent Sessions
+Foreman overlay could not load agents
+fixture tux unavailable: fake Foreman error
+Try: foreman --doctor
+If this app was launched from Raycast/Spotlight, Foreman uses its bundled control binary and the current tux environment.
+Region: List
+Focus
+Refresh
+Compose
+Settings
+List • type search • T/J move • Enter focus • Cmd+J jump • ?
+help • Cmdt, settings • Cmd+T theme
+Theme: System

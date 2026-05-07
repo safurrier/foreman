@@ -11,6 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub struct NativeSignal {
     pub status: AgentStatus,
     pub activity_score: u64,
+    pub recent_activity_unix_millis: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -106,6 +107,11 @@ impl NativeSignalSource for FileNativeSignalSource {
             return Ok(None);
         }
 
+        let metadata = fs::metadata(&path).ok();
+        let recent_activity_unix_millis = metadata
+            .and_then(|metadata| metadata.modified().ok())
+            .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| duration.as_millis() as u64);
         let payload = fs::read_to_string(path)?;
         let raw: RawNativeSignal = serde_json::from_str(&payload)?;
         let status = parse_native_status(&raw.status)?;
@@ -114,6 +120,7 @@ impl NativeSignalSource for FileNativeSignalSource {
             activity_score: raw
                 .activity_score
                 .unwrap_or_else(|| native_activity_score(status)),
+            recent_activity_unix_millis,
         }))
     }
 }
@@ -134,6 +141,7 @@ pub fn signal_for_status(status: AgentStatus) -> NativeSignal {
     NativeSignal {
         status,
         activity_score: native_activity_score(status),
+        recent_activity_unix_millis: None,
     }
 }
 
@@ -208,6 +216,9 @@ pub fn apply_native_signals<S: NativeSignalSource>(
                             activity_score: signal.activity_score,
                             debounce_ticks: 0,
                         });
+                        pane.activity_unix_millis = signal
+                            .recent_activity_unix_millis
+                            .or(pane.activity_unix_millis);
                         summary.applied += 1;
                     }
                     Ok(Some(_)) => {}

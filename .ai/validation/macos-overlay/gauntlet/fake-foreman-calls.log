@@ -1,0 +1,10 @@
+agents --json --pull-requests
+agents --json --pull-requests
+focus --pane %101 --json
+agents --json --pull-requests
+focus --pane %101 --json
+agents --json --pull-requests
+send --pane %101 --stdin --json
+agents --json --pull-requests
+agents --json --pull-requests
+agents --json --pull-requests

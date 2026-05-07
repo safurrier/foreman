@@ -1,0 +1,17 @@
+id: 2026-05-05-macos-overlay-row-display-mode
+slug: macos-overlay-row-display-mode
+title: macOS Overlay Row Display Mode
+status: in_progress
+created: 2026-05-05
+branch: spec/macos-popup-raycast-spike
+paths:
+  - apps/macos-overlay/Sources/ForemanOverlayCore/Core.swift
+  - apps/macos-overlay/Sources/ForemanOverlayUI/OverlayView.swift
+  - apps/macos-overlay/Sources/ForemanOverlaySnapshot/main.swift
+  - apps/macos-overlay/Fixtures/agents-duplicate-workspace.json
+  - apps/macos-overlay/Tests/ForemanOverlayCoreTests/ForemanOverlayCoreTests.swift
+validation:
+  - swift test --package-path apps/macos-overlay
+  - mise run render-macos-overlay-snapshots
+  - mise run verify-macos-overlay
+  - mise run install-macos-overlay-app

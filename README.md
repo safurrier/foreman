@@ -1,23 +1,31 @@
 # foreman
 
-Foreman is a terminal console for supervising AI agents that are running in
-tmux.
+<p align="center">
+  <img src="foreman-logo.png" alt="Foreman logo" width="180">
+</p>
 
-Current crate version: `1.2.0`
+Foreman is a terminal console and native macOS control app for supervising AI
+agents that are running in tmux.
+
+Current crate version: `1.3.0`
 
 It gives one operator view over Claude Code, Codex CLI, Pi, Gemini CLI, and
 OpenCode panes. The dashboard groups tmux sessions, shows which panes are
 stable or need attention, lets you jump directly to the right pane, and can
-wire native status hooks for the harnesses that support them.
+wire native status hooks for the harnesses that support them. The optional
+native macOS app packages that same control plane as `Foreman.app` for a global
+hotkey, Spotlight/Raycast launch, quick search, preview, compose/send, and pane
+focus from outside the terminal.
 
 ## Why Use It
 
-- See all agent sessions and panes in one TUI.
+- See all agent sessions and panes in one TUI or the native macOS overlay.
+- Launch `Foreman.app` from a global shortcut, Spotlight, Raycast, Finder, or `open -a Foreman`.
 - Prefer native hook signals for Claude Code, Codex, and Pi when available.
 - Fall back to lower-confidence tmux compatibility detection for unsupported
   or unwired panes.
 - Jump tmux to the selected pane, compose input, search, filter, and inspect
-  status provenance without leaving the dashboard.
+  status provenance without leaving the dashboard or overlay.
 - Use setup and doctor commands to install hooks, check wiring, and diagnose
   fallback-heavy sessions.
 - Send desktop notifications when work completes or an agent needs attention.
@@ -51,7 +59,17 @@ To try Foreman from the checkout without installing:
 mise run dev
 ```
 
-The install task provides:
+To install or reset the native macOS app locally:
+
+```bash
+mise run install-macos-overlay-app
+open -a Foreman
+```
+
+That installs `~/Applications/Foreman.app` and cleans stale local app-bundle
+registrations so Spotlight/Raycast do not launch an old development copy.
+
+The CLI install task provides:
 
 - `foreman`
 - `foreman-claude-hook`
@@ -80,6 +98,43 @@ Common keys:
 Status labels include their source. `native hook` means Foreman read a
 structured harness signal. `compatibility heuristic` means Foreman inferred
 state from tmux-visible behavior and treats it as lower confidence.
+
+## Native macOS App
+
+The macOS app is a Swift/AppKit/SwiftUI client for Foreman's Rust control API.
+It does not reimplement tmux discovery; it calls `foreman agents --json`,
+`foreman focus --pane ... --json`, and `foreman send --pane ... --json`.
+
+Local install/reset:
+
+```bash
+mise run install-macos-overlay-app
+open -a Foreman
+```
+
+Use the app for:
+
+- global hotkey access to Foreman from anywhere
+- type-to-search over agent panes
+- attention/recent sorting and filters
+- detail preview and pull request cards
+- compose/send to a selected pane
+- double-click or Enter/Focus to jump the terminal to a pane
+
+For development and validation:
+
+```bash
+swift test --package-path apps/macos-overlay
+mise run validate-macos-overlay-change
+mise run install-macos-overlay-app
+```
+
+Run the install task after validation before manual Spotlight/Raycast testing;
+validation builds a repo-local app bundle, and the install task unregisters and
+removes that dist copy so macOS launchers see only `~/Applications/Foreman.app`.
+
+See [macOS Overlay App Bundle](docs/macos-overlay/app-bundle.md) and
+[macOS Overlay Validation](docs/macos-overlay/validation.md) for details.
 
 ## Native Harness Support
 
@@ -128,6 +183,8 @@ the `alerter --sound` notification-sound prefix path that better respects Focus
 - [Workflow Guide](docs/workflows.md) - plan workflow, validation ladder, and
   release process
 - [Architecture](docs/architecture.md) - system boundaries and module map
+- [macOS App Bundle](docs/macos-overlay/app-bundle.md) - build, install, launch, and validate `Foreman.app`
+- [macOS Overlay Architecture](docs/macos-overlay/architecture.md) - Swift app boundaries and control API seams
 - [Changelog](CHANGELOG.md) - release history
 
 ## Development
@@ -151,6 +208,9 @@ Useful tasks:
 | `mise run check` | Fast quality gate |
 | `mise run verify` | Heavy validation |
 | `mise run verify-release` | Release-confidence operator gauntlet |
+| `mise run validate-macos-overlay-change` | Required validation for macOS overlay/app/control-API changes |
+| `mise run install-macos-overlay-app` | Build, install, and reset `~/Applications/Foreman.app` |
+| `mise run verify-macos-overlay-app` | Non-activating app-bundle smoke test |
 | `mise run native-preflight` | Check local real-harness readiness |
 | `mise run verify-native` | Real Claude, Codex, and Pi E2E drill |
 | `mise run verify-ux` | TUI runtime smoke and UX artifact refresh |

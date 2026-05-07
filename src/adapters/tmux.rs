@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Instant;
 
-const LIST_PANES_FORMAT: &str = "#{session_id}\t#{session_name}\t#{window_id}\t#{window_name}\t#{pane_id}\t#{pane_title}\t#{pane_current_command}\t#{pane_pid}\t#{pane_current_path}";
+const LIST_PANES_FORMAT: &str = "#{session_id}\t#{session_name}\t#{window_id}\t#{window_name}\t#{pane_id}\t#{pane_title}\t#{pane_current_command}\t#{pane_pid}\t#{pane_current_path}\t#{pane_activity}";
 
 #[derive(Debug)]
 pub enum TmuxError {
@@ -50,6 +50,7 @@ pub struct TmuxPaneRecord {
     pub pane_pid: Option<u32>,
     pub runtime_command: Option<String>,
     pub current_path: Option<PathBuf>,
+    pub activity_unix_millis: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -263,6 +264,7 @@ impl<B: TmuxBackend> TmuxAdapter<B> {
                 current_command,
                 runtime_command,
                 working_dir: record.current_path.clone(),
+                activity_unix_millis: record.activity_unix_millis,
                 preview,
                 preview_provenance,
                 agent,
@@ -549,7 +551,7 @@ impl TmuxBackend for SystemTmuxBackend {
 }
 
 fn parse_pane_record(line: &str) -> Result<TmuxPaneRecord, TmuxError> {
-    let mut fields = line.splitn(9, '\t');
+    let mut fields = line.splitn(10, '\t');
     let session_id = fields
         .next()
         .ok_or_else(|| TmuxError::Parse(format!("missing session_id in pane record: {line}")))?;
@@ -577,6 +579,10 @@ fn parse_pane_record(line: &str) -> Result<TmuxPaneRecord, TmuxError> {
     let current_path = fields
         .next()
         .ok_or_else(|| TmuxError::Parse(format!("missing current_path in pane record: {line}")))?;
+    let activity_unix_millis = fields
+        .next()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(|seconds| seconds.saturating_mul(1_000));
 
     Ok(TmuxPaneRecord {
         session_id: SessionId::new(session_id),
@@ -589,6 +595,7 @@ fn parse_pane_record(line: &str) -> Result<TmuxPaneRecord, TmuxError> {
         pane_pid: pane_pid.trim().parse().ok(),
         runtime_command: None,
         current_path: (!current_path.trim().is_empty()).then(|| PathBuf::from(current_path)),
+        activity_unix_millis,
     })
 }
 
@@ -826,6 +833,7 @@ mod tests {
             pane_pid: Some(1234),
             runtime_command: None,
             current_path: Some(PathBuf::from("/workspace")),
+            activity_unix_millis: None,
         }
     }
 

@@ -1,0 +1,43 @@
+Q Search Agent Sessions
+very-long-overlay-workspace-na….
+Pi • foreman • foreman
+• sample-toolkit
+Pi • sample-toolkit
+• dotfiles
+Codex CLI • dotfiles • skills
+ATTENTION
+WORKING
+IDLE
+foreman
+foreman / foreman
+/ %101
+Harness
+Source
+Command
+Workspace
+Pi
+native hook
+pi
+ATTENTION
+/workspace/foreman/apps/macos-overlay/Sources/ForemanOverlay/
+Deeply/Nested/Experimental/CommandPalette/Validation/Fixture/That...
+Pull Request #123
+OPEN
+Polish native Foreman overlay controls
+foreman • spec/macos-overlay → main • @example-user
+Open PR
+Recent Output
+Need input: choose whether the Swift overlay
+validation lane should capture full-screen screenshots
+first or window-scoped captures.
+Recommended next step: start with full-screen capture,
+then tighten to window capture once the panel exposes
+a stable accessibility identifier.
+Region: List
+Focus
+Refresh
+Compose
+Settings
+List • type search • T/J move • Enter focus • Cd+J jump • ?
+help • Cmdt, settings • Cmd+T theme
+Theme: System

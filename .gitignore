@@ -9,3 +9,6 @@
 /.claude/settings.local.json
 /.codex/hooks.json
 /.pi/extensions/foreman.ts
+
+/apps/macos-overlay/.build/
+/apps/macos-overlay/dist/

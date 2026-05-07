@@ -1,0 +1,6 @@
+slug: macos-overlay-arrow-key-fix
+branch: feat/macos-overlay-control-app
+created: 2026-05-05
+pr:
+status: complete
+source: user-reported-regression

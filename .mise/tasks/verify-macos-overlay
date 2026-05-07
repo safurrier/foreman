@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# MISE description="Verify Swift macOS overlay: Rust control API, Swift tests, real tmux smoke, screenshot capture"
+set -euo pipefail
+"$MISE_PROJECT_ROOT/scripts/verify-macos-overlay.sh"
