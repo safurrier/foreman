@@ -16,7 +16,7 @@ index:
 ## Start Here
 
 - [Repo Tour](tour.md) — first read for onboarding, reading order, and the code map
-- [Workflow Guide](workflows.md) — plan hygiene, validation layers, and common rough edges
+- [Workflow Guide](workflows.md) — HK lifecycle, validation layers, and common rough edges
 
 ## Operate Foreman
 

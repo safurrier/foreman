@@ -10,7 +10,7 @@
 
 | Doc | Topic |
 |---|---|
-| [`workflows.md`](workflows.md) | Plan workflow, validation ladder, and recurring non-code rough edges |
+| [`workflows.md`](workflows.md) | HK lifecycle, validation ladder, and recurring non-code rough edges |
 | [`operator-guide.md`](operator-guide.md) | Install, setup, dashboard, config, hooks, notifications, and troubleshooting |
 | [`macos-overlay/app-bundle.md`](macos-overlay/app-bundle.md) | Build, install, and smoke-test the native Foreman.app bundle |
 | [`macos-overlay/validation.md`](macos-overlay/validation.md) | Required macOS overlay validation lane, snapshots, gauntlet, and manual smoke checks |

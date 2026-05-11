@@ -231,6 +231,12 @@ private func cliEnvironment() -> [String: String] {
     } else {
         environment["PATH"] = standardPath
     }
+    if environment["LC_CTYPE"]?.isEmpty ?? true {
+        environment["LC_CTYPE"] = "UTF-8"
+    }
+    if environment["LANG"]?.isEmpty ?? true {
+        environment["LANG"] = "en_US.UTF-8"
+    }
     return environment
 }
 

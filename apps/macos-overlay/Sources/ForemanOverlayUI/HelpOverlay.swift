@@ -6,7 +6,7 @@ struct HelpOverlay: View {
     @ObservedObject var store: OverlayStore
 
     private let sections: [(String, [String])] = [
-        ("Global", ["Default hotkey Ctrl+F toggles the overlay", "Esc closes help, cancels compose, then closes the overlay", "Cmd+, opens Settings", "Cmd+R refreshes agents", "Cmd+J shows flash jump labels", "Cmd+Shift+J jumps and focuses", "Cmd+T cycles themes", "? opens this help"]),
+        ("Global", ["Default hotkey Cmd+Option+F toggles the overlay", "Esc closes help, cancels compose, then closes the overlay", "Cmd+, opens Settings", "Cmd+R refreshes agents", "Cmd+J shows flash jump labels", "Cmd+Shift+J jumps and focuses", "Cmd+T cycles themes", "? opens this help"]),
         ("List / Search", ["Type anywhere to search while compose is inactive", "↑/↓ moves the selected agent", "Cmd+J then a visible label jumps directly to a row", "Enter focuses the selected tmux pane", "Double-click focuses the clicked row"]),
         ("Regions", ["Tab moves List → PR → Details → Compose when a PR exists", "Rows without PR metadata skip the PR region", "Shift+Tab moves backward", "The footer chip and subtle focus ring mark the active keyboard region"]),
         ("Pull Request", ["When PR is active, Enter opens it in your browser", "Click the PR card or tab to it to make it active", "The Open PR link remains pointer-accessible"]),

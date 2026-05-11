@@ -2,10 +2,11 @@
 id: workflows
 title: Workflow Guide
 description: >
-  Durable workflow and validation guidance for foreman, including plan hygiene,
-  tmux E2E rules, harness-specific test notes, and Docker/CI rough edges.
+  Durable workflow and validation guidance for foreman, including HK lifecycle
+  hygiene, tmux E2E rules, harness-specific test notes, and Docker/CI rough
+  edges.
 index:
-  - id: plan-artifacts
+  - id: hk-lifecycle
   - id: validation-ladder
   - id: large-feature-pr-preflight
   - id: release-after-merge
@@ -16,19 +17,58 @@ index:
 
 # Workflow Guide
 
-## Plan Artifacts
+## HK Lifecycle
 
-For every meaningful slice, create a plan under `.ai/plans/` and keep these
-files current while you work:
+For meaningful work, use Harness Kit as the lifecycle source of truth. The HK
+ledger is local/generated state; compact exports under `.ai/hk/<work-id>/` are
+review handoff packages.
 
-| File | What to keep current |
-|---|---|
-| `META.yaml` | `branch`, `pr`, and `status` |
-| `TODO.md` | What is actually left |
-| `LEARNING_LOG.md` | Surprises, failures, and design adjustments |
-| `VALIDATION.md` | What was run and what passed or failed |
+Start or inspect work:
 
-Use `status: complete`, not `completed`.
+```bash
+hk profile resolve --target . --json
+hk start <slug> --plan "Describe the intended change and validation approach" --target .
+hk status --target . --json
+```
+
+Record validation and sync points while working:
+
+```bash
+hk checks --target . --changed --json
+hk validate --check <name> --why "Why this proves the slice" -- <native command>
+hk sync --target .
+```
+
+Close out meaningful PR-sized work:
+
+```bash
+hk ready --target .
+WORK_ID=$(hk status --target . --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["active_work"])')
+hk export --format handoff-dir --output ".ai/hk/$WORK_ID" --target .
+```
+
+Commit the compact export shape:
+
+```text
+.ai/hk/<work-id>/
+  README.md
+  meta.json
+  artifacts/
+    README.md
+```
+
+The HK ledger remains canonical. The export is a generated review snapshot, not
+a hand-authored plan directory.
+
+### Legacy `.ai/plans/**`
+
+Historical `.ai/plans/**` directories remain useful archaeology. Do not delete or
+rewrite them as part of routine work. If a branch already touches a legacy plan,
+keep its `META.yaml`, `TODO.md`, `LEARNING_LOG.md`, and `VALIDATION.md` coherent,
+and use `status: complete`, not `completed`.
+
+`mise run plan -- <slug>` is now a migration shim that points to HK instead of
+creating a new plan directory.
 
 ## `.ai` Policy
 
@@ -36,8 +76,9 @@ Foreman keeps a narrow set of `.ai/` paths in git on purpose.
 
 Commit these:
 
-- `.ai/plans/AGENTS.md`, `.ai/plans/_templates/`, and `.ai/plans/_example/`
-- completed slice plan directories under `.ai/plans/`
+- `.ai/hk/AGENTS.md` and compact generated HK exports under `.ai/hk/<work-id>/`
+- legacy `.ai/plans/AGENTS.md`, `.ai/plans/_templates/`, `.ai/plans/_example/`,
+  and existing slice plan directories when a branch intentionally updates them
 - stable validation roots under `.ai/validation/`
 
 Do not commit these:
@@ -45,17 +86,20 @@ Do not commit these:
 - `.ai/handoffs/`
 - `.ai/research/`
 - plan-local artifact folders under `.ai/plans/`
+- HK artifact payloads under `.ai/hk/*/artifacts/**` unless explicitly required
+  for review
 - ad hoc scratch dumps or temporary debug files under `.ai/`
 
 Why:
 
-- `.ai/plans/` is structured working memory and evidence for a slice
+- `.ai/hk/` exports are generated review snapshots from the HK ledger
+- `.ai/plans/` is historical structured working memory and evidence for older slices
 - `.ai/validation/` is consumed by CI and release workflows as stable proof
 - handoffs, research notes, and local artifacts are useful while exploring, but
   they are not canonical repo context
 
-If a scratch note becomes durable, promote it into `docs/`, `AGENTS.md`, or a
-real plan directory and then delete the scratch copy.
+If a scratch note becomes durable, promote it into `docs/`, `AGENTS.md`, an HK
+context/decision record, or a compact HK export and then delete the scratch copy.
 
 ## Validation Ladder
 
@@ -237,6 +281,8 @@ Checklist:
   repo names, tmux sockets, and stale fixture values before force-pushing.
 - Update durable docs and context when behavior changes: `README.md`,
   `SPEC.md`, `CHANGELOG.md`, `docs/`, and relevant `AGENTS.md` files.
+- For meaningful PR-sized work, run `hk sync --target .`, `hk ready --target .`,
+  and export a compact `.ai/hk/<work-id>/` handoff package.
 - Run docs/context validators when docs or context files changed.
 - Run the narrowest validation lane that proves the slice, then the required
   lane for touched surfaces. For macOS overlay, app-bundle, keyboard/focus,

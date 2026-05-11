@@ -81,8 +81,11 @@ remain under `apps/macos-overlay/Sources/ForemanOverlayUI/`; deterministic rende
 
 - The app lives under `apps/macos-overlay/` as a SwiftPM package.
 - The overlay uses `KeyboardShortcuts.Recorder` for persisted hotkey
-  configuration and `HotkeyController` for Carbon registration. The default is
-  `Ctrl+F`; `FOREMAN_OVERLAY_HOTKEY` can override it for development launches.
+  configuration and the same `KeyboardShortcuts` package for normal global
+  shortcut handling. The default is `Cmd+Option+F`; `FOREMAN_OVERLAY_HOTKEY` can
+  override it for development launches. Settings exposes separate **Clear
+  Shortcut** and **Restore Default** actions so clearing the global shortcut is
+  distinct from restoring the default chord.
 - Launch with deterministic fake data using `scripts/capture-macos-overlay.sh`.
 - Launch against the real local binary with:
 

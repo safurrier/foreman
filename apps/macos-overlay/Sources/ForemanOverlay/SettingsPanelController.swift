@@ -20,7 +20,8 @@ final class SettingsPanelController {
     private var panel: NSPanel?
     private weak var preferences: OverlayPreferences?
     private var hotkeyStatus: String?
-    private var onReset: (() -> Void)?
+    private var onClearShortcut: (() -> Void)?
+    private var onRestoreDefault: (() -> Void)?
     private var onShortcutChanged: (() -> Void)?
 
     var isVisible: Bool {
@@ -30,12 +31,14 @@ final class SettingsPanelController {
     func show(
         preferences: OverlayPreferences,
         hotkeyStatus: String?,
-        onReset: @escaping () -> Void,
+        onClearShortcut: @escaping () -> Void,
+        onRestoreDefault: @escaping () -> Void,
         onShortcutChanged: @escaping () -> Void
     ) {
         self.preferences = preferences
         self.hotkeyStatus = hotkeyStatus
-        self.onReset = onReset
+        self.onClearShortcut = onClearShortcut
+        self.onRestoreDefault = onRestoreDefault
         self.onShortcutChanged = onShortcutChanged
         if panel == nil {
             panel = SettingsPanel(
@@ -68,7 +71,8 @@ final class SettingsPanelController {
         panel?.contentView = NSHostingView(rootView: SettingsView(
             preferences: preferences,
             hotkeyStatus: hotkeyStatus,
-            onReset: { [weak self] in self?.onReset?() },
+            onClearShortcut: { [weak self] in self?.onClearShortcut?() },
+            onRestoreDefault: { [weak self] in self?.onRestoreDefault?() },
             onShortcutChanged: { [weak self] in self?.onShortcutChanged?() }
         ))
     }

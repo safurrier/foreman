@@ -1,17 +1,21 @@
 Foreman Settings
-Tune the macOS control surface without changing Foreman's tmux runtime.
+Tune the macOS control surface without changing Foreman's tux runtime.
 General
 View
 Focus
 Notifications
 Shortcut
 Toggle Foreman
-Reset Shortcut
+Clear Shortcut
+Restore Default
+Default: Cmd+Option+F
 ^F
-Default: CtrI+F
+Click the shortcut field, then press a key combination. Clear removes the global shortcut; Restore Default sets
+Cmd+Option+F.
 Popup Size
-Size • Compact — 760 × 500
-• Default — 900 × 600
-• Large — 1100 × 720
-• Extra Large — 1280 × 840
+Size
+• Compact — 760 × 500
+• Default - 900 × 600
+Large - 1100 × 720
+Extra Large - 1280 × 840
 Reset Popup Size

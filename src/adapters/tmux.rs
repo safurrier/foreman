@@ -440,17 +440,7 @@ impl TmuxBackend for SystemTmuxBackend {
     fn list_panes(&self) -> Result<Vec<TmuxPaneRecord>, TmuxError> {
         let output = self.run_tmux(&["list-panes", "-a", "-F", LIST_PANES_FORMAT])?;
         let processes = process_table().unwrap_or_default();
-        output
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .map(|line| {
-                let mut record = parse_pane_record(line)?;
-                record.runtime_command = record
-                    .pane_pid
-                    .and_then(|pane_pid| foreground_command_from_processes(pane_pid, &processes));
-                Ok(record)
-            })
-            .collect()
+        parse_pane_records_from_output(&output, &processes)
     }
 
     fn capture_pane(&self, pane_id: &PaneId, lines: usize) -> Result<String, TmuxError> {
@@ -548,6 +538,34 @@ impl TmuxBackend for SystemTmuxBackend {
             pane_id: pane_id.clone(),
         })
     }
+}
+
+fn parse_pane_records_from_output(
+    output: &str,
+    processes: &[ProcessRow],
+) -> Result<Vec<TmuxPaneRecord>, TmuxError> {
+    let mut records = Vec::new();
+    let mut skipped_non_record_lines = 0usize;
+    for line in output.lines().filter(|line| !line.trim().is_empty()) {
+        let mut record = match parse_pane_record(line) {
+            Ok(record) => record,
+            Err(TmuxError::Parse(_)) if !line.contains('\t') => {
+                skipped_non_record_lines += 1;
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
+        record.runtime_command = record
+            .pane_pid
+            .and_then(|pane_pid| foreground_command_from_processes(pane_pid, processes));
+        records.push(record);
+    }
+    if records.is_empty() && skipped_non_record_lines > 0 {
+        return Err(TmuxError::Parse(format!(
+            "all tmux pane records were malformed; skipped {skipped_non_record_lines} non-record line(s). Check GUI subprocess locale settings."
+        )));
+    }
+    Ok(records)
 }
 
 fn parse_pane_record(line: &str) -> Result<TmuxPaneRecord, TmuxError> {
@@ -706,8 +724,8 @@ fn sanitize_tmux_name(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        InventoryLoadPolicy, KillPaneResult, RenameWindowResult, SendInputResult,
-        SpawnWindowResult, TmuxAdapter, TmuxBackend, TmuxError, TmuxPaneRecord,
+        parse_pane_records_from_output, InventoryLoadPolicy, KillPaneResult, RenameWindowResult,
+        SendInputResult, SpawnWindowResult, TmuxAdapter, TmuxBackend, TmuxError, TmuxPaneRecord,
     };
     use crate::app::{
         fixtures::{inventory, PaneBuilder},
@@ -835,6 +853,39 @@ mod tests {
             current_path: Some(PathBuf::from("/workspace")),
             activity_unix_millis: None,
         }
+    }
+
+    #[test]
+    fn parse_pane_records_skips_malformed_lines() {
+        let output = "$1\talpha\t@1\tmain\t%1\ttitle\tzsh\t1234\t/workspace\t1778450000\nmalformed-only-pane-title\n$2\tbeta\t@2\tmain\t%2\ttitle\tzsh\t1235\t/workspace\t1778450001\n";
+
+        let records = parse_pane_records_from_output(output, &[]).expect("records should parse");
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].session_name, "alpha");
+        assert_eq!(records[1].session_name, "beta");
+    }
+
+    #[test]
+    fn parse_pane_records_errors_when_all_lines_are_malformed() {
+        let output = "$1_alpha_@1_main_%1_title_zsh_1234_/workspace_1778450000\n";
+
+        let error = parse_pane_records_from_output(output, &[])
+            .expect_err("all-malformed output should stay diagnostic");
+
+        assert!(error
+            .to_string()
+            .contains("all tmux pane records were malformed"));
+    }
+
+    #[test]
+    fn parse_pane_records_errors_on_truncated_tabbed_records() {
+        let output = "$1\talpha\t@1\tmain\t%1\n";
+
+        let error = parse_pane_records_from_output(output, &[])
+            .expect_err("truncated pane records should not be hidden");
+
+        assert!(error.to_string().contains("missing pane_title"));
     }
 
     #[test]

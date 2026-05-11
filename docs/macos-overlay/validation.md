@@ -119,9 +119,9 @@ headless snapshots with OCR semantic checks, and app bundle smoke. Use plain
 - Global hotkey behavior should remain manual/local. Tests should use
   `FOREMAN_OVERLAY_SHOW_ON_LAUNCH=1` instead of trying to synthesize the hotkey.
 - The normal persisted hotkey UI uses `KeyboardShortcuts.Recorder` in the menu
-  bar Settings panel, while Foreman registers the chosen shortcut through its own
-  lifecycle-safe Carbon controller.
-- The default persisted hotkey is `Ctrl+F`.
+  bar Settings panel, while Foreman handles the selected shortcut through the
+  same `KeyboardShortcuts` package to avoid duplicate Carbon registrations.
+- The default persisted hotkey is `Cmd+Option+F`.
 - `FOREMAN_OVERLAY_HOTKEY` can override the persisted shortcut for local testing,
   using strings like `control+f` or `cmd+shift+space`.
 - `FOREMAN_OVERLAY_TERMINAL_ACTIVATION` controls terminal foregrounding after
