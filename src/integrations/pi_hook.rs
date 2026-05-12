@@ -9,7 +9,7 @@ use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use sysinfo::{Pid, System};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
 const LOCK_RETRY_SLEEP: Duration = Duration::from_millis(10);
 const LOCK_TIMEOUT: Duration = Duration::from_secs(2);
@@ -262,7 +262,7 @@ fn stale_dead_processes(
     now_unix_ms: u64,
     current_process_id: Option<&str>,
 ) -> Vec<String> {
-    state
+    let candidates: Vec<(String, Pid)> = state
         .active_processes
         .iter()
         .filter_map(|(process_id, started_at)| {
@@ -270,20 +270,31 @@ fn stale_dead_processes(
                 return None;
             }
             let age = Duration::from_millis(now_unix_ms.saturating_sub(*started_at));
-            if age < STALE_ACTIVE_PROCESS_AFTER || process_is_running(process_id) {
+            if age < STALE_ACTIVE_PROCESS_AFTER {
                 return None;
             }
-            Some(process_id.clone())
+            process_id
+                .parse::<u32>()
+                .ok()
+                .map(|pid| (process_id.clone(), Pid::from_u32(pid)))
         })
-        .collect()
-}
+        .collect();
+    if candidates.is_empty() {
+        return Vec::new();
+    }
 
-fn process_is_running(process_id: &str) -> bool {
-    let Ok(process_id) = process_id.parse::<u32>() else {
-        return true;
-    };
-    let system = System::new_all();
-    system.process(Pid::from_u32(process_id)).is_some()
+    let pids: Vec<Pid> = candidates.iter().map(|(_, pid)| *pid).collect();
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&pids),
+        true,
+        ProcessRefreshKind::nothing(),
+    );
+
+    candidates
+        .into_iter()
+        .filter_map(|(process_id, pid)| system.process(pid).is_none().then_some(process_id))
+        .collect()
 }
 
 fn compact_resolved_events(
