@@ -2425,12 +2425,24 @@ fn pi_extension_template() -> String {
     r#"import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { spawnSync } from "node:child_process";
 
-function runHook(event: string) {
+let turnCounter = 0;
+let activeRunId: string | undefined;
+const processId = String(process.pid);
+
+function nextRunId(): string {
+  turnCounter += 1;
+  return `${processId}:${Date.now()}:${turnCounter}`;
+}
+
+function runHook(event: string, runId?: string) {
   const paneId = process.env.TMUX_PANE;
   if (!paneId) {
     return;
   }
-  const args = ["--event", event, "--pane-id", paneId];
+  const args = ["--event", event, "--pane-id", paneId, "--process-id", processId];
+  if (runId) {
+    args.push("--run-id", runId);
+  }
   const result = spawnSync("foreman-pi-hook", args, { stdio: "inherit" });
   if ((result.status ?? 1) !== 0) {
     throw new Error(`foreman-pi-hook failed for ${event}`);
@@ -2439,10 +2451,12 @@ function runHook(event: string) {
 
 export default function (pi: ExtensionAPI) {
   pi.on("agent_start", async () => {
-    runHook("agent-start");
+    activeRunId = nextRunId();
+    runHook("agent-start", activeRunId);
   });
   pi.on("agent_end", async () => {
-    runHook("agent-end");
+    runHook("agent-end", activeRunId);
+    activeRunId = undefined;
   });
   pi.on("session_shutdown", async () => {
     runHook("session-shutdown");

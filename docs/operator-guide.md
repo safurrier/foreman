@@ -352,6 +352,9 @@ Example repo-local `.codex/hooks.json`:
 
 `foreman-pi-hook` is called by a Pi extension on Pi lifecycle events. The
 bridge writes the per-pane signal file that Foreman overlays in native mode.
+The generated extension passes a per-turn run id and process id so overlapping
+Pi child processes, including `pi-subagents` children that share `TMUX_PANE`,
+do not mark the pane idle until every active run for that pane has ended.
 
 Override the native signal path with:
 
@@ -366,18 +369,31 @@ Example project-local `.pi/extensions/foreman.ts`:
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { spawnSync } from "node:child_process";
 
+let turnCounter = 0;
+let activeRunId: string | undefined;
+const processId = String(process.pid);
+
 export default function (pi: ExtensionAPI) {
-  const runHook = (event: string) => {
+  const runHook = (event: string, runId?: string) => {
     const paneId = process.env.TMUX_PANE;
     if (!paneId) {
       return;
     }
-    const args = ["--event", event, "--pane-id", paneId];
+    const args = ["--event", event, "--pane-id", paneId, "--process-id", processId];
+    if (runId) {
+      args.push("--run-id", runId);
+    }
     spawnSync("foreman-pi-hook", args, { stdio: "inherit" });
   };
 
-  pi.on("agent_start", async () => runHook("agent-start"));
-  pi.on("agent_end", async () => runHook("agent-end"));
+  pi.on("agent_start", async () => {
+    activeRunId = `${processId}:${Date.now()}:${++turnCounter}`;
+    runHook("agent-start", activeRunId);
+  });
+  pi.on("agent_end", async () => {
+    runHook("agent-end", activeRunId);
+    activeRunId = undefined;
+  });
   pi.on("session_shutdown", async () => runHook("session-shutdown"));
 }
 ```
