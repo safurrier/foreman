@@ -6,6 +6,10 @@
 /.ai/handoffs/
 /.ai/research/
 /.ai/plans/**/artifacts/
+/.ai/hk/*/artifacts/**
+!/.ai/hk/*/artifacts/
+!/.ai/hk/*/artifacts/README.md
+!/.ai/hk/*/artifacts/manifest.json
 /.claude/settings.local.json
 /.codex/hooks.json
 /.pi/extensions/foreman.ts

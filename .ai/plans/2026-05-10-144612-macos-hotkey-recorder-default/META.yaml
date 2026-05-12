@@ -1,0 +1,6 @@
+slug: macos-hotkey-recorder-default
+branch: fix/macos-hotkey-recorder-default
+created: 2026-05-10
+pr:
+status: active
+source: diagnose Settings shortcut recorder not accepting changes and change default global hotkey; Cmd+Shift+F proved system-reserved, so default moved to Cmd+Option+F

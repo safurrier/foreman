@@ -60,6 +60,8 @@ impl AgentSnapshotBuilder {
             integration_mode: self.integration_mode,
             activity_score: self.activity_score,
             debounce_ticks: self.debounce_ticks,
+            active_run_count: None,
+            last_status_change_unix_millis: None,
         }
     }
 }

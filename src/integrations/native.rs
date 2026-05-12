@@ -12,6 +12,9 @@ pub struct NativeSignal {
     pub status: AgentStatus,
     pub activity_score: u64,
     pub recent_activity_unix_millis: Option<u64>,
+    pub active_run_count: Option<u32>,
+    pub last_activity_unix_millis: Option<u64>,
+    pub last_status_change_unix_millis: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -115,12 +118,16 @@ impl NativeSignalSource for FileNativeSignalSource {
         let payload = fs::read_to_string(path)?;
         let raw: RawNativeSignal = serde_json::from_str(&payload)?;
         let status = parse_native_status(&raw.status)?;
+        let last_activity_unix_millis = raw.last_activity_unix_millis;
         Ok(Some(NativeSignal {
             status,
             activity_score: raw
                 .activity_score
                 .unwrap_or_else(|| native_activity_score(status)),
-            recent_activity_unix_millis,
+            recent_activity_unix_millis: last_activity_unix_millis.or(recent_activity_unix_millis),
+            active_run_count: raw.active_run_count,
+            last_activity_unix_millis,
+            last_status_change_unix_millis: raw.last_status_change_unix_millis,
         }))
     }
 }
@@ -129,12 +136,25 @@ impl NativeSignalSource for FileNativeSignalSource {
 struct RawNativeSignal {
     status: String,
     activity_score: Option<u64>,
+    active_run_count: Option<u32>,
+    last_activity_unix_millis: Option<u64>,
+    last_status_change_unix_millis: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
 struct SignalFile<'a> {
     status: &'a str,
     activity_score: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    schema_version: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    status_rank: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    active_run_count: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_activity_unix_millis: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_status_change_unix_millis: Option<u64>,
 }
 
 pub fn signal_for_status(status: AgentStatus) -> NativeSignal {
@@ -142,6 +162,9 @@ pub fn signal_for_status(status: AgentStatus) -> NativeSignal {
         status,
         activity_score: native_activity_score(status),
         recent_activity_unix_millis: None,
+        active_run_count: None,
+        last_activity_unix_millis: None,
+        last_status_change_unix_millis: None,
     }
 }
 
@@ -158,9 +181,17 @@ pub fn write_signal_file(
         .expect("system clock should be after unix epoch")
         .as_nanos();
     let temp_path = native_dir.join(format!(".{pane_id}.{unique_suffix}.tmp"));
+    let has_v2_fields = signal.active_run_count.is_some()
+        || signal.last_activity_unix_millis.is_some()
+        || signal.last_status_change_unix_millis.is_some();
     let payload = SignalFile {
         status: status_label(signal.status),
         activity_score: signal.activity_score,
+        schema_version: has_v2_fields.then_some(2),
+        status_rank: has_v2_fields.then_some(status_rank(signal.status)),
+        active_run_count: signal.active_run_count,
+        last_activity_unix_millis: signal.last_activity_unix_millis,
+        last_status_change_unix_millis: signal.last_status_change_unix_millis,
     };
     let contents = serde_json::to_vec(&payload)?;
     fs::write(&temp_path, contents)?;
@@ -215,6 +246,8 @@ pub fn apply_native_signals<S: NativeSignalSource>(
                             integration_mode: IntegrationMode::Native,
                             activity_score: signal.activity_score,
                             debounce_ticks: 0,
+                            active_run_count: signal.active_run_count,
+                            last_status_change_unix_millis: signal.last_status_change_unix_millis,
                         });
                         pane.activity_unix_millis = signal
                             .recent_activity_unix_millis
@@ -296,6 +329,10 @@ fn native_activity_score(status: AgentStatus) -> u64 {
     }
 }
 
+pub fn status_rank(status: AgentStatus) -> u8 {
+    status.attention_rank()
+}
+
 fn status_label(status: AgentStatus) -> &'static str {
     match status {
         AgentStatus::Working => "working",
@@ -310,7 +347,7 @@ fn status_label(status: AgentStatus) -> &'static str {
 mod tests {
     use super::{
         apply_native_signals, compatibility_fallback_summary, signal_for_status, write_signal_file,
-        FileNativeSignalSource, NativeOverlaySummary, NativeSignalSource,
+        FileNativeSignalSource, NativeOverlaySummary, NativeSignal, NativeSignalSource,
     };
     use crate::app::{
         inventory, AgentStatus, HarnessKind, IntegrationMode, PaneBuilder, SessionBuilder,
@@ -349,6 +386,35 @@ mod tests {
         let contents =
             std::fs::read_to_string(temp_dir.path().join("%9.json")).expect("signal should exist");
         assert_eq!(contents, r#"{"status":"working","activity_score":120}"#);
+    }
+
+    #[test]
+    fn v2_signal_file_round_trips_explicit_activity_fields() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        write_signal_file(
+            temp_dir.path(),
+            "%9",
+            &NativeSignal {
+                status: AgentStatus::Working,
+                activity_score: 120,
+                recent_activity_unix_millis: Some(200),
+                active_run_count: Some(2),
+                last_activity_unix_millis: Some(200),
+                last_status_change_unix_millis: Some(100),
+            },
+        )
+        .expect("write should succeed");
+
+        let signal = FileNativeSignalSource::new(temp_dir.path().to_path_buf())
+            .signal_for_pane(&"%9".into())
+            .expect("signal read should succeed")
+            .expect("signal should exist");
+
+        assert_eq!(signal.status, AgentStatus::Working);
+        assert_eq!(signal.active_run_count, Some(2));
+        assert_eq!(signal.recent_activity_unix_millis, Some(200));
+        assert_eq!(signal.last_activity_unix_millis, Some(200));
+        assert_eq!(signal.last_status_change_unix_millis, Some(100));
     }
 
     #[test]

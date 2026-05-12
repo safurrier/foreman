@@ -6,7 +6,7 @@ import ForemanOverlayCore
 public extension KeyboardShortcuts.Name {
     static let toggleForemanOverlay = Self(
         "toggleForemanOverlay",
-        default: .init(.f, modifiers: [.control])
+        default: .init(.f, modifiers: [.command, .option])
     )
 }
 
@@ -21,7 +21,8 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 public struct SettingsView: View {
     @ObservedObject var preferences: OverlayPreferences
     let hotkeyStatus: String?
-    let onReset: () -> Void
+    let onClearShortcut: () -> Void
+    let onRestoreDefault: () -> Void
     let onShortcutChanged: () -> Void
     @State private var section: SettingsSection
 
@@ -29,12 +30,14 @@ public struct SettingsView: View {
         preferences: OverlayPreferences,
         initialSection: String = "General",
         hotkeyStatus: String? = nil,
-        onReset: @escaping () -> Void,
+        onClearShortcut: @escaping () -> Void,
+        onRestoreDefault: @escaping () -> Void,
         onShortcutChanged: @escaping () -> Void = {}
     ) {
         self.preferences = preferences
         self.hotkeyStatus = hotkeyStatus
-        self.onReset = onReset
+        self.onClearShortcut = onClearShortcut
+        self.onRestoreDefault = onRestoreDefault
         self.onShortcutChanged = onShortcutChanged
         _section = State(initialValue: SettingsSection(rawValue: initialSection) ?? .general)
     }
@@ -87,11 +90,16 @@ public struct SettingsView: View {
                     .labelsHidden()
                 }
                 HStack {
-                    Button("Reset Shortcut") { onReset() }
-                    Text("Default: Ctrl+F")
+                    Button("Clear Shortcut") { onClearShortcut() }
+                    Button("Restore Default") { onRestoreDefault() }
+                    Text("Default: Cmd+Option+F")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                Text("Click the shortcut field, then press a key combination. Clear removes the global shortcut; Restore Default sets Cmd+Option+F.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let hotkeyStatus {
                     Text(hotkeyStatus)
                         .font(.caption)

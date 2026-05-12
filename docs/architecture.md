@@ -186,8 +186,8 @@ testable as the app grows.
 
 - The crate builds and tests from a clean checkout or Git worktree.
 - Generated artifacts are deterministic or ignored.
-- Plan artifacts under `.ai/plans/` are documentation inputs, not runtime
-  dependencies.
+- HK exports under `.ai/hk/` and legacy plan artifacts under `.ai/plans/` are
+  documentation inputs, not runtime dependencies.
 
 ### Traceability and observability
 

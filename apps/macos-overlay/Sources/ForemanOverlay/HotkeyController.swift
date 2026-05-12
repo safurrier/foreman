@@ -3,6 +3,8 @@ import Carbon.HIToolbox
 import Foundation
 import KeyboardShortcuts
 
+import ForemanOverlayUI
+
 enum HotkeySource: String {
     case environment = "environment override"
     case recorder = "settings recorder"
@@ -15,7 +17,13 @@ struct HotkeyStatus {
     let message: String
 
     var settingsText: String {
-        isRegistered ? "Registered via \(source.rawValue)" : "Not registered: \(message)"
+        if isRegistered {
+            return source == .recorder ? "Configured via \(source.rawValue)" : "Registered via \(source.rawValue)"
+        }
+        if message == "paused while Settings is open" {
+            return "Paused while Settings is open"
+        }
+        return "Not registered: \(message)"
     }
 }
 
@@ -24,7 +32,7 @@ struct HotkeySpec {
     let modifiers: UInt32
     let label: String
 
-    static let defaultSpec = HotkeySpec(keyCode: UInt32(kVK_ANSI_F), modifiers: UInt32(controlKey), label: "⌃F")
+    static let defaultSpec = HotkeySpec(keyCode: UInt32(kVK_ANSI_F), modifiers: UInt32(cmdKey | optionKey), label: "⌥⌘F")
 
     static let userDefaultsKey = "ForemanOverlayHotkey"
 
@@ -94,6 +102,9 @@ final class HotkeyController: @unchecked Sendable {
     private var eventHandler: EventHandlerRef?
     private var spec: HotkeySpec
     private var source: HotkeySource
+    private var isSuspended = false
+    private var retryWorkItem: DispatchWorkItem?
+    private var registeredWithKeyboardShortcuts = false
     private let onPressed: @MainActor @Sendable () -> Void
     private(set) var status: HotkeyStatus
 
@@ -111,12 +122,52 @@ final class HotkeyController: @unchecked Sendable {
     }
 
     func update(spec: HotkeySpec, source: HotkeySource? = nil) {
+        cancelRetry()
         unregister()
         removeEventHandler()
         self.spec = spec
         if let source { self.source = source }
         status = HotkeyStatus(label: spec.label, source: self.source, isRegistered: false, message: "registration pending")
-        register()
+        if isSuspended {
+            status = HotkeyStatus(label: spec.label, source: self.source, isRegistered: false, message: "paused while Settings is open")
+        } else {
+            register()
+        }
+    }
+
+    func setSuspended(_ suspended: Bool) {
+        guard source == .environment else { return }
+        guard suspended != isSuspended else { return }
+        isSuspended = suspended
+        unregister()
+        removeEventHandler()
+        status = HotkeyStatus(
+            label: spec.label,
+            source: source,
+            isRegistered: false,
+            message: suspended ? "paused while Settings is open" : "registration pending"
+        )
+        if !suspended {
+            register()
+        }
+    }
+
+    private func cancelRetry() {
+        retryWorkItem?.cancel()
+        retryWorkItem = nil
+    }
+
+    private func scheduleRetry(after delay: TimeInterval = 0.25, attemptsRemaining: Int = 5) {
+        cancelRetry()
+        guard attemptsRemaining > 0, !isSuspended else { return }
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self, !self.isSuspended else { return }
+            self.unregister()
+            self.removeEventHandler()
+            self.register(attemptsRemaining: attemptsRemaining - 1)
+        }
+        retryWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
     }
 
     private func removeEventHandler() {
@@ -127,13 +178,32 @@ final class HotkeyController: @unchecked Sendable {
     }
 
     private func unregister() {
+        if registeredWithKeyboardShortcuts {
+            KeyboardShortcuts.removeHandler(for: .toggleForemanOverlay)
+            registeredWithKeyboardShortcuts = false
+        }
         if let hotKeyRef {
             UnregisterEventHotKey(hotKeyRef)
             self.hotKeyRef = nil
         }
     }
 
-    private func register() {
+    private func register(attemptsRemaining: Int = 5) {
+        if source == .recorder {
+            KeyboardShortcuts.removeHandler(for: .toggleForemanOverlay)
+            KeyboardShortcuts.onKeyUp(for: .toggleForemanOverlay) { [weak self] in
+                guard let self else { return }
+                Task { @MainActor in self.onPressed() }
+            }
+            registeredWithKeyboardShortcuts = true
+            let shortcut = KeyboardShortcuts.getShortcut(for: .toggleForemanOverlay)
+            let label = shortcut == nil ? "—" : spec.label
+            let isConfigured = shortcut != nil
+            let message = isConfigured ? "configured" : "no shortcut configured"
+            status = HotkeyStatus(label: label, source: source, isRegistered: isConfigured, message: message)
+            NSLog("Foreman overlay hotkey configured from \(source.rawValue): \(label)")
+            return
+        }
         guard let dispatcherTarget = GetEventDispatcherTarget() else {
             status = HotkeyStatus(label: spec.label, source: source, isRegistered: false, message: "Carbon event dispatcher target unavailable")
             NSLog("Foreman overlay hotkey registration failed: \(status.message)")
@@ -144,6 +214,9 @@ final class HotkeyController: @unchecked Sendable {
         guard registerError == noErr, hotKeyRef != nil else {
             status = HotkeyStatus(label: spec.label, source: source, isRegistered: false, message: "Carbon registration failed with OSStatus \(registerError)")
             NSLog("Foreman overlay hotkey registration failed: \(status.message)")
+            if registerError == OSStatus(eventHotKeyExistsErr), attemptsRemaining > 0 {
+                scheduleRetry(attemptsRemaining: attemptsRemaining)
+            }
             return
         }
 
@@ -161,6 +234,7 @@ final class HotkeyController: @unchecked Sendable {
             NSLog("Foreman overlay hotkey handler installation failed: \(status.message)")
             return
         }
+        cancelRetry()
         status = HotkeyStatus(label: spec.label, source: source, isRegistered: true, message: "registered")
         NSLog("Foreman overlay hotkey registered from \(source.rawValue): \(spec.label)")
     }

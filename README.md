@@ -180,7 +180,7 @@ the `alerter --sound` notification-sound prefix path that better respects Focus
 - [Operator Guide](docs/operator-guide.md) - install, setup, dashboard, config,
   hooks, notifications, and troubleshooting
 - [Repo Tour](docs/tour.md) - first read for contributors
-- [Workflow Guide](docs/workflows.md) - plan workflow, validation ladder, and
+- [Workflow Guide](docs/workflows.md) - HK lifecycle, validation ladder, and
   release process
 - [Architecture](docs/architecture.md) - system boundaries and module map
 - [macOS App Bundle](docs/macos-overlay/app-bundle.md) - build, install, launch, and validate `Foreman.app`
@@ -191,7 +191,7 @@ the `alerter --sound` notification-sound prefix path that better respects Focus
 
 ```bash
 git checkout -b feat/<slug>
-mise run plan -- <slug>
+hk start <slug> --plan "Describe the intended change" --target .
 mise run check
 ```
 
@@ -209,6 +209,7 @@ Useful tasks:
 | `mise run verify` | Heavy validation |
 | `mise run verify-release` | Release-confidence operator gauntlet |
 | `mise run pr-preflight` | Large-PR checklist and cheap merge-prep guardrails |
+| `mise run plan -- <slug>` | Legacy shim that points new work to HK |
 | `mise run validate-macos-overlay-change` | Required validation for macOS overlay/app/control-API changes |
 | `mise run install-macos-overlay-app` | Build, install, and reset `~/Applications/Foreman.app` |
 | `mise run verify-macos-overlay-app` | Non-activating app-bundle smoke test |

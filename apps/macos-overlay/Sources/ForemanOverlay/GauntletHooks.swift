@@ -1,6 +1,7 @@
 import AppKit
 import Carbon.HIToolbox
 import Darwin
+import KeyboardShortcuts
 
 extension AppDelegate {
     func runScriptedGauntletIfRequested() {
@@ -74,8 +75,37 @@ extension AppDelegate {
             try? await Task.sleep(for: .milliseconds(700))
             postKey(keyCode: UInt16(kVK_ANSI_R), characters: "r", modifiers: .command)
             try? await Task.sleep(for: .milliseconds(500))
+            runShortcutSettingsGauntlet()
             NSApp.terminate(nil)
         }
+    }
+
+    func runShortcutSettingsGauntlet() {
+        let defaultsKey = "KeyboardShortcuts_toggleForemanOverlay"
+        let previousShortcut = UserDefaults.standard.object(forKey: defaultsKey)
+        defer {
+            if let previousShortcut {
+                UserDefaults.standard.set(previousShortcut, forKey: defaultsKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: defaultsKey)
+            }
+        }
+
+        openSettings()
+        clearShortcut()
+        guard KeyboardShortcuts.getShortcut(for: .toggleForemanOverlay) == nil else {
+            NSLog("overlay gauntlet shortcut clear failed")
+            exit(74)
+        }
+        restoreDefaultShortcut()
+        guard let shortcut = KeyboardShortcuts.getShortcut(for: .toggleForemanOverlay),
+              shortcut.carbonKeyCode == Int(HotkeySpec.defaultSpec.keyCode),
+              shortcut.carbonModifiers == Int(HotkeySpec.defaultSpec.modifiers),
+              KeyboardShortcuts.isEnabled(for: .toggleForemanOverlay) else {
+            NSLog("overlay gauntlet shortcut restore failed")
+            exit(75)
+        }
+        NSLog("overlay gauntlet shortcut settings passed")
     }
 
     func keyCode(for character: Character) -> UInt16 {

@@ -82,16 +82,20 @@ public final class OverlayStore: ObservableObject {
             return visible
         case .attentionFirst:
             return visible.sorted { lhs, rhs in
-                let lhsPriority = statusPriority(lhs.status)
-                let rhsPriority = statusPriority(rhs.status)
+                let lhsPriority = lhs.statusRank ?? statusPriority(lhs.status)
+                let rhsPriority = rhs.statusRank ?? statusPriority(rhs.status)
                 if lhsPriority != rhsPriority { return lhsPriority < rhsPriority }
-                if lhs.activityScore != rhs.activityScore { return lhs.activityScore > rhs.activityScore }
+                let lhsActivity = lhs.lastActivityUnixMs ?? lhs.activityScore
+                let rhsActivity = rhs.lastActivityUnixMs ?? rhs.activityScore
+                if lhsActivity != rhsActivity { return lhsActivity > rhsActivity }
                 if lhs.navigationTitle != rhs.navigationTitle { return lhs.navigationTitle < rhs.navigationTitle }
                 return lhs.id < rhs.id
             }
         case .recentFirst:
             return visible.sorted { lhs, rhs in
-                if lhs.activityScore != rhs.activityScore { return lhs.activityScore > rhs.activityScore }
+                let lhsActivity = lhs.lastActivityUnixMs ?? lhs.activityScore
+                let rhsActivity = rhs.lastActivityUnixMs ?? rhs.activityScore
+                if lhsActivity != rhsActivity { return lhsActivity > rhsActivity }
                 if lhs.navigationTitle != rhs.navigationTitle { return lhs.navigationTitle < rhs.navigationTitle }
                 return lhs.id < rhs.id
             }
@@ -117,8 +121,8 @@ public final class OverlayStore: ObservableObject {
 
     private func statusPriority(_ status: String) -> Int {
         switch status {
-        case "needs-attention": 0
-        case "error": 1
+        case "error": 0
+        case "needs-attention": 1
         case "working": 2
         case "idle": 3
         default: 4

@@ -24,8 +24,8 @@ durable implementation boundaries live in [`architecture.md`](architecture.md).
 
 1. [`../SPEC.md`](../SPEC.md) for the correctness envelope
 2. [`architecture.md`](architecture.md) for architectural boundaries
-3. [`workflows.md`](workflows.md) for plan, validation, and environment rules
-4. [`.ai/plans/AGENTS.md`](../.ai/plans/AGENTS.md) for the plan artifact contract
+3. [`workflows.md`](workflows.md) for HK lifecycle, validation, and environment rules
+4. [`.ai/hk/AGENTS.md`](../.ai/hk/AGENTS.md) for generated HK export rules
 
 ## Repo Map
 
@@ -37,23 +37,25 @@ durable implementation boundaries live in [`architecture.md`](architecture.md).
 | `src/integrations/` | Harness detection plus native overlays |
 | `src/services/` | Notifications, PRs, logging, and system stats |
 | `tests/` | Unit, contract, tmux smoke, runtime smoke, and opt-in real harness E2E |
-| `.ai/plans/` | Task-local specs, logs, validation history, and retrospectives |
+| `.ai/hk/` | Generated Harness Kit handoff exports for meaningful work |
+| `.ai/plans/` | Legacy task-local specs, logs, validation history, and retrospectives |
 | `.ai/validation/` | Stable UX and release evidence consumed by CI and release workflows |
 
 ## Daily Loop
 
 1. Create or stay on the feature branch for the slice.
-2. Run `mise run plan -- <slug>` for any meaningful unit of work.
+2. Start meaningful work with `hk start <slug> --plan "..." --target .`.
 3. Implement the smallest vertical slice that closes a spec or workflow gap.
-4. Keep the active plan current: `META.yaml`, `TODO.md`, `LEARNING_LOG.md`, and
-   `VALIDATION.md`.
+4. Record validation with `hk validate --check <name> --why "..." -- <command>`.
 5. Run `mise run check`.
-6. Before pushing, sync plan/spec/context/docs.
+6. Before pushing, run `hk sync --target .`, update spec/context/docs, and export
+   `.ai/hk/<work-id>/` for PR-sized work.
 7. Run `mise run verify` before merge.
 
 ## Where Lessons Live
 
-- `.ai/plans/*` is working memory and evidence for a slice.
+- `.ai/hk/*` is generated HK review/handoff evidence for a slice.
+- `.ai/plans/*` is legacy working memory and historical evidence.
 - `.ai/validation/*` is stable review and release proof.
 - `.ai/handoffs/*` and `.ai/research/*` are scratch by default and should not
   become canonical repo context.

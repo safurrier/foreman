@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import KeyboardShortcuts
 import SwiftUI
 
 import ForemanOverlayCore
@@ -143,7 +144,17 @@ func render(state: SnapshotState) throws -> URL {
     let renderWidth: CGFloat
     let renderHeight: CGFloat
     if state.renderSettings {
-        view = AnyView(SettingsView(preferences: store.preferences, onReset: {}))
+        let shortcutDefaultsKey = "KeyboardShortcuts_toggleForemanOverlay"
+        let previousShortcut = UserDefaults.standard.object(forKey: shortcutDefaultsKey)
+        KeyboardShortcuts.reset(.toggleForemanOverlay)
+        defer {
+            if let previousShortcut {
+                UserDefaults.standard.set(previousShortcut, forKey: shortcutDefaultsKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: shortcutDefaultsKey)
+            }
+        }
+        view = AnyView(SettingsView(preferences: store.preferences, onClearShortcut: {}, onRestoreDefault: {}))
         renderWidth = 640
         renderHeight = 560
     } else {

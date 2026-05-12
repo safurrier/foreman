@@ -308,6 +308,10 @@ pub struct AgentSnapshot {
     pub integration_mode: IntegrationMode,
     pub activity_score: u64,
     pub debounce_ticks: u8,
+    #[serde(default)]
+    pub active_run_count: Option<u32>,
+    #[serde(default)]
+    pub last_status_change_unix_millis: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

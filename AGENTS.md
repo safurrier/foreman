@@ -9,10 +9,14 @@ record, and `docs/workflows.md` as the validation/process guide.
 
 ## How to Work Here
 
-For meaningful work, create a feature branch, run `mise run plan -- <slug>`, and
-keep the active plan current as scope changes. Use the smallest validation layer
-that proves the slice, then run `mise run check` before push and `mise run
-verify` before merge or runtime/release-sensitive changes.
+For meaningful work, create a feature branch and use the Harness Kit lifecycle:
+`hk start <slug> --plan "..." --target .`, `hk validate --check <name> --why
+"..." -- <command>`, `hk sync --target .`, and `hk ready --target .`. Export a
+compact handoff package to `.ai/hk/<work-id>/` for PR-sized work. Historical
+`.ai/plans/**` directories remain useful archaeology, but new work should not
+create them by default. Use the smallest validation layer that proves the slice,
+then run `mise run check` before push and `mise run verify` before merge or
+runtime/release-sensitive changes.
 
 ## Commands
 
@@ -40,14 +44,22 @@ Claude, Codex, and Pi E2Es with `mise run verify-native`.
   in-place. **BECAUSE** partial reads create false compatibility fallback and
   flaky runtime tests.
 
-- **DO** promote recurring workflow lessons out of `.ai/plans/*` into `docs/`
-  or `AGENTS.md`. **NOT** treat historical plan logs as canonical truth.
-  **BECAUSE** plan artifacts are evidence for a slice, not long-term onboarding.
+- **DO** promote recurring workflow lessons out of `.ai/plans/*` or `.ai/hk/*`
+  into `docs/` or `AGENTS.md`. **NOT** treat historical plan logs or generated
+  HK exports as canonical truth. **BECAUSE** lifecycle artifacts are evidence
+  for a slice, not long-term onboarding.
 
-- **DO** commit structured `.ai/plans/` and `.ai/validation/` paths that the
-  workflow depends on. **NOT** commit `.ai/handoffs/`, `.ai/research/`, or
-  plan-local artifact scratch. **BECAUSE** only the structured plan and
-  validation roots are durable repo context.
+- **DO** use HK for new meaningful work and commit compact `.ai/hk/<work-id>/`
+  exports when a handoff package is useful. **NOT** hand-author new
+  `.ai/plans/**` directories unless maintaining legacy workflow evidence.
+  **BECAUSE** HK is now the lifecycle source of truth while `.ai/plans/**` is
+  historical.
+
+- **DO** commit structured `.ai/hk/`, legacy `.ai/plans/`, and `.ai/validation/`
+  paths that the workflow depends on. **NOT** commit `.ai/handoffs/`,
+  `.ai/research/`, HK artifact payloads, or plan-local artifact scratch unless
+  explicitly needed for review. **BECAUSE** only compact handoff exports and
+  stable validation roots are durable repo context.
 
 - **DO** check the active Docker context when `mise run verify` fails in the
   Docker phase. **NOT** assume the Rust app regressed first. **BECAUSE** the
@@ -120,10 +132,11 @@ Claude, Codex, and Pi E2Es with `mise run verify-native`.
   Option+Delete, or Cmd+A paths. **BECAUSE** the overlay should feel like a
   native Mac command palette, not a custom terminal prompt.
 
-- **DO** register the persisted macOS overlay shortcut through Foreman's
-  `HotkeyController` and surface its Carbon registration status. **NOT** rely on
-  `KeyboardShortcuts` handler state as proof the global hook works. **BECAUSE**
-  the recorder is persistence/UI, while Carbon registration is the runtime seam.
+- **DO** use the `KeyboardShortcuts` package for both persisted macOS overlay
+  shortcut recording and normal global shortcut handling. **NOT** register a
+  second custom Carbon hotkey for the same persisted shortcut. **BECAUSE** mixed
+  ownership races the recorder and can leave Settings showing stale registration
+  failures.
 
 - **DO** run `mise run validate-macos-overlay-change` for Swift overlay,
   app-bundle, keyboard/focus, screenshot, or control-API changes. **NOT** treat
@@ -136,12 +149,13 @@ Claude, Codex, and Pi E2Es with `mise run verify-native`.
 | Path | What's there |
 |---|---|
 | `docs/tour.md` | First read, repo map, and daily loop |
-| `docs/workflows.md` | Plan artifacts, validation ladder, and environment notes |
+| `docs/workflows.md` | HK lifecycle, validation ladder, and environment notes |
 | `docs/architecture.md` | System boundaries, invariants, and module map |
 | `docs/macos-overlay/` | Swift macOS overlay architecture, app bundle/install notes, UX checklist, and validation ladder |
 | `.agent/skills/foreman-swift-overlay-ux/` | Foreman-specific Swift overlay UX review workflow |
 | `.agent/skills/foreman-swift-overlay-validation/` | Foreman-specific Swift overlay validation workflow |
-| `.ai/plans/AGENTS.md` | Plan artifact contract and lifecycle |
+| `.ai/hk/AGENTS.md` | Generated HK export rules |
+| `.ai/plans/AGENTS.md` | Legacy plan artifact contract |
 | `README.md` | Human quickstart, install, dashboard keys, and status matrix |
 
 <!-- generated-by: context-engineering@2.2.0 | last-updated: 2026-04-30 -->

@@ -9,7 +9,7 @@ Foreman Help
 T/V scroll • Esc close
 ATTENTION
 Global
-• Default hotkey CtrI+F toggles the overlay
+• Default hotkey Cmd+Option+F toggles the overlay
 • Esc closes help, cancels compose, then closes the overlay
 • Cmdt, opens Settings
 • Cmd+R refreshes agents

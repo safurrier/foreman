@@ -24,6 +24,12 @@ struct Cli {
     #[arg(long)]
     pane_id: Option<String>,
 
+    #[arg(long)]
+    run_id: Option<String>,
+
+    #[arg(long)]
+    process_id: Option<String>,
+
     #[arg(long, value_enum)]
     event: EventArg,
 }
@@ -86,7 +92,9 @@ fn main() {
 
 fn run(cli: Cli) -> Result<(), HookCliError> {
     let native_dir = resolve_native_dir(&cli)?;
-    let request = PiHookBridgeRequest::with_tmux_pane(native_dir, cli.pane_id)?;
+    let mut request = PiHookBridgeRequest::with_tmux_pane(native_dir, cli.pane_id)?;
+    request.run_id = cli.run_id;
+    request.process_id = cli.process_id;
     bridge_pi_event(&request, cli.event.into())?;
     Ok(())
 }

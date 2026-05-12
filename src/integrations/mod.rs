@@ -4,6 +4,7 @@ mod codex;
 mod codex_hook;
 mod gemini;
 mod native;
+mod native_events;
 mod opencode;
 mod pi;
 mod pi_hook;
@@ -24,6 +25,7 @@ pub use codex::{
 pub use codex_hook::{
     bridge_codex_hook_input, CodexHookBridgeError, CodexHookBridgeRequest, CodexHookEventKind,
 };
+pub use native_events::{derive_native_state, NativeDerivedState, NativeEvent, NativeEventKind};
 pub use pi::{
     apply_native_signals as apply_pi_native_signals, FilePiNativeSignalSource,
     PiNativeOverlaySummary,
@@ -96,6 +98,8 @@ pub fn compatibility_snapshot(observation: CompatibilityObservation<'_>) -> Opti
         integration_mode: IntegrationMode::Compatibility,
         activity_score: activity_score_for_status(observed_status),
         debounce_ticks: 0,
+        active_run_count: None,
+        last_status_change_unix_millis: None,
     })
 }
 

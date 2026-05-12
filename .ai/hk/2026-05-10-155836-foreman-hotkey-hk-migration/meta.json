@@ -1,0 +1,34 @@
+{
+  "branch": "fix/macos-hotkey-recorder-default",
+  "diff_hash": "sha256:958c1726dbd43248c1022616369f9670f29b209ea3c2ce2a1335d3d0c1287351",
+  "dirty": true,
+  "event_count": 13,
+  "event_seq": 16,
+  "evidence_count": 4,
+  "evidence_ids": [
+    "ev_20260510_155933_567117",
+    "ev_20260510_155943_370186",
+    "ev_20260510_160204_295924",
+    "ev_20260510_161455_245821"
+  ],
+  "file_hashes": {
+    "README.md": "sha256:7af9e0837cb27622c5eba6b6837b7ea252d4ef7d13b4c22867440c265ba048e8",
+    "artifacts/README.md": "sha256:c4bad9d4652f296a7e4dcf175fe1dd0c66a99ec0b74941cd45c499e84792436c"
+  },
+  "files": [
+    "README.md",
+    "meta.json",
+    "artifacts/README.md"
+  ],
+  "generated_at": "2026-05-11T00:09:52.028387+00:00",
+  "generated_by": "hk export --format handoff-dir",
+  "git_sha": "bcc0bd0",
+  "output_path": ".ai/hk/2026-05-10-155836-foreman-hotkey-hk-migration",
+  "ready": true,
+  "ready_status": "ready",
+  "schema_version": 1,
+  "sync_status": "synced",
+  "target_root": ".",
+  "target_scope": ".",
+  "work_id": "2026-05-10-155836-foreman-hotkey-hk-migration"
+}

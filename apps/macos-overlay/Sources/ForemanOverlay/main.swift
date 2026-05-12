@@ -106,7 +106,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             spec = hotkeySpec
             source = .environment
         } else {
-            if KeyboardShortcuts.getShortcut(for: .toggleForemanOverlay) == nil {
+            let shortcutDefaultsKey = "KeyboardShortcuts_toggleForemanOverlay"
+            if UserDefaults.standard.object(forKey: shortcutDefaultsKey) == nil {
                 KeyboardShortcuts.reset(.toggleForemanOverlay)
             }
             spec = KeyboardShortcuts.getShortcut(for: .toggleForemanOverlay).map(HotkeySpec.fromShortcut) ?? HotkeySpec.defaultSpec
@@ -163,14 +164,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func refresh() { store.reload() }
     @objc func beginFlashJump() { store.beginFlash() }
     @objc func cycleTheme() { store.cycleTheme() }
+    func clearShortcut() {
+        KeyboardShortcuts.setShortcut(nil, for: .toggleForemanOverlay)
+        configureHotkey()
+    }
+
+    func restoreDefaultShortcut() {
+        KeyboardShortcuts.reset(.toggleForemanOverlay)
+        configureHotkey()
+    }
+
     @objc func openSettings() {
         settingsPanelController.show(
             preferences: preferences,
             hotkeyStatus: hotkeyStatusText,
-            onReset: { [weak self] in
-                KeyboardShortcuts.reset(.toggleForemanOverlay)
-                self?.configureHotkey()
-            },
+            onClearShortcut: { [weak self] in self?.clearShortcut() },
+            onRestoreDefault: { [weak self] in self?.restoreDefaultShortcut() },
             onShortcutChanged: { [weak self] in
                 self?.configureHotkey()
             }
