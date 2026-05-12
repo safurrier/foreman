@@ -2426,7 +2426,7 @@ fn pi_extension_template() -> String {
 import { spawnSync } from "node:child_process";
 
 let turnCounter = 0;
-let activeRunId: string | undefined;
+const activeRunIds: string[] = [];
 const processId = String(process.pid);
 
 function nextRunId(): string {
@@ -2451,15 +2451,16 @@ function runHook(event: string, runId?: string) {
 
 export default function (pi: ExtensionAPI) {
   pi.on("agent_start", async () => {
-    activeRunId = nextRunId();
-    runHook("agent-start", activeRunId);
+    const runId = nextRunId();
+    activeRunIds.push(runId);
+    runHook("agent-start", runId);
   });
   pi.on("agent_end", async () => {
-    runHook("agent-end", activeRunId);
-    activeRunId = undefined;
+    runHook("agent-end", activeRunIds.pop());
   });
   pi.on("session_shutdown", async () => {
     runHook("session-shutdown");
+    activeRunIds.length = 0;
   });
 }"#
     .to_string()

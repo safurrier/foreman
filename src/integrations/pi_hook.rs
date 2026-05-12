@@ -9,10 +9,12 @@ use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use sysinfo::{Pid, System};
 
 const LOCK_RETRY_SLEEP: Duration = Duration::from_millis(10);
 const LOCK_TIMEOUT: Duration = Duration::from_secs(2);
 const STALE_LOCK_AFTER: Duration = Duration::from_secs(30);
+const STALE_ACTIVE_PROCESS_AFTER: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PiHookBridgeRequest {
@@ -126,10 +128,25 @@ fn active_accounted_signal(
 ) -> Result<NativeSignal, PiHookBridgeError> {
     fs::create_dir_all(&request.native_dir)?;
     let _guard = EventMaterializationLock::acquire(&request.native_dir)?;
-    let native_event = event_for_request(request, event, unix_millis(), unix_sequence())?;
+    let occurred_at = unix_millis();
+    let native_event = event_for_request(request, event, occurred_at, unix_sequence())?;
     append_event(&request.native_dir, &native_event)?;
-    let events = read_events(&request.native_dir, &request.pane_id)?;
-    let state = derive_native_state(&events);
+    let mut events = read_events(&request.native_dir, &request.pane_id)?;
+    let mut state = derive_native_state(&events);
+
+    let stale_processes = stale_dead_processes(&state, occurred_at, request.process_id.as_deref());
+    for process_id in stale_processes {
+        append_event(
+            &request.native_dir,
+            &NativeEvent::process_exited("pi", &request.pane_id, process_id, unix_millis())
+                .with_sequence(unix_sequence()),
+        )?;
+    }
+    if !state.active_processes.is_empty() {
+        events = read_events(&request.native_dir, &request.pane_id)?;
+        state = derive_native_state(&events);
+    }
+
     let signal = NativeSignal {
         status: state.status,
         activity_score: signal_for_status(state.status).activity_score,
@@ -139,6 +156,11 @@ fn active_accounted_signal(
         last_status_change_unix_millis: state.last_status_change_unix_ms,
     };
     write_native_signal_file(&request.native_dir, request.pane_id.as_str(), &signal)?;
+    compact_resolved_events(
+        &request.native_dir,
+        &request.pane_id,
+        state.active_run_count,
+    )?;
     Ok(signal)
 }
 
@@ -235,6 +257,50 @@ fn read_events(native_dir: &Path, pane_id: &str) -> Result<Vec<NativeEvent>, PiH
     Ok(events)
 }
 
+fn stale_dead_processes(
+    state: &super::native_events::NativeDerivedState,
+    now_unix_ms: u64,
+    current_process_id: Option<&str>,
+) -> Vec<String> {
+    state
+        .active_processes
+        .iter()
+        .filter_map(|(process_id, started_at)| {
+            if current_process_id == Some(process_id.as_str()) {
+                return None;
+            }
+            let age = Duration::from_millis(now_unix_ms.saturating_sub(*started_at));
+            if age < STALE_ACTIVE_PROCESS_AFTER || process_is_running(process_id) {
+                return None;
+            }
+            Some(process_id.clone())
+        })
+        .collect()
+}
+
+fn process_is_running(process_id: &str) -> bool {
+    let Ok(process_id) = process_id.parse::<u32>() else {
+        return true;
+    };
+    let system = System::new_all();
+    system.process(Pid::from_u32(process_id)).is_some()
+}
+
+fn compact_resolved_events(
+    native_dir: &Path,
+    pane_id: &str,
+    active_run_count: u32,
+) -> Result<(), PiHookBridgeError> {
+    if active_run_count != 0 {
+        return Ok(());
+    }
+    match fs::remove_dir_all(event_dir(native_dir, pane_id)) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(PiHookBridgeError::Io(error)),
+    }
+}
+
 fn event_dir(native_dir: &Path, pane_id: &str) -> PathBuf {
     native_dir
         .join(".pi-events")
@@ -302,7 +368,10 @@ fn unix_sequence() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{bridge_pi_event, PiHookBridgeRequest, PiHookEventKind};
+    use super::{
+        append_event, bridge_pi_event, event_dir, read_events, unix_millis, NativeEvent,
+        PiHookBridgeRequest, PiHookEventKind, STALE_ACTIVE_PROCESS_AFTER,
+    };
     use tempfile::tempdir;
 
     fn bridge_request() -> (tempfile::TempDir, PiHookBridgeRequest) {
@@ -374,5 +443,49 @@ mod tests {
         .expect("first process shuts down");
 
         assert_eq!(signal.status, crate::app::AgentStatus::Working);
+    }
+
+    #[test]
+    fn final_run_finish_compacts_resolved_event_history() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let request = PiHookBridgeRequest::new(temp_dir.path().to_path_buf(), "%11")
+            .with_run_id("run")
+            .with_process_id(std::process::id().to_string());
+
+        bridge_pi_event(&request, PiHookEventKind::AgentStart).expect("run starts");
+        assert!(event_dir(temp_dir.path(), "%11").exists());
+
+        let signal = bridge_pi_event(&request, PiHookEventKind::AgentEnd).expect("run ends");
+
+        assert_eq!(signal.status, crate::app::AgentStatus::Idle);
+        assert_eq!(signal.active_run_count, Some(0));
+        assert!(!event_dir(temp_dir.path(), "%11").exists());
+    }
+
+    #[test]
+    fn stale_dead_process_runs_are_cleared_on_next_materialization() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let stale_started_at = unix_millis()
+            .saturating_sub(STALE_ACTIVE_PROCESS_AFTER.as_millis() as u64)
+            .saturating_sub(1_000);
+        let stale_process = "99999999";
+        append_event(
+            temp_dir.path(),
+            &NativeEvent::run_started("pi", "%11", "orphan", stale_process, stale_started_at),
+        )
+        .expect("stale event should be written");
+
+        let request = PiHookBridgeRequest::new(temp_dir.path().to_path_buf(), "%11")
+            .with_run_id("fresh")
+            .with_process_id(std::process::id().to_string());
+        let signal = bridge_pi_event(&request, PiHookEventKind::AgentStart).expect("fresh starts");
+
+        assert_eq!(signal.status, crate::app::AgentStatus::Working);
+        assert_eq!(signal.active_run_count, Some(1));
+        let events = read_events(temp_dir.path(), "%11").expect("events should read");
+        assert!(events.iter().any(|event| {
+            event.kind == super::NativeEventKind::ProcessExited
+                && event.process_id.as_deref() == Some(stale_process)
+        }));
     }
 }

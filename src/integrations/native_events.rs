@@ -99,6 +99,7 @@ impl NativeEvent {
 pub struct NativeDerivedState {
     pub status: AgentStatus,
     pub active_run_count: u32,
+    pub active_processes: BTreeMap<String, u64>,
     pub last_activity_unix_ms: Option<u64>,
     pub last_status_change_unix_ms: Option<u64>,
 }
@@ -108,6 +109,7 @@ impl Default for NativeDerivedState {
         Self {
             status: AgentStatus::Idle,
             active_run_count: 0,
+            active_processes: BTreeMap::new(),
             last_activity_unix_ms: None,
             last_status_change_unix_ms: None,
         }
@@ -117,6 +119,7 @@ impl Default for NativeDerivedState {
 #[derive(Debug, Clone)]
 struct ActiveRun {
     process_id: Option<String>,
+    started_at_unix_ms: u64,
 }
 
 pub fn derive_native_state(events: &[NativeEvent]) -> NativeDerivedState {
@@ -141,6 +144,7 @@ pub fn derive_native_state(events: &[NativeEvent]) -> NativeDerivedState {
                         run_id.clone(),
                         ActiveRun {
                             process_id: event.process_id.clone(),
+                            started_at_unix_ms: event.occurred_at_unix_ms,
                         },
                     );
                 }
@@ -161,6 +165,23 @@ pub fn derive_native_state(events: &[NativeEvent]) -> NativeDerivedState {
         }
 
         state.active_run_count = active_runs.len() as u32;
+        state.active_processes = active_runs
+            .values()
+            .filter_map(|run| {
+                run.process_id
+                    .as_ref()
+                    .map(|process_id| (process_id.clone(), run.started_at_unix_ms))
+            })
+            .fold(
+                BTreeMap::new(),
+                |mut processes, (process_id, started_at)| {
+                    processes
+                        .entry(process_id)
+                        .and_modify(|current| *current = (*current).min(started_at))
+                        .or_insert(started_at);
+                    processes
+                },
+            );
         let derived_status = if active_runs.is_empty() {
             AgentStatus::Idle
         } else {

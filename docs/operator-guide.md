@@ -373,7 +373,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { spawnSync } from "node:child_process";
 
 let turnCounter = 0;
-let activeRunId: string | undefined;
+const activeRunIds: string[] = [];
 const processId = String(process.pid);
 
 export default function (pi: ExtensionAPI) {
@@ -390,14 +390,17 @@ export default function (pi: ExtensionAPI) {
   };
 
   pi.on("agent_start", async () => {
-    activeRunId = `${processId}:${Date.now()}:${++turnCounter}`;
-    runHook("agent-start", activeRunId);
+    const runId = `${processId}:${Date.now()}:${++turnCounter}`;
+    activeRunIds.push(runId);
+    runHook("agent-start", runId);
   });
   pi.on("agent_end", async () => {
-    runHook("agent-end", activeRunId);
-    activeRunId = undefined;
+    runHook("agent-end", activeRunIds.pop());
   });
-  pi.on("session_shutdown", async () => runHook("session-shutdown"));
+  pi.on("session_shutdown", async () => {
+    runHook("session-shutdown");
+    activeRunIds.length = 0;
+  });
 }
 ```
 
