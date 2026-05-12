@@ -2,9 +2,8 @@ use super::native::{
     signal_for_status, write_signal_file as write_native_signal_file, NativeSignal,
     NativeSignalWriteError,
 };
+use super::native_events::{derive_native_state, NativeEvent, NativeEventKind};
 use crate::app::AgentStatus;
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use std::fmt;
 use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
@@ -105,12 +104,11 @@ pub fn bridge_pi_event(
     request: &PiHookBridgeRequest,
     event: PiHookEventKind,
 ) -> Result<NativeSignal, PiHookBridgeError> {
-    let status = if request.run_id.is_some() || request.process_id.is_some() {
-        active_accounted_status(request, event)?
-    } else {
-        legacy_status_for_event(event)
-    };
-    let signal = signal_for_status(status);
+    if request.run_id.is_some() || request.process_id.is_some() {
+        return active_accounted_signal(request, event);
+    }
+
+    let signal = signal_for_status(legacy_status_for_event(event));
     write_native_signal_file(&request.native_dir, request.pane_id.as_str(), &signal)?;
     Ok(signal)
 }
@@ -122,96 +120,134 @@ fn legacy_status_for_event(event: PiHookEventKind) -> AgentStatus {
     }
 }
 
-fn active_accounted_status(
+fn active_accounted_signal(
     request: &PiHookBridgeRequest,
     event: PiHookEventKind,
-) -> Result<AgentStatus, PiHookBridgeError> {
+) -> Result<NativeSignal, PiHookBridgeError> {
     fs::create_dir_all(&request.native_dir)?;
-    let _guard = ActiveStateLock::acquire(&request.native_dir)?;
-    let state_path = active_state_path(&request.native_dir, &request.pane_id);
-    let mut state = read_active_state(&state_path)?;
-    let now = unix_millis();
+    let _guard = EventMaterializationLock::acquire(&request.native_dir)?;
+    let native_event = event_for_request(request, event, unix_millis(), unix_sequence())?;
+    append_event(&request.native_dir, &native_event)?;
+    let events = read_events(&request.native_dir, &request.pane_id)?;
+    let state = derive_native_state(&events);
+    let signal = NativeSignal {
+        status: state.status,
+        activity_score: signal_for_status(state.status).activity_score,
+        recent_activity_unix_millis: state.last_activity_unix_ms,
+        active_run_count: Some(state.active_run_count),
+        last_activity_unix_millis: state.last_activity_unix_ms,
+        last_status_change_unix_millis: state.last_status_change_unix_ms,
+    };
+    write_native_signal_file(&request.native_dir, request.pane_id.as_str(), &signal)?;
+    Ok(signal)
+}
 
-    match event {
-        PiHookEventKind::BeforeAgentStart | PiHookEventKind::AgentStart => {
-            if let Some(run_id) = request.run_id.as_ref() {
-                state.runs.insert(
-                    run_id.clone(),
-                    ActiveRun {
-                        process_id: request.process_id.clone(),
-                        updated_at_unix_ms: now,
-                    },
-                );
-            }
-        }
-        PiHookEventKind::AgentEnd => {
-            if let Some(run_id) = request.run_id.as_ref() {
-                state.runs.remove(run_id);
-            }
-        }
-        PiHookEventKind::SessionShutdown => {
-            if let Some(process_id) = request.process_id.as_ref() {
-                state
-                    .runs
-                    .retain(|_, run| run.process_id.as_deref() != Some(process_id));
-            } else if let Some(run_id) = request.run_id.as_ref() {
-                state.runs.remove(run_id);
-            } else {
-                state.runs.clear();
-            }
-        }
+fn event_for_request(
+    request: &PiHookBridgeRequest,
+    event: PiHookEventKind,
+    occurred_at_unix_ms: u64,
+    sequence: u64,
+) -> Result<NativeEvent, PiHookBridgeError> {
+    let mut native_event = match event {
+        PiHookEventKind::BeforeAgentStart | PiHookEventKind::AgentStart => NativeEvent {
+            schema_version: 1,
+            source: "pi".to_string(),
+            pane_id: request.pane_id.clone(),
+            kind: NativeEventKind::RunStarted,
+            occurred_at_unix_ms,
+            sequence,
+            run_id: request.run_id.clone(),
+            process_id: request.process_id.clone(),
+            status: None,
+        },
+        PiHookEventKind::AgentEnd => NativeEvent {
+            schema_version: 1,
+            source: "pi".to_string(),
+            pane_id: request.pane_id.clone(),
+            kind: NativeEventKind::RunFinished,
+            occurred_at_unix_ms,
+            sequence,
+            run_id: request.run_id.clone(),
+            process_id: request.process_id.clone(),
+            status: None,
+        },
+        PiHookEventKind::SessionShutdown => NativeEvent {
+            schema_version: 1,
+            source: "pi".to_string(),
+            pane_id: request.pane_id.clone(),
+            kind: NativeEventKind::ProcessExited,
+            occurred_at_unix_ms,
+            sequence,
+            run_id: request.run_id.clone(),
+            process_id: request.process_id.clone(),
+            status: None,
+        },
+    };
+
+    if matches!(
+        native_event.kind,
+        NativeEventKind::RunStarted | NativeEventKind::RunFinished
+    ) && native_event.run_id.is_none()
+    {
+        native_event.run_id = Some(format!(
+            "{}:{}",
+            native_event.source,
+            native_event
+                .process_id
+                .as_deref()
+                .unwrap_or("unknown-process")
+        ));
     }
 
-    write_active_state(&state_path, &state)?;
-    Ok(if state.runs.is_empty() {
-        AgentStatus::Idle
-    } else {
-        AgentStatus::Working
-    })
+    Ok(native_event)
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-struct ActivePaneState {
-    #[serde(default)]
-    runs: BTreeMap<String, ActiveRun>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ActiveRun {
-    process_id: Option<String>,
-    updated_at_unix_ms: u64,
-}
-
-fn read_active_state(path: &Path) -> Result<ActivePaneState, PiHookBridgeError> {
-    if !path.exists() {
-        return Ok(ActivePaneState::default());
-    }
-    let contents = fs::read_to_string(path)?;
-    Ok(serde_json::from_str(&contents)?)
-}
-
-fn write_active_state(path: &Path, state: &ActivePaneState) -> Result<(), PiHookBridgeError> {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(parent)?;
-    let temp_path = path.with_extension(format!("{}.tmp", unix_millis()));
-    fs::write(&temp_path, serde_json::to_vec(state)?)?;
-    fs::rename(temp_path, path)?;
+fn append_event(native_dir: &Path, event: &NativeEvent) -> Result<(), PiHookBridgeError> {
+    let event_dir = event_dir(native_dir, &event.pane_id);
+    fs::create_dir_all(&event_dir)?;
+    let final_path = event_dir.join(format!(
+        "{}-{}.json",
+        event.occurred_at_unix_ms, event.sequence
+    ));
+    let temp_path = event_dir.join(format!(
+        ".{}-{}.tmp",
+        event.occurred_at_unix_ms, event.sequence
+    ));
+    fs::write(&temp_path, serde_json::to_vec(event)?)?;
+    fs::rename(temp_path, final_path)?;
     Ok(())
 }
 
-fn active_state_path(native_dir: &Path, pane_id: &str) -> PathBuf {
-    native_dir
-        .join(".pi-active")
-        .join(format!("{}.json", pane_id.replace('/', "_")))
+fn read_events(native_dir: &Path, pane_id: &str) -> Result<Vec<NativeEvent>, PiHookBridgeError> {
+    let event_dir = event_dir(native_dir, pane_id);
+    if !event_dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut events = Vec::new();
+    for entry in fs::read_dir(event_dir)? {
+        let path = entry?.path();
+        if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
+            continue;
+        }
+        let contents = fs::read_to_string(path)?;
+        events.push(serde_json::from_str(&contents)?);
+    }
+    Ok(events)
 }
 
-struct ActiveStateLock {
+fn event_dir(native_dir: &Path, pane_id: &str) -> PathBuf {
+    native_dir
+        .join(".pi-events")
+        .join(pane_id.replace('/', "_"))
+}
+
+struct EventMaterializationLock {
     path: PathBuf,
 }
 
-impl ActiveStateLock {
+impl EventMaterializationLock {
     fn acquire(native_dir: &Path) -> Result<Self, PiHookBridgeError> {
-        let path = native_dir.join(".pi-active.lock");
+        let path = native_dir.join(".pi-events.lock");
         let started = SystemTime::now();
         loop {
             match OpenOptions::new().write(true).create_new(true).open(&path) {
@@ -229,7 +265,7 @@ impl ActiveStateLock {
     }
 }
 
-impl Drop for ActiveStateLock {
+impl Drop for EventMaterializationLock {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.path);
     }
@@ -254,6 +290,13 @@ fn unix_millis() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
+        .unwrap_or_default()
+}
+
+fn unix_sequence() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos() as u64)
         .unwrap_or_default()
 }
 

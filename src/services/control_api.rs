@@ -53,6 +53,10 @@ pub struct AgentEntry {
     pub preview: String,
     pub preview_provenance: String,
     pub activity_score: u64,
+    pub status_rank: u8,
+    pub last_activity_unix_ms: Option<u64>,
+    pub last_status_change_unix_ms: Option<u64>,
+    pub active_run_count: Option<u32>,
     pub pull_request: Option<ControlPullRequest>,
 }
 
@@ -226,6 +230,10 @@ fn agent_entry(
         preview: truncate_preview(&pane.preview),
         preview_provenance: preview_provenance_slug(pane.preview_provenance).to_string(),
         activity_score: pane.recent_activity(),
+        status_rank: status_rank(status),
+        last_activity_unix_ms: pane.activity_unix_millis,
+        last_status_change_unix_ms: agent.and_then(|agent| agent.last_status_change_unix_millis),
+        active_run_count: agent.and_then(|agent| agent.active_run_count),
         pull_request: None,
     }
 }

@@ -173,8 +173,30 @@ final class ForemanOverlayCoreTests: XCTestCase {
 
         preferences.sortMode = .attentionFirst
 
-        XCTAssertEqual(store.entries.prefix(3).map(\.paneId), ["%201", "%205", "%209"])
+        XCTAssertEqual(store.entries.prefix(3).map(\.paneId), ["%204", "%208", "%212"])
         XCTAssertEqual(OverlaySortMode.attentionFirst.label, "Attention → Recent")
+    }
+
+    @MainActor
+    func testSortPrefersExplicitLastActivityOverFallbackScore() throws {
+        let response = try JSONDecoder().decode(AgentsResponse.self, from: Data(#"""
+        {
+          "schemaVersion": 1,
+          "inventory": {"totalSessions": 1, "totalWindows": 1, "totalPanes": 2, "visibleSessions": 1, "visibleWindows": 1, "visiblePanes": 2},
+          "diagnostics": [],
+          "entries": [
+            {"id":"pane:%old","paneId":"%old","sessionName":"s","windowName":"w","title":"old","navigationTitle":"old","harness":"pi","harnessLabel":"Pi","status":"working","statusLabel":"WORKING","statusSource":"native hook","integrationMode":"native","isAgent":true,"currentCommand":"pi","runtimeCommand":"pi","workingDir":"/repo","workspaceName":"repo","preview":"","previewProvenance":"captured","activityScore":999,"statusRank":2,"lastActivityUnixMs":100,"lastStatusChangeUnixMs":50,"activeRunCount":1,"pullRequest":null},
+            {"id":"pane:%new","paneId":"%new","sessionName":"s","windowName":"w","title":"new","navigationTitle":"new","harness":"pi","harnessLabel":"Pi","status":"working","statusLabel":"WORKING","statusSource":"native hook","integrationMode":"native","isAgent":true,"currentCommand":"pi","runtimeCommand":"pi","workingDir":"/repo","workspaceName":"repo","preview":"","previewProvenance":"captured","activityScore":1,"statusRank":2,"lastActivityUnixMs":200,"lastStatusChangeUnixMs":60,"activeRunCount":1,"pullRequest":null}
+          ]
+        }
+        """#.utf8))
+        let preferences = testPreferences()
+        let store = OverlayStore(client: ForemanClient(foremanPath: "/bin/false"), preferences: preferences)
+        store.response = response
+
+        preferences.sortMode = .recentFirst
+
+        XCTAssertEqual(store.entries.map(\.paneId), ["%new", "%old"])
     }
 
     @MainActor

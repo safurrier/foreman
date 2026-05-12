@@ -55,5 +55,9 @@ public struct AgentEntry: Decodable, Identifiable, Sendable {
     public let preview: String
     public let previewProvenance: String
     public let activityScore: UInt64
+    public let statusRank: Int?
+    public let lastActivityUnixMs: UInt64?
+    public let lastStatusChangeUnixMs: UInt64?
+    public let activeRunCount: UInt32?
     public let pullRequest: ControlPullRequest?
 }

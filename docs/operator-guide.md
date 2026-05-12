@@ -354,7 +354,10 @@ Example repo-local `.codex/hooks.json`:
 bridge writes the per-pane signal file that Foreman overlays in native mode.
 The generated extension passes a per-turn run id and process id so overlapping
 Pi child processes, including `pi-subagents` children that share `TMUX_PANE`,
-do not mark the pane idle until every active run for that pane has ended.
+do not mark the pane idle until every active run for that pane has ended. The
+hook writes append-only native events and derives the compatible per-pane signal
+file from that event history, with explicit active-run and timestamp fields in
+new signal payloads.
 
 Override the native signal path with:
 
