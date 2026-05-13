@@ -12,6 +12,7 @@ const CONFIG_FILE_NAME: &str = "config.toml";
 pub const DEFAULT_LOG_RETENTION: usize = 20;
 pub const DEFAULT_NOTIFICATION_COOLDOWN_TICKS: u64 = 3;
 pub const DEFAULT_STARTUP_CACHE_MAX_AGE_MS: u64 = 5 * 60_000;
+pub const DEFAULT_EXTENSION_POLL_INTERVAL_MS: u64 = 30_000;
 
 fn default_enabled() -> bool {
     true
@@ -117,6 +118,7 @@ pub struct AppConfig {
     pub notifications: NotificationConfig,
     pub logging: LoggingConfig,
     pub pull_requests: PullRequestConfig,
+    pub extensions: ExtensionConfig,
     pub integrations: IntegrationConfig,
     pub ui: UiConfig,
     #[serde(skip)]
@@ -230,6 +232,20 @@ impl Default for PullRequestConfig {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ExtensionConfig {
+    pub poll_interval_ms: u64,
+}
+
+impl Default for ExtensionConfig {
+    fn default() -> Self {
+        Self {
+            poll_interval_ms: DEFAULT_EXTENSION_POLL_INTERVAL_MS,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct UiConfig {
@@ -315,6 +331,7 @@ struct DefaultConfigTemplate {
     notifications: NotificationConfig,
     logging: LoggingConfig,
     pull_requests: PullRequestConfig,
+    extensions: ExtensionConfig,
     integrations: IntegrationConfig,
 }
 
@@ -326,6 +343,7 @@ impl Default for DefaultConfigTemplate {
             notifications: config.notifications,
             logging: config.logging,
             pull_requests: config.pull_requests,
+            extensions: config.extensions,
             integrations: config.integrations,
         }
     }
@@ -348,6 +366,7 @@ pub struct RuntimeConfig {
     pub popup: bool,
     pub pull_request_monitoring_enabled: bool,
     pub pull_request_poll_interval_ms: u64,
+    pub extension_poll_interval_ms: u64,
     pub notifications_enabled: bool,
     pub notification_cooldown_ticks: u64,
     pub notification_backends: Vec<NotificationBackendName>,
@@ -406,6 +425,7 @@ impl RuntimeConfig {
             popup: cli.popup,
             pull_request_monitoring_enabled: file_config.pull_requests.enabled,
             pull_request_poll_interval_ms: file_config.pull_requests.poll_interval_ms,
+            extension_poll_interval_ms: file_config.extensions.poll_interval_ms,
             notifications_enabled: if cli.no_notify {
                 false
             } else {
@@ -575,10 +595,10 @@ mod tests {
     use super::{
         default_claude_native_dir, default_codex_native_dir, default_config_toml,
         default_pi_native_dir, load_config, resolve_paths_with_env, write_default_config,
-        AppConfig, ConfigError, IntegrationPreference, LoggingConfig, NotificationBackendName,
-        NotificationConfig, NotificationSoundProfile, PathEnvironment, PullRequestConfig,
-        RuntimeConfig, UiConfig, DEFAULT_NOTIFICATION_COOLDOWN_TICKS,
-        DEFAULT_STARTUP_CACHE_MAX_AGE_MS,
+        AppConfig, ConfigError, ExtensionConfig, IntegrationPreference, LoggingConfig,
+        NotificationBackendName, NotificationConfig, NotificationSoundProfile, PathEnvironment,
+        PullRequestConfig, RuntimeConfig, UiConfig, DEFAULT_EXTENSION_POLL_INTERVAL_MS,
+        DEFAULT_NOTIFICATION_COOLDOWN_TICKS, DEFAULT_STARTUP_CACHE_MAX_AGE_MS,
     };
     use crate::app::{NotificationProfile, SortMode};
     use crate::cli::Cli;
@@ -647,6 +667,7 @@ mod tests {
         assert_eq!(parsed.logging, LoggingConfig::default());
         assert_eq!(parsed.notifications, NotificationConfig::default());
         assert_eq!(parsed.pull_requests, PullRequestConfig::default());
+        assert_eq!(parsed.extensions, ExtensionConfig::default());
         let contents = std::fs::read_to_string(&config_path).expect("config should be readable");
         assert!(!contents.contains("[ui]"));
 
@@ -739,6 +760,10 @@ mod tests {
         assert!(runtime.popup);
         assert!(runtime.pull_request_monitoring_enabled);
         assert_eq!(runtime.pull_request_poll_interval_ms, 30_000);
+        assert_eq!(
+            runtime.extension_poll_interval_ms,
+            DEFAULT_EXTENSION_POLL_INTERVAL_MS
+        );
         assert!(!runtime.notifications_enabled);
         assert_eq!(
             runtime.notification_cooldown_ticks,

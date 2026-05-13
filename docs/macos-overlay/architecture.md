@@ -47,6 +47,7 @@ The Swift app consumes only stable command output:
 ```bash
 foreman agents --json
 foreman agents --json --pull-requests
+foreman extensions --pane <PANE_ID> --json
 foreman focus --pane <PANE_ID> --json
 foreman send --pane <PANE_ID> --stdin --json
 ```
@@ -58,6 +59,8 @@ Rules:
 - Pane ids are opaque strings.
 - Preview text is bounded by the Rust control API.
 - Schema changes require fixture updates and Swift decoder validation.
+- The overlay loads agent/PR inventory first, then fetches extension cards for
+  the selected pane so slow providers do not block first paint or hide PR cards.
 
 ## SwiftPM Modules
 

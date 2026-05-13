@@ -2,6 +2,7 @@ use crate::app::{
     AgentStatus, AppState, Focus, HarnessKind, IntegrationMode, ModalState, Mode, Pane,
     PreviewProvenance, SelectionTarget, SidebarHarnessSummary, SidebarRowKind, VisibleTargetEntry,
 };
+use crate::services::extensions::ControlExtensionCard;
 use crate::services::pull_requests::{PullRequestLookup, PullRequestStatus};
 use crate::ui::theme::{Theme, ThemeName};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -716,6 +717,11 @@ fn preview_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Tex
         sections.push(pull_request_lines);
     }
 
+    let extension_lines = extension_card_lines(state, theme, layout_mode);
+    if !extension_lines.is_empty() {
+        sections.push(extension_lines);
+    }
+
     let selection_lines = selected_target_summary_lines(state, theme, layout_mode);
     if !selection_lines.is_empty() {
         sections.push(selection_lines);
@@ -1283,6 +1289,113 @@ fn pull_request_lines(state: &AppState, theme: &Theme) -> Vec<Line<'static>> {
     }
 }
 
+fn extension_card_lines(
+    state: &AppState,
+    theme: &Theme,
+    layout_mode: LayoutMode,
+) -> Vec<Line<'static>> {
+    let cards = state.selected_extension_cards().unwrap_or(&[]);
+    if cards.is_empty() && !state.selected_extension_refreshing() {
+        return Vec::new();
+    }
+
+    let mut lines = vec![detail_section_line("Extensions", theme)];
+    if state.selected_extension_refreshing() {
+        lines.push(detail_value_line(
+            "State",
+            vec![Span::styled("refreshing cards", theme.attention)],
+            theme,
+        ));
+    }
+
+    let max_cards = match layout_mode {
+        LayoutMode::Compact => 1,
+        LayoutMode::Medium => 2,
+        LayoutMode::Wide => 3,
+    };
+    for card in cards.iter().take(max_cards) {
+        lines.extend(extension_card_detail_lines(card, theme, layout_mode));
+    }
+    if cards.len() > max_cards {
+        lines.push(detail_note_line(
+            format!(
+                "{} more extension cards hidden in this layout.",
+                cards.len() - max_cards
+            ),
+            theme,
+        ));
+    }
+
+    lines
+}
+
+fn extension_card_detail_lines(
+    card: &ControlExtensionCard,
+    theme: &Theme,
+    layout_mode: LayoutMode,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    lines.push(detail_value_line(
+        &card.title,
+        vec![
+            Span::styled(
+                card.status_label.clone(),
+                extension_status_style(theme, &card.status),
+            ),
+            detail_separator(theme),
+            Span::styled(card.summary.clone(), theme.base),
+        ],
+        theme,
+    ));
+
+    let max_rows = match layout_mode {
+        LayoutMode::Compact => 2,
+        LayoutMode::Medium => 4,
+        LayoutMode::Wide => 6,
+    };
+    for row in card.rows.iter().take(max_rows) {
+        lines.push(detail_compact_value_line(
+            &row.label,
+            vec![Span::styled(
+                row.value.clone(),
+                row.status
+                    .as_deref()
+                    .map(|status| extension_status_style(theme, status))
+                    .unwrap_or(theme.base),
+            )],
+            theme,
+        ));
+    }
+
+    if !card.actions.is_empty() {
+        let action_labels = card
+            .actions
+            .iter()
+            .take(3)
+            .map(|action| format!("{} ({})", action.label, action.kind))
+            .collect::<Vec<_>>()
+            .join(", ");
+        lines.push(detail_compact_value_line(
+            "Actions",
+            vec![Span::styled(action_labels, theme.muted)],
+            theme,
+        ));
+    }
+
+    lines
+}
+
+fn extension_status_style(theme: &Theme, status: &str) -> Style {
+    match status {
+        "ready" | "pass" | "synced" => theme.idle,
+        "not-ready" | "fail" | "unavailable" | "error" => theme.error,
+        "working" | "refreshing" | "needs-validation" | "needs-review" | "needs-sync"
+        | "needs-attention" | "attention" => theme.attention,
+        "idle" | "info" => theme.muted,
+        _ => theme.base,
+    }
+}
+
 fn activity_digest_label(state: &AppState, theme: &Theme) -> Option<Line<'static>> {
     let mut total = 0usize;
     let mut working = 0usize;
@@ -1601,7 +1714,28 @@ fn selected_target_summary_lines(
     }
 
     if layout_mode != LayoutMode::Compact {
-        if let Some(workspace_path) = state.selected_workspace_path() {
+        if let Some(selected_pane) = state.selected_actionable_pane() {
+            if let Some(workspace_path) = selected_pane.working_dir.as_ref() {
+                lines.push(detail_value_line(
+                    "Workspace",
+                    vec![Span::styled(
+                        workspace_path.display().to_string(),
+                        theme.base,
+                    )],
+                    theme,
+                ));
+            }
+            if let Some(linked_repository) = state.linked_repository_for_pane(selected_pane) {
+                lines.push(detail_value_line(
+                    "Linked repo",
+                    vec![Span::styled(
+                        linked_repository.display().to_string(),
+                        theme.emphasis,
+                    )],
+                    theme,
+                ));
+            }
+        } else if let Some(workspace_path) = state.selected_workspace_path() {
             lines.push(detail_value_line(
                 "Workspace",
                 vec![Span::styled(
@@ -1846,6 +1980,9 @@ mod tests {
         WindowBuilder,
     };
     use crate::doctor::{DoctorArea, DoctorFinding, DoctorSeverity};
+    use crate::services::extensions::{
+        ControlExtensionAction, ControlExtensionCard, ControlExtensionRow,
+    };
     use crate::services::pull_requests::{PullRequestData, PullRequestLookup, PullRequestStatus};
     use crate::services::system_stats::SystemStatsSnapshot;
     use crate::ui::theme::ThemeName;
@@ -2087,6 +2224,42 @@ mod tests {
         assert!(output.contains("Status source:"));
         assert!(output.contains("native hook"));
         assert!(output.contains("Preview source: captured"));
+    }
+
+    #[test]
+    fn render_preview_surfaces_extension_cards_for_selected_workspace() {
+        let mut state = sample_state();
+        state.extension_cards_cache.insert(
+            PathBuf::from("/tmp/alpha"),
+            vec![ControlExtensionCard {
+                id: "hk".to_string(),
+                title: "Harness Kit".to_string(),
+                status: "not-ready".to_string(),
+                status_label: "NOT READY".to_string(),
+                summary: "validation needed".to_string(),
+                rows: vec![ControlExtensionRow {
+                    label: "Validation".to_string(),
+                    value: "missing fast gate".to_string(),
+                    status: Some("fail".to_string()),
+                }],
+                actions: vec![ControlExtensionAction {
+                    id: "copy-status".to_string(),
+                    label: "Copy status".to_string(),
+                    kind: "copy".to_string(),
+                    value: "hk status --json".to_string(),
+                }],
+            }],
+        );
+
+        let output = render_to_string(&state);
+
+        assert!(output.contains("Extensions"));
+        assert!(output.contains("Harness Kit"));
+        assert!(output.contains("NOT READY"));
+        assert!(output.contains("validation needed"));
+        assert!(output.contains("Validation:"));
+        assert!(output.contains("missing fast gate"));
+        assert!(output.contains("Copy status (copy)"));
     }
 
     #[test]

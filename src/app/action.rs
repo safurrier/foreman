@@ -4,6 +4,7 @@ use crate::app::state::{
     SessionId, SortMode, WindowId,
 };
 use crate::doctor::DoctorFinding;
+use crate::services::extensions::ControlExtensionCard;
 use crate::services::pull_requests::PullRequestLookup;
 use crate::services::system_stats::SystemStatsSnapshot;
 use std::path::PathBuf;
@@ -34,6 +35,14 @@ pub enum Action {
         lookup: PullRequestLookup,
     },
     SetPullRequestRefreshing {
+        workspace_path: PathBuf,
+        refreshing: bool,
+    },
+    SetExtensionCards {
+        workspace_path: PathBuf,
+        cards: Vec<ControlExtensionCard>,
+    },
+    SetExtensionRefreshing {
         workspace_path: PathBuf,
         refreshing: bool,
     },
@@ -107,6 +116,8 @@ impl Action {
             Self::BeginFlash { .. } => "begin-flash",
             Self::SetPullRequestLookup { .. } => "set-pull-request-lookup",
             Self::SetPullRequestRefreshing { .. } => "set-pull-request-refreshing",
+            Self::SetExtensionCards { .. } => "set-extension-cards",
+            Self::SetExtensionRefreshing { .. } => "set-extension-refreshing",
             Self::SetRuntimeDiagnostics(_) => "set-runtime-diagnostics",
             Self::SetSystemStats(_) => "set-system-stats",
             Self::SetStartupLoading(_) => "set-startup-loading",

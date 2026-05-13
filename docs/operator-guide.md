@@ -2,14 +2,15 @@
 id: operator-guide
 title: Operator Guide
 description: >
-  User-facing install, setup, dashboard, configuration, native hook, and
-  notification reference for Foreman operators.
+  User-facing install, setup, dashboard, configuration, extension provider,
+  native hook, and notification reference for Foreman operators.
 index:
   - id: install-and-setup
   - id: doctor
   - id: dashboard
   - id: attention-recent-sort
   - id: configuration
+  - id: extension-providers
   - id: native-hooks
   - id: notifications
   - id: troubleshooting
@@ -226,6 +227,57 @@ collapsed sessions, and the last selected target in a UI state file next to the
 resolved config file. Explicit theme and default sort config values in the
 `[ui]` table win over persisted values. Persisted values fill in only when those
 keys are omitted.
+
+## Extension Providers
+
+Extension providers are read-only commands that attach operator cards to agent
+workspace rows in the JSON control API and the terminal dashboard Details pane:
+
+```bash
+foreman agents --json --extensions
+```
+
+Providers live in these locations, from low to high priority:
+
+1. `~/.config/foreman/providers`
+2. `<repo>/.foreman/providers`
+3. directories listed in `FOREMAN_EXTENSION_PROVIDER_DIRS`
+
+If multiple manifests use the same provider `id`, the higher-priority provider
+wins. The preferred Harness Kit install is user-level so one provider displays HK
+state for every repo:
+
+```text
+~/.config/foreman/providers/hk.toml
+~/.config/foreman/providers/hk-provider.py
+```
+
+Repo-local `.foreman/providers` entries are for repo-specific overrides. The TUI
+fetches provider cards only for the selected workspace/details pane instead of
+running providers for every row. The HK provider summarizes the current work
+slice, lifecycle phase, dominant blocker, handoff export freshness, next
+command, and safe copy/open actions such as `Copy next`, `Open handoff`, `Copy
+export`, and `Open evidence`. Foreman does not run `hk export` itself; stale or
+missing exports surface HK's copyable export/preview commands. Repos with no
+active HK work render a compact `NO WORK` card with a start command instead of
+full `none`/`not-started` bookkeeping rows. See [Harness Kit Provider](providers/harness-kit.md)
+for the HK provider contract and example manifest.
+
+If an agent pane is running from notes or another coordinating workspace, link it
+to the actual code repo explicitly instead of relying on transcript heuristics:
+
+```bash
+foreman links --help
+foreman links list --json
+foreman links add --pane %82 --repo ~/git_repositories/foreman --json
+foreman links remove --pane %82 --json
+```
+
+Linked repositories are stored in `linked-repositories.json` beside Foreman's
+config file. The pane's tmux cwd is still displayed as the workspace, while PR
+lookup and extension providers use the linked repo target. The macOS overlay
+loads PR inventory first and asks Foreman for extension cards for the selected
+pane, so slow HK/provider checks do not block PR cards from appearing.
 
 ## Native Hooks
 

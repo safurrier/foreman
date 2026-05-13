@@ -1,4 +1,5 @@
 use crate::app::{AgentStatus, AppState, HarnessKind, IntegrationMode, Pane, PreviewProvenance};
+use crate::services::extensions::ControlExtensionCard;
 use crate::services::pull_requests::{PullRequestData, PullRequestStatus};
 use serde::Serialize;
 use std::path::Path;
@@ -49,6 +50,7 @@ pub struct AgentEntry {
     pub current_command: Option<String>,
     pub runtime_command: Option<String>,
     pub working_dir: Option<String>,
+    pub linked_repository: Option<String>,
     pub workspace_name: Option<String>,
     pub preview: String,
     pub preview_provenance: String,
@@ -58,6 +60,8 @@ pub struct AgentEntry {
     pub last_status_change_unix_ms: Option<u64>,
     pub active_run_count: Option<u32>,
     pub pull_request: Option<ControlPullRequest>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extension_cards: Vec<ControlExtensionCard>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -119,6 +123,7 @@ pub fn agents_response(state: &AppState, include_non_agents: bool) -> AgentsResp
                 }
 
                 entries.push(agent_entry(
+                    state,
                     pane,
                     session.id.as_str(),
                     &session.name,
@@ -189,6 +194,7 @@ pub fn send_response(pane_id: &str, bytes_sent: usize) -> ActionResponse {
 }
 
 fn agent_entry(
+    state: &AppState,
     pane: &Pane,
     session_id: &str,
     session_name: &str,
@@ -204,6 +210,9 @@ fn agent_entry(
     let integration_mode = agent.map(|agent| integration_slug(agent.integration_mode).to_string());
     let status_source = agent.map(|agent| agent.integration_mode.source_label().to_string());
     let working_dir = pane.working_dir.as_ref().map(|path| path_string(path));
+    let linked_repository = state
+        .linked_repository_for_pane(pane)
+        .map(|path| path_string(path));
 
     AgentEntry {
         id: format!("pane:{}", pane.id.as_str()),
@@ -226,6 +235,7 @@ fn agent_entry(
         current_command: pane.current_command.clone(),
         runtime_command: pane.runtime_command.clone(),
         working_dir,
+        linked_repository,
         workspace_name: pane.workspace_name(),
         preview: truncate_preview(&pane.preview),
         preview_provenance: preview_provenance_slug(pane.preview_provenance).to_string(),
@@ -235,7 +245,12 @@ fn agent_entry(
         last_status_change_unix_ms: agent.and_then(|agent| agent.last_status_change_unix_millis),
         active_run_count: agent.and_then(|agent| agent.active_run_count),
         pull_request: None,
+        extension_cards: Vec::new(),
     }
+}
+
+pub fn attach_extension_cards(entry: &mut AgentEntry, cards: Vec<ControlExtensionCard>) {
+    entry.extension_cards = cards;
 }
 
 pub fn attach_pull_request(entry: &mut AgentEntry, pull_request: &PullRequestData) {
@@ -320,6 +335,7 @@ fn generated_at_unix_ms() -> u128 {
 mod tests {
     use super::*;
     use crate::app::{inventory, HarnessKind, PaneBuilder, SessionBuilder, WindowBuilder};
+    use std::path::PathBuf;
 
     #[test]
     fn agents_response_defaults_to_agent_panes_only() {
@@ -356,5 +372,36 @@ mod tests {
 
         assert_eq!(response.entries.len(), 1);
         assert!(!response.entries[0].is_agent);
+    }
+
+    #[test]
+    fn agents_response_includes_explicit_linked_repository() {
+        let inventory = inventory([SessionBuilder::new("notes").window(
+            WindowBuilder::new("main").pane(
+                PaneBuilder::agent("%82", HarnessKind::Pi)
+                    .working_dir("/tmp/notes")
+                    .preview("working from notes"),
+            ),
+        )]);
+        let mut state = AppState::with_inventory(inventory);
+        state
+            .linked_repositories
+            .insert(crate::app::PaneId::new("%82"), PathBuf::from("/tmp/code"));
+        state.linked_repository_pane_working_dirs.insert(
+            crate::app::PaneId::new("%82"),
+            Some(PathBuf::from("/tmp/notes")),
+        );
+
+        let response = agents_response(&state, false);
+
+        assert_eq!(response.entries.len(), 1);
+        assert_eq!(
+            response.entries[0].working_dir.as_deref(),
+            Some("/tmp/notes")
+        );
+        assert_eq!(
+            response.entries[0].linked_repository.as_deref(),
+            Some("/tmp/code")
+        );
     }
 }

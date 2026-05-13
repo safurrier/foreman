@@ -7,5 +7,5 @@
 - Headless SwiftUI snapshots: passed
 - App bundle smoke: passed
 - Snapshots: .ai/validation/macos-overlay/headless-snapshots/
-- Fake Foreman calls: .ai/validation/macos-overlay/fake-foreman-calls.log
-- Verified: 2026-05-10T23:14:18Z
+- Fake Foreman calls: .ai/validation/macos-overlay/gauntlet/fake-foreman-calls.log
+- Verified: 2026-05-16T00:37:41Z

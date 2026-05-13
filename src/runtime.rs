@@ -13,6 +13,7 @@ use crate::integrations::{
     apply_configured_claude_signals, apply_configured_codex_signals, apply_configured_pi_signals,
     ClaudeNativeOverlaySummary, CodexNativeOverlaySummary, PiNativeOverlaySummary,
 };
+use crate::services::extensions::{collect_workspace_extensions, ControlExtensionCard};
 use crate::services::logging::RunLogger;
 use crate::services::notifications::{
     build_notification_dispatcher, NotificationDispatcher, NotificationRequest,
@@ -42,6 +43,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const SELECTION_PULL_REQUEST_LOOKUP_DEBOUNCE_MS: u64 = 180;
+const SELECTION_EXTENSION_LOOKUP_DEBOUNCE_MS: u64 = 180;
 const SLOW_RENDER_FRAME_MS: u128 = 33;
 const SLOW_ACTION_MS: u128 = 40;
 const SLOW_INVENTORY_REFRESH_MS: u128 = 200;
@@ -50,6 +52,7 @@ const SLOW_STARTUP_CACHE_WRITE_MS: u128 = 20;
 const OFFSCREEN_PREVIEW_REFRESH_BATCH: usize = 4;
 const STARTUP_CACHE_WRITE_INTERVAL_MS: u64 = 5_000;
 const PULL_REQUEST_LOOKUP_RESULT_POLL_MS: u64 = 50;
+const EXTENSION_LOOKUP_RESULT_POLL_MS: u64 = 50;
 const UI_PREFERENCES_WRITE_DEBOUNCE_MS: u64 = 300;
 
 pub(crate) fn run(prepared: PreparedBootstrap) -> Result<(), RuntimeError> {
@@ -60,6 +63,7 @@ pub(crate) fn run(prepared: PreparedBootstrap) -> Result<(), RuntimeError> {
 
     let mut runtime = DashboardRuntime::new(prepared);
     runtime.maybe_refresh_selected_pull_request(true, "bootstrap")?;
+    runtime.maybe_refresh_selected_extensions(true, "bootstrap")?;
     runtime.run_loop(&mut terminal)
 }
 
@@ -91,10 +95,13 @@ struct DashboardRuntime {
     tmux: TmuxAdapter<SystemTmuxBackend>,
     pull_requests: PullRequestService<SystemPullRequestBackend>,
     pull_request_lookup: PullRequestLookupWorker,
+    extension_lookup: ExtensionLookupWorker,
     notifications: NotificationDispatcher,
     system_stats: SystemStatsService<SysinfoSystemStatsBackend>,
     last_pull_request_lookup: BTreeMap<PathBuf, Instant>,
     pending_pull_request_lookup: Option<PendingPullRequestLookup>,
+    last_extension_lookup: BTreeMap<PathBuf, Instant>,
+    pending_extension_lookup: Option<PendingExtensionLookup>,
     offscreen_capture_cursor: usize,
     inventory_refresh: InventoryRefreshWorker,
     notification_policy_epoch: u64,
@@ -106,6 +113,12 @@ struct DashboardRuntime {
 
 #[derive(Debug, Clone)]
 struct PendingPullRequestLookup {
+    workspace_path: PathBuf,
+    due_at: Instant,
+}
+
+#[derive(Debug, Clone)]
+struct PendingExtensionLookup {
     workspace_path: PathBuf,
     due_at: Instant,
 }
@@ -134,6 +147,32 @@ struct PullRequestLookupResult {
     trigger: &'static str,
     elapsed_ms: u128,
     lookup: PullRequestLookup,
+}
+
+struct ExtensionLookupWorker {
+    request_tx: Sender<ExtensionLookupCommand>,
+    result_rx: Receiver<ExtensionLookupResult>,
+    next_generation: u64,
+    in_flight_generation: Option<u64>,
+}
+
+enum ExtensionLookupCommand {
+    Lookup(ExtensionLookupRequest),
+    Shutdown,
+}
+
+struct ExtensionLookupRequest {
+    generation: u64,
+    workspace_path: PathBuf,
+    trigger: &'static str,
+}
+
+struct ExtensionLookupResult {
+    generation: u64,
+    workspace_path: PathBuf,
+    trigger: &'static str,
+    elapsed_ms: u128,
+    cards: Vec<ControlExtensionCard>,
 }
 
 struct InventoryRefreshWorker {
@@ -190,6 +229,7 @@ impl DashboardRuntime {
         let tmux = TmuxAdapter::new(SystemTmuxBackend::new(prepared.runtime.tmux_socket.clone()));
         let inventory_refresh = spawn_inventory_refresh_worker(prepared.runtime.clone());
         let pull_request_lookup = spawn_pull_request_lookup_worker();
+        let extension_lookup = spawn_extension_lookup_worker();
         let startup_cache = StartupCacheTracker {
             last_written_at_ms: prepared.startup_cache_generated_at_ms,
         };
@@ -198,6 +238,7 @@ impl DashboardRuntime {
             tmux,
             pull_requests: PullRequestService::new(SystemPullRequestBackend::new()),
             pull_request_lookup,
+            extension_lookup,
             notifications: build_notification_dispatcher(
                 &prepared.runtime.notification_backends,
                 &prepared.runtime.notification_sound_profile,
@@ -209,6 +250,8 @@ impl DashboardRuntime {
             system_stats: SystemStatsService::new(SysinfoSystemStatsBackend::new()),
             last_pull_request_lookup: BTreeMap::new(),
             pending_pull_request_lookup: None,
+            last_extension_lookup: BTreeMap::new(),
+            pending_extension_lookup: None,
             offscreen_capture_cursor: 0,
             inventory_refresh,
             notification_policy_epoch: 0,
@@ -250,6 +293,7 @@ impl DashboardRuntime {
                 self.drain_inventory_refresh_results()?;
             }
             self.drain_pull_request_lookup_results()?;
+            self.drain_extension_lookup_results()?;
             self.maybe_flush_ui_preferences(false, "debounce")?;
             let current_size = terminal.size()?;
             let sidebar_rows = sidebar_viewport_rows_for_area_with_popup(
@@ -319,7 +363,8 @@ impl DashboardRuntime {
                                 self.maybe_flush_ui_preferences(true, "shutdown")?;
                                 break;
                             }
-                            self.schedule_selected_pull_request_refresh(previous_workspace);
+                            self.schedule_selected_pull_request_refresh(previous_workspace.clone());
+                            self.schedule_selected_extension_refresh(previous_workspace);
                         }
                     }
                     Event::Paste(text) => {
@@ -343,7 +388,9 @@ impl DashboardRuntime {
             }
 
             self.run_pending_pull_request_refresh()?;
+            self.run_pending_extension_refresh()?;
             self.drain_pull_request_lookup_results()?;
+            self.drain_extension_lookup_results()?;
 
             if last_inventory_refresh.elapsed() >= poll_interval {
                 self.request_inventory_refresh()?;
@@ -626,6 +673,7 @@ impl DashboardRuntime {
         self.refresh_runtime_diagnostics(&claude_native, &codex_native, &pi_native)?;
 
         self.maybe_refresh_selected_pull_request(false, "inventory-refresh")?;
+        self.maybe_refresh_selected_extensions(false, "inventory-refresh")?;
         self.logger.log_timing(
             "inventory_refresh",
             &format!("outcome={outcome} elapsed_ms={elapsed_ms}"),
@@ -876,6 +924,117 @@ impl DashboardRuntime {
         Ok(())
     }
 
+    fn maybe_refresh_selected_extensions(
+        &mut self,
+        force: bool,
+        trigger: &'static str,
+    ) -> Result<(), RuntimeError> {
+        let Some(workspace_path) = self.state.selected_workspace_path() else {
+            self.clear_pending_extension_lookup()?;
+            return Ok(());
+        };
+
+        if !self.extension_lookup_due(&workspace_path, force) {
+            return Ok(());
+        }
+
+        self.request_extension_lookup(workspace_path, trigger)
+    }
+
+    fn request_extension_lookup(
+        &mut self,
+        workspace_path: PathBuf,
+        trigger: &'static str,
+    ) -> Result<(), RuntimeError> {
+        if self.extension_lookup.in_flight_generation.is_some() {
+            self.replace_pending_extension_lookup(PendingExtensionLookup {
+                workspace_path: workspace_path.clone(),
+                due_at: Instant::now()
+                    + Duration::from_millis(SELECTION_EXTENSION_LOOKUP_DEBOUNCE_MS),
+            })?;
+            self.apply_runtime_action(Action::SetExtensionRefreshing {
+                workspace_path,
+                refreshing: true,
+            })?;
+            return Ok(());
+        }
+
+        let generation = self.extension_lookup.next_generation;
+        self.extension_lookup.next_generation += 1;
+        self.extension_lookup.in_flight_generation = Some(generation);
+        self.apply_runtime_action(Action::SetExtensionRefreshing {
+            workspace_path: workspace_path.clone(),
+            refreshing: true,
+        })?;
+        let send_result = self
+            .extension_lookup
+            .request_tx
+            .send(ExtensionLookupCommand::Lookup(ExtensionLookupRequest {
+                generation,
+                workspace_path: workspace_path.clone(),
+                trigger,
+            }));
+        if let Err(error) = send_result {
+            self.extension_lookup.in_flight_generation = None;
+            self.apply_runtime_action(Action::SetExtensionRefreshing {
+                workspace_path,
+                refreshing: false,
+            })?;
+            return Err(io::Error::new(io::ErrorKind::BrokenPipe, error.to_string()).into());
+        }
+
+        Ok(())
+    }
+
+    fn drain_extension_lookup_results(&mut self) -> Result<(), RuntimeError> {
+        loop {
+            match self.extension_lookup.result_rx.try_recv() {
+                Ok(result) => self.apply_extension_lookup_result(result)?,
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => break,
+            }
+        }
+
+        Ok(())
+    }
+
+    fn apply_extension_lookup_result(
+        &mut self,
+        result: ExtensionLookupResult,
+    ) -> Result<(), RuntimeError> {
+        if self.extension_lookup.in_flight_generation != Some(result.generation) {
+            return Ok(());
+        }
+
+        self.extension_lookup.in_flight_generation = None;
+        let ExtensionLookupResult {
+            workspace_path,
+            trigger,
+            elapsed_ms,
+            cards,
+            ..
+        } = result;
+        self.last_extension_lookup
+            .insert(workspace_path.clone(), Instant::now());
+        self.logger.log_timing(
+            "extension_lookup",
+            &format!(
+                "trigger={trigger} workspace={} cards={} elapsed_ms={elapsed_ms}",
+                workspace_path.display(),
+                cards.len(),
+            ),
+        )?;
+        self.apply_runtime_action(Action::SetExtensionRefreshing {
+            workspace_path: workspace_path.clone(),
+            refreshing: false,
+        })?;
+        self.apply_runtime_action(Action::SetExtensionCards {
+            workspace_path,
+            cards,
+        })?;
+        Ok(())
+    }
+
     fn apply_pull_request_lookup_result(
         &mut self,
         result: PullRequestLookupResult,
@@ -1080,19 +1239,32 @@ impl DashboardRuntime {
     }
 
     fn next_wait_timeout(&self, inventory_timeout: Duration) -> Duration {
-        let pending_timeout = self
+        let pending_pull_request_timeout = self
             .pending_pull_request_lookup
             .as_ref()
             .map(|pending| pending.due_at.saturating_duration_since(Instant::now()))
             .unwrap_or(inventory_timeout);
-        let lookup_result_timeout = if self.pull_request_lookup.in_flight_generation.is_some() {
+        let pending_extension_timeout = self
+            .pending_extension_lookup
+            .as_ref()
+            .map(|pending| pending.due_at.saturating_duration_since(Instant::now()))
+            .unwrap_or(inventory_timeout);
+        let pull_request_result_timeout = if self.pull_request_lookup.in_flight_generation.is_some()
+        {
             Duration::from_millis(PULL_REQUEST_LOOKUP_RESULT_POLL_MS)
         } else {
             inventory_timeout
         };
+        let extension_result_timeout = if self.extension_lookup.in_flight_generation.is_some() {
+            Duration::from_millis(EXTENSION_LOOKUP_RESULT_POLL_MS)
+        } else {
+            inventory_timeout
+        };
         inventory_timeout
-            .min(pending_timeout)
-            .min(lookup_result_timeout)
+            .min(pending_pull_request_timeout)
+            .min(pending_extension_timeout)
+            .min(pull_request_result_timeout)
+            .min(extension_result_timeout)
             .min(self.ui_preferences_flush_timeout(inventory_timeout))
     }
 
@@ -1148,6 +1320,52 @@ impl DashboardRuntime {
         self.maybe_refresh_selected_pull_request(false, "selection-idle")
     }
 
+    fn schedule_selected_extension_refresh(&mut self, previous_workspace: Option<PathBuf>) {
+        let current_workspace = self.state.selected_workspace_path();
+        if current_workspace == previous_workspace {
+            return;
+        }
+
+        let Some(workspace_path) = current_workspace else {
+            self.pending_extension_lookup = None;
+            return;
+        };
+
+        if !self.extension_lookup_due(&workspace_path, false) {
+            self.pending_extension_lookup = None;
+            return;
+        }
+
+        self.pending_extension_lookup = Some(PendingExtensionLookup {
+            workspace_path,
+            due_at: Instant::now() + Duration::from_millis(SELECTION_EXTENSION_LOOKUP_DEBOUNCE_MS),
+        });
+    }
+
+    fn run_pending_extension_refresh(&mut self) -> Result<(), RuntimeError> {
+        let Some(pending) = self.pending_extension_lookup.clone() else {
+            return Ok(());
+        };
+
+        if pending.due_at > Instant::now() {
+            return Ok(());
+        }
+
+        let Some(selected_workspace) = self.state.selected_workspace_path() else {
+            self.clear_pending_extension_lookup()?;
+            return Ok(());
+        };
+
+        if selected_workspace != pending.workspace_path {
+            self.clear_pending_extension_lookup()?;
+            self.schedule_selected_extension_refresh(Some(pending.workspace_path));
+            return Ok(());
+        }
+
+        self.pending_extension_lookup = None;
+        self.maybe_refresh_selected_extensions(false, "selection-idle")
+    }
+
     fn replace_pending_pull_request_lookup(
         &mut self,
         pending: PendingPullRequestLookup,
@@ -1183,6 +1401,41 @@ impl DashboardRuntime {
         Ok(())
     }
 
+    fn replace_pending_extension_lookup(
+        &mut self,
+        pending: PendingExtensionLookup,
+    ) -> Result<(), RuntimeError> {
+        if let Some(previous) = self.pending_extension_lookup.replace(pending) {
+            self.clear_extension_refreshing_for(previous.workspace_path)?;
+        }
+        Ok(())
+    }
+
+    fn clear_pending_extension_lookup(&mut self) -> Result<(), RuntimeError> {
+        if let Some(pending) = self.pending_extension_lookup.take() {
+            self.clear_extension_refreshing_for(pending.workspace_path)?;
+        }
+        Ok(())
+    }
+
+    fn clear_extension_refreshing_for(
+        &mut self,
+        workspace_path: PathBuf,
+    ) -> Result<(), RuntimeError> {
+        if self
+            .state
+            .extension_refreshing_workspace
+            .as_ref()
+            .is_some_and(|refreshing| refreshing == &workspace_path)
+        {
+            self.apply_runtime_action(Action::SetExtensionRefreshing {
+                workspace_path,
+                refreshing: false,
+            })?;
+        }
+        Ok(())
+    }
+
     fn pull_request_lookup_due(&self, workspace_path: &PathBuf, force: bool) -> bool {
         let poll_interval =
             Duration::from_millis(self.runtime.pull_request_poll_interval_ms.max(1));
@@ -1190,6 +1443,19 @@ impl DashboardRuntime {
             || !self.state.pull_request_cache.contains_key(workspace_path)
             || self
                 .last_pull_request_lookup
+                .get(workspace_path)
+                .is_none_or(|last_lookup| last_lookup.elapsed() >= poll_interval)
+    }
+
+    fn extension_lookup_due(&self, workspace_path: &PathBuf, force: bool) -> bool {
+        let poll_interval = Duration::from_millis(self.runtime.extension_poll_interval_ms.max(1));
+        force
+            || !self
+                .state
+                .extension_cards_cache
+                .contains_key(workspace_path)
+            || self
+                .last_extension_lookup
                 .get(workspace_path)
                 .is_none_or(|last_lookup| last_lookup.elapsed() >= poll_interval)
     }
@@ -1294,6 +1560,12 @@ impl Drop for PullRequestLookupWorker {
     }
 }
 
+impl Drop for ExtensionLookupWorker {
+    fn drop(&mut self) {
+        let _ = self.request_tx.send(ExtensionLookupCommand::Shutdown);
+    }
+}
+
 fn rotating_capture_batch(
     pane_ids: &[crate::app::PaneId],
     cursor: &mut usize,
@@ -1385,6 +1657,44 @@ fn spawn_pull_request_lookup_worker() -> PullRequestLookupWorker {
         .expect("pull request lookup worker should spawn");
 
     PullRequestLookupWorker {
+        request_tx,
+        result_rx,
+        next_generation: 0,
+        in_flight_generation: None,
+    }
+}
+
+fn spawn_extension_lookup_worker() -> ExtensionLookupWorker {
+    let (request_tx, request_rx) = mpsc::channel::<ExtensionLookupCommand>();
+    let (result_tx, result_rx) = mpsc::channel::<ExtensionLookupResult>();
+
+    thread::Builder::new()
+        .name("foreman-extension-lookup".to_string())
+        .spawn(move || {
+            while let Ok(command) = request_rx.recv() {
+                match command {
+                    ExtensionLookupCommand::Lookup(request) => {
+                        let lookup_started = Instant::now();
+                        let cards = collect_workspace_extensions(std::slice::from_ref(
+                            &request.workspace_path,
+                        ))
+                        .remove(&request.workspace_path)
+                        .unwrap_or_default();
+                        let _ = result_tx.send(ExtensionLookupResult {
+                            generation: request.generation,
+                            workspace_path: request.workspace_path,
+                            trigger: request.trigger,
+                            elapsed_ms: lookup_started.elapsed().as_millis(),
+                            cards,
+                        });
+                    }
+                    ExtensionLookupCommand::Shutdown => break,
+                }
+            }
+        })
+        .expect("extension lookup worker should spawn");
+
+    ExtensionLookupWorker {
         request_tx,
         result_rx,
         next_generation: 0,

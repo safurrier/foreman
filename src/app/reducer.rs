@@ -99,6 +99,26 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             state.pull_request_cache.insert(workspace_path, lookup);
             reconcile_pull_request_detail(state);
         }
+        Action::SetExtensionCards {
+            workspace_path,
+            cards,
+        } => {
+            state.extension_cards_cache.insert(workspace_path, cards);
+        }
+        Action::SetExtensionRefreshing {
+            workspace_path,
+            refreshing,
+        } => {
+            if refreshing {
+                state.extension_refreshing_workspace = Some(workspace_path);
+            } else if state
+                .extension_refreshing_workspace
+                .as_ref()
+                .is_some_and(|current| current == &workspace_path)
+            {
+                state.extension_refreshing_workspace = None;
+            }
+        }
         Action::SetRuntimeDiagnostics(diagnostics) => {
             state.runtime_diagnostics = diagnostics;
         }
@@ -846,6 +866,7 @@ mod tests {
         Focus, HarnessKind, ModalState, Mode, OperatorAlertLevel, OperatorAlertSource, PaneBuilder,
         SelectionDirection, SelectionTarget, SessionBuilder, SortMode, WindowBuilder,
     };
+    use crate::services::extensions::ControlExtensionCard;
     use crate::services::pull_requests::{PullRequestData, PullRequestLookup, PullRequestStatus};
     use crate::services::system_stats::SystemStatsSnapshot;
     use std::path::PathBuf;
@@ -1778,6 +1799,51 @@ mod tests {
 
         assert!(state.is_pull_request_detail_open());
         assert!(state.pull_request_detail_manual);
+    }
+
+    #[test]
+    fn extension_cards_are_cached_for_selected_workspace() {
+        let mut state = AppState::with_inventory(sample_inventory());
+        state.selection = Some(SelectionTarget::Pane("alpha:claude".into()));
+
+        reduce(
+            &mut state,
+            Action::SetExtensionRefreshing {
+                workspace_path: PathBuf::from("/tmp/alpha"),
+                refreshing: true,
+            },
+        );
+        assert!(state.selected_extension_refreshing());
+
+        reduce(
+            &mut state,
+            Action::SetExtensionCards {
+                workspace_path: PathBuf::from("/tmp/alpha"),
+                cards: vec![ControlExtensionCard {
+                    id: "hk".to_string(),
+                    title: "Harness Kit".to_string(),
+                    status: "ready".to_string(),
+                    status_label: "READY".to_string(),
+                    summary: "ready".to_string(),
+                    rows: Vec::new(),
+                    actions: Vec::new(),
+                }],
+            },
+        );
+        reduce(
+            &mut state,
+            Action::SetExtensionRefreshing {
+                workspace_path: PathBuf::from("/tmp/alpha"),
+                refreshing: false,
+            },
+        );
+
+        let cards = state
+            .selected_extension_cards()
+            .expect("cards should be cached");
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0].id, "hk");
+        assert!(!state.selected_extension_refreshing());
     }
 
     #[test]

@@ -1,4 +1,6 @@
 pub mod control_api;
+pub mod extensions;
+pub mod linked_repositories;
 pub mod logging;
 pub mod notifications;
 pub mod pull_requests;

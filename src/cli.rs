@@ -16,7 +16,11 @@ use crate::integrations::{
     ClaudeNativeOverlaySummary, CodexNativeOverlaySummary, PiNativeOverlaySummary,
 };
 use crate::services::control_api::{
-    agents_response, attach_pull_request, focus_response, send_response,
+    agents_response, attach_extension_cards, attach_pull_request, focus_response, send_response,
+};
+use crate::services::linked_repositories::{
+    linked_repositories_file, load_linked_repositories, resolve_git_repository,
+    save_linked_repositories,
 };
 use crate::services::logging::{RunLogSummary, RunLogger};
 use crate::services::pull_requests::{
@@ -27,7 +31,7 @@ use crate::services::system_stats::{SysinfoSystemStatsBackend, SystemStatsServic
 use crate::services::ui_preferences::{
     apply_preferences_to_runtime, load_ui_preferences, reset_ui_preferences, PersistedUiPreferences,
 };
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use std::fmt;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -36,6 +40,9 @@ use std::time::Instant;
 const CLI_ABOUT: &str = "Foreman - watch and control AI coding agents running in tmux.";
 const CLI_LONG_ABOUT: &str = "Foreman is a keyboard-first dashboard for AI coding agents running in tmux.\n\nUse when: you want one operator surface for Claude Code, Codex, Pi, Gemini, or OpenCode panes.\nDon't use to: inspect a plain tmux tree with no agent workflow.";
 const CLI_AFTER_HELP: &str = "First-time setup:\n  foreman --setup --user --project\n  foreman --doctor\n  foreman\n\nInspect resolved paths/config:\n  foreman --config-show\n\nPreview safe doctor fixes:\n  foreman --doctor --doctor-fix --doctor-dry-run\n\nPreview setup changes:\n  foreman --setup --user --project --dry-run\n\nScoped installs:\n  foreman --setup --user\n  foreman --setup --project --codex --repo /path/to/repo\n\nAnother repo:\n  foreman --setup --project --repo /path/to/repo\n  foreman --doctor --repo /path/to/repo";
+const LINKS_ABOUT: &str = "Inspect and manage explicit pane-to-repository links.";
+const LINKS_LONG_ABOUT: &str = "Repository links let Foreman associate a tmux pane with a git repository different from the pane's current working directory.\n\nUse when: an agent is running from notes, Obsidian, scratch space, or a launcher directory, but PR/HK/provider state belongs to a code repo elsewhere.\nDon't use when: the pane is already running from the repository Foreman should inspect.\n\nForeman still displays the pane's real working directory as Workspace, but uses the linked repository for PR lookup, HK cards, and extension providers. Links are persisted beside Foreman's config and guarded by the pane working-directory fingerprint to avoid stale tmux pane-id reuse.";
+const LINKS_AFTER_HELP: &str = "Agent workflow:\n  1. Identify the pane id. If you are inside the target tmux pane, run: echo \"$TMUX_PANE\"\n  2. If you are outside the pane, inspect candidates with: foreman agents --json\n  3. Identify the intended code repo with: git -C <candidate-path> rev-parse --show-toplevel\n  4. Link the pane to that repo: foreman links add --pane %82 --repo ~/git_repositories/foreman --json\n  5. Verify Foreman uses the linked target: foreman agents --json --extensions\n\nExamples:\n  foreman links list --json\n  foreman links add --pane %82 --repo ~/git_repositories/foreman --json\n  foreman links remove --pane %82 --json";
 
 #[derive(Debug, Parser, Clone)]
 #[command(
@@ -260,6 +267,11 @@ pub enum CliCommand {
             help = "Attach best-effort GitHub pull request metadata for each workspace."
         )]
         pull_requests: bool,
+        #[arg(
+            long,
+            help = "Attach read-only extension/provider cards for each workspace."
+        )]
+        extensions: bool,
     },
     /// Focus tmux on a pane.
     Focus {
@@ -270,6 +282,26 @@ pub enum CliCommand {
         )]
         pane: String,
         #[arg(long, help = "Print a JSON action result.")]
+        json: bool,
+    },
+    #[command(
+        about = LINKS_ABOUT,
+        long_about = LINKS_LONG_ABOUT,
+        after_help = LINKS_AFTER_HELP
+    )]
+    Links {
+        #[command(subcommand)]
+        command: Option<LinksCommand>,
+    },
+    /// Print read-only extension/provider cards for one live tmux pane as JSON.
+    Extensions {
+        #[arg(
+            long,
+            value_name = "PANE_ID",
+            help = "Live tmux pane id whose workspace target should be inspected, e.g. %42. Linked repository targets are applied by Foreman."
+        )]
+        pane: String,
+        #[arg(long, help = "Print a JSON extension-card result.")]
         json: bool,
     },
     /// Send text to a pane and press Enter.
@@ -287,6 +319,59 @@ pub enum CliCommand {
         #[arg(long, help = "Print a JSON action result.")]
         json: bool,
     },
+}
+
+#[derive(Debug, Subcommand, Clone, PartialEq, Eq)]
+pub enum LinksCommand {
+    /// Link a live tmux pane to the git repository Foreman should inspect.
+    #[command(
+        long_about = "Link a live tmux pane to the git repository Foreman should inspect.\n\nUse when: the pane is running from notes, Obsidian, scratch space, or a launcher directory, but the relevant PR/HK/provider state belongs to a different code repo.\nDon't use when: the pane's working directory is already the repo Foreman should inspect.\n\nThe command validates that the pane is live, resolves --repo to a git root, records the pane working directory as a stale-id guard, and persists the link beside Foreman's config."
+    )]
+    Add(LinkArgs),
+    /// Remove a persisted repository link for a tmux pane.
+    #[command(
+        alias = "rm",
+        long_about = "Remove a persisted repository link for a tmux pane.\n\nUse when: the pane should go back to using its real working directory for PR/HK/provider lookup, or when a stale/manual link is no longer wanted."
+    )]
+    Remove(UnlinkArgs),
+    /// List persisted repository links.
+    #[command(
+        long_about = "List persisted repository links and the linked-repositories.json path.\n\nUse before linking to inspect current state, or after linking to verify the saved mapping. This reads Foreman's config-area link file only; it does not mutate links or inspect providers."
+    )]
+    List {
+        #[arg(long, help = "Print persisted links as JSON for agent workflows.")]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Args, Clone, PartialEq, Eq)]
+pub struct LinkArgs {
+    #[arg(
+        long,
+        value_name = "PANE_ID",
+        help = "Live tmux pane id to link, e.g. %42. Inside the target pane, `echo $TMUX_PANE` prints this value."
+    )]
+    pub pane: String,
+    #[arg(
+        long,
+        value_name = "REPO",
+        help = "Git working tree Foreman should use for PR/HK/provider lookup. Foreman resolves this path with `git rev-parse --show-toplevel`."
+    )]
+    pub repo: PathBuf,
+    #[arg(long, help = "Print a JSON action result.")]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Clone, PartialEq, Eq)]
+pub struct UnlinkArgs {
+    #[arg(
+        long,
+        value_name = "PANE_ID",
+        help = "tmux pane id to unlink, e.g. %42."
+    )]
+    pub pane: String,
+    #[arg(long, help = "Print a JSON action result.")]
+    pub json: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -431,6 +516,149 @@ pub fn run_main(cli: Cli) -> Result<(), RunError> {
     Ok(())
 }
 
+fn link_pane_to_repository(
+    cli: &Cli,
+    paths: &crate::config::AppPaths,
+    args: &LinkArgs,
+) -> Result<RunOutcome, RunError> {
+    let pane_id = crate::app::PaneId::new(args.pane.clone());
+    let adapter = TmuxAdapter::new(SystemTmuxBackend::new(cli.tmux_socket.clone()));
+    let inventory = adapter.load_inventory(1).map_err(|error| {
+        RunError::Usage(format!(
+            "failed to inspect tmux panes before linking: {error}"
+        ))
+    })?;
+    let pane_working_dir = inventory
+        .pane(&pane_id)
+        .map(|pane| pane.working_dir.clone())
+        .ok_or_else(|| {
+            RunError::Usage(format!(
+                "cannot link unknown pane {}; choose a live tmux pane id",
+                pane_id.as_str()
+            ))
+        })?;
+    let repo_root = resolve_git_repository(&args.repo).map_err(|error| {
+        RunError::Usage(format!(
+            "failed to resolve linked repository {}: {error}",
+            args.repo.display()
+        ))
+    })?;
+    let mut links = load_linked_repositories(&paths.config_file).map_err(ConfigError::Io)?;
+    links.insert(pane_id.clone(), repo_root.clone(), pane_working_dir.clone());
+    save_linked_repositories(&paths.config_file, &links).map_err(ConfigError::Io)?;
+    let value = serde_json::json!({
+        "schemaVersion": crate::services::control_api::CONTROL_API_SCHEMA_VERSION,
+        "ok": true,
+        "action": "link",
+        "paneId": pane_id.as_str(),
+        "linkedRepository": repo_root,
+        "paneWorkingDir": pane_working_dir,
+        "path": linked_repositories_file(&paths.config_file),
+    });
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&value).map_err(|error| {
+                RunError::Usage(format!("failed to encode link JSON: {error}"))
+            })?
+        );
+    } else {
+        println!(
+            "Linked pane {} to {}",
+            pane_id.as_str(),
+            repo_root.display()
+        );
+    }
+    Ok(RunOutcome::ControlJson(value))
+}
+
+fn unlink_pane_repository(
+    paths: &crate::config::AppPaths,
+    args: &UnlinkArgs,
+) -> Result<RunOutcome, RunError> {
+    let pane_id = crate::app::PaneId::new(args.pane.clone());
+    let mut links = load_linked_repositories(&paths.config_file).map_err(ConfigError::Io)?;
+    let removed = links.remove(&pane_id);
+    save_linked_repositories(&paths.config_file, &links).map_err(ConfigError::Io)?;
+    let value = serde_json::json!({
+        "schemaVersion": crate::services::control_api::CONTROL_API_SCHEMA_VERSION,
+        "ok": true,
+        "action": "unlink",
+        "paneId": pane_id.as_str(),
+        "removed": removed,
+        "path": linked_repositories_file(&paths.config_file),
+    });
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&value).map_err(|error| {
+                RunError::Usage(format!("failed to encode unlink JSON: {error}"))
+            })?
+        );
+    } else if removed {
+        println!("Unlinked pane {}", pane_id.as_str());
+    } else {
+        println!("Pane {} had no linked repository", pane_id.as_str());
+    }
+    Ok(RunOutcome::ControlJson(value))
+}
+
+fn list_repository_links(
+    paths: &crate::config::AppPaths,
+    json: bool,
+) -> Result<RunOutcome, RunError> {
+    let links = load_linked_repositories(&paths.config_file).map_err(ConfigError::Io)?;
+    let path = linked_repositories_file(&paths.config_file);
+    let entries: Vec<_> = links
+        .links
+        .iter()
+        .map(|(pane_id, link)| {
+            serde_json::json!({
+                "paneId": pane_id.as_str(),
+                "linkedRepository": &link.repository,
+                "paneWorkingDir": &link.pane_working_dir,
+            })
+        })
+        .collect();
+    let value = serde_json::json!({
+        "schemaVersion": crate::services::control_api::CONTROL_API_SCHEMA_VERSION,
+        "ok": true,
+        "action": "links.list",
+        "path": path,
+        "links": entries,
+    });
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&value).map_err(|error| {
+                RunError::Usage(format!("failed to encode links list JSON: {error}"))
+            })?
+        );
+    } else if links.links.is_empty() {
+        println!("No linked repositories recorded.");
+        println!("Path: {}", path.display());
+    } else {
+        println!("Linked repositories:");
+        for (pane_id, link) in &links.links {
+            match &link.pane_working_dir {
+                Some(working_dir) => println!(
+                    "  {} -> {} (pane cwd guard: {})",
+                    pane_id.as_str(),
+                    link.repository.display(),
+                    working_dir.display()
+                ),
+                None => println!(
+                    "  {} -> {} (no pane cwd guard recorded)",
+                    pane_id.as_str(),
+                    link.repository.display()
+                ),
+            }
+        }
+        println!("Path: {}", path.display());
+    }
+    Ok(RunOutcome::ControlJson(value))
+}
+
 fn maybe_handle_control_command(
     cli: &Cli,
     paths: &crate::config::AppPaths,
@@ -448,14 +676,19 @@ fn maybe_handle_control_command(
         CliCommand::Agents {
             all_panes,
             pull_requests,
+            extensions,
             ..
         } => {
             let file_config = load_config(&paths.config_file)?;
             let runtime = RuntimeConfig::from_sources(paths.clone(), file_config, cli);
-            let (state, ..) = bootstrap_state(&runtime);
+            let (mut state, ..) = bootstrap_state(&runtime);
+            apply_linked_repositories_to_state(&mut state, &runtime);
             let mut response = agents_response(&state, *all_panes);
             if *pull_requests {
                 attach_pull_requests_to_response(&mut response);
+            }
+            if *extensions {
+                attach_extensions_to_response(&mut response);
             }
             let value = serde_json::to_value(&response).map_err(|error| {
                 RunError::Usage(format!("failed to encode agents JSON: {error}"))
@@ -490,6 +723,32 @@ fn maybe_handle_control_command(
                 );
             } else {
                 println!("Focused pane {}", pane_id.as_str());
+            }
+            Ok(Some(RunOutcome::ControlJson(value)))
+        }
+        CliCommand::Links { command } => match command {
+            Some(LinksCommand::Add(args)) => Ok(Some(link_pane_to_repository(cli, paths, args)?)),
+            Some(LinksCommand::Remove(args)) => Ok(Some(unlink_pane_repository(paths, args)?)),
+            Some(LinksCommand::List { json }) => Ok(Some(list_repository_links(paths, *json)?)),
+            None => Ok(Some(list_repository_links(paths, false)?)),
+        },
+        CliCommand::Extensions { pane, json } => {
+            let file_config = load_config(&paths.config_file)?;
+            let runtime = RuntimeConfig::from_sources(paths.clone(), file_config, cli);
+            let (mut state, ..) = bootstrap_state(&runtime);
+            apply_linked_repositories_to_state(&mut state, &runtime);
+            let pane_id = crate::app::PaneId::new(pane.clone());
+            let value = extension_cards_response_for_pane(&state, &pane_id)?;
+            if *json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&value).map_err(|error| {
+                        RunError::Usage(format!("failed to encode extension JSON: {error}"))
+                    })?
+                );
+            } else {
+                let count = value["extensionCards"].as_array().map_or(0, Vec::len);
+                println!("Extension cards for {}: {}", pane_id.as_str(), count);
             }
             Ok(Some(RunOutcome::ControlJson(value)))
         }
@@ -540,18 +799,93 @@ fn maybe_handle_control_command(
     }
 }
 
+fn extension_cards_response_for_pane(
+    state: &AppState,
+    pane_id: &crate::app::PaneId,
+) -> Result<serde_json::Value, RunError> {
+    extension_cards_response_for_pane_with_collector(state, pane_id, |target| {
+        use crate::services::extensions::collect_workspace_extensions;
+        collect_workspace_extensions(std::slice::from_ref(target))
+            .remove(target)
+            .unwrap_or_default()
+    })
+}
+
+fn extension_cards_response_for_pane_with_collector<F>(
+    state: &AppState,
+    pane_id: &crate::app::PaneId,
+    collect: F,
+) -> Result<serde_json::Value, RunError>
+where
+    F: FnOnce(&PathBuf) -> Vec<crate::services::extensions::ControlExtensionCard>,
+{
+    let pane = state.inventory.pane(pane_id).ok_or_else(|| {
+        RunError::Usage(format!(
+            "cannot inspect extensions for unknown pane {}; choose a live tmux pane id",
+            pane_id.as_str()
+        ))
+    })?;
+    let target_path = state.workspace_target_for_pane(pane).ok_or_else(|| {
+        RunError::Usage(format!(
+            "cannot inspect extensions for pane {}; pane has no workspace target",
+            pane_id.as_str()
+        ))
+    })?;
+    let workspace = pane.working_dir.clone();
+    let linked_repository = state.linked_repository_for_pane(pane).cloned();
+    let cards = collect(&target_path);
+    Ok(serde_json::json!({
+        "schemaVersion": crate::services::control_api::CONTROL_API_SCHEMA_VERSION,
+        "ok": true,
+        "action": "extensions",
+        "paneId": pane_id.as_str(),
+        "workspace": workspace,
+        "linkedRepository": linked_repository,
+        "targetPath": target_path,
+        "extensionCards": cards,
+    }))
+}
+
+fn entry_workspace_target(entry: &crate::services::control_api::AgentEntry) -> Option<PathBuf> {
+    entry
+        .linked_repository
+        .as_ref()
+        .or(entry.working_dir.as_ref())
+        .map(PathBuf::from)
+}
+
+fn attach_extensions_to_response(response: &mut crate::services::control_api::AgentsResponse) {
+    use crate::services::extensions::collect_workspace_extensions;
+
+    let workspaces = response
+        .entries
+        .iter()
+        .filter_map(entry_workspace_target)
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let cache = collect_workspace_extensions(&workspaces);
+
+    for entry in &mut response.entries {
+        let Some(path) = entry_workspace_target(entry) else {
+            continue;
+        };
+        if let Some(cards) = cache.get(&path).filter(|cards| !cards.is_empty()) {
+            attach_extension_cards(entry, cards.clone());
+        }
+    }
+}
+
 fn attach_pull_requests_to_response(response: &mut crate::services::control_api::AgentsResponse) {
     use std::collections::BTreeMap;
-    use std::path::PathBuf;
 
     let service = PullRequestService::new(SystemPullRequestBackend::new());
     let mut cache = BTreeMap::<PathBuf, PullRequestLookup>::new();
 
     for entry in &mut response.entries {
-        let Some(working_dir) = entry.working_dir.as_ref() else {
+        let Some(path) = entry_workspace_target(entry) else {
             continue;
         };
-        let path = PathBuf::from(working_dir);
         let lookup = cache.entry(path.clone()).or_insert_with(|| {
             service
                 .lookup(&path)
@@ -933,6 +1267,7 @@ pub(crate) fn prepare_bootstrap(
     let (mut state, tmux_metrics, native_timing, claude_native, codex_native, pi_native) =
         bootstrap_state(&runtime);
     apply_ui_preferences_to_state(&mut state, &runtime, &ui_preferences);
+    apply_linked_repositories_to_state(&mut state, &runtime);
     apply_ui_preferences_error_to_state(&mut state, &runtime, ui_preferences_error.as_deref());
     logger
             .log_timing(
@@ -1168,6 +1503,7 @@ fn prepare_runtime_bootstrap(
         ),
     };
     apply_runtime_state_defaults(&mut state, &runtime, &ui_preferences);
+    apply_linked_repositories_to_state(&mut state, &runtime);
     apply_ui_preferences_error_to_state(&mut state, &runtime, ui_preferences_error.as_deref());
 
     let persistent_runtime_diagnostics =
@@ -1230,6 +1566,56 @@ fn apply_runtime_state_defaults(
     state.notifications.profile = runtime.notification_profile;
     state.notifications.cooldown_ticks = runtime.notification_cooldown_ticks;
     apply_ui_preferences_to_state(state, runtime, ui_preferences);
+}
+
+fn apply_linked_repositories_to_state(state: &mut AppState, runtime: &RuntimeConfig) {
+    match load_linked_repositories(&runtime.config_file) {
+        Ok(links) => {
+            let mut skipped = Vec::new();
+            let mut linked_repositories = std::collections::BTreeMap::new();
+            let mut linked_repository_pane_working_dirs = std::collections::BTreeMap::new();
+            for (pane_id, link) in links.links {
+                match resolve_git_repository(&link.repository) {
+                    Ok(repo_root) => {
+                        if let Some(pane) = state.inventory.pane(&pane_id) {
+                            if link.pane_working_dir != pane.working_dir {
+                                skipped
+                                    .push(format!("{}: pane identity changed", pane_id.as_str()));
+                                continue;
+                            }
+                        }
+                        linked_repository_pane_working_dirs
+                            .insert(pane_id.clone(), link.pane_working_dir);
+                        linked_repositories.insert(pane_id, repo_root);
+                    }
+                    Err(error) => {
+                        skipped.push(format!("{}: {error}", pane_id.as_str()));
+                    }
+                }
+            }
+            state.linked_repositories = linked_repositories;
+            state.linked_repository_pane_working_dirs = linked_repository_pane_working_dirs;
+            state.rebuild_visible_state();
+            state.reconcile_selection();
+            if !skipped.is_empty() {
+                state.operator_alert = Some(OperatorAlert::new(
+                    OperatorAlertSource::Diagnostics,
+                    OperatorAlertLevel::Warn,
+                    format!(
+                        "Ignored stale linked repository target(s): {}",
+                        skipped.join(", ")
+                    ),
+                ));
+            }
+        }
+        Err(error) => {
+            state.operator_alert = Some(OperatorAlert::new(
+                OperatorAlertSource::Diagnostics,
+                OperatorAlertLevel::Warn,
+                format!("Linked repository state could not be loaded: {error}"),
+            ));
+        }
+    }
 }
 
 fn apply_ui_preferences_to_state(
@@ -1405,16 +1791,20 @@ pub(crate) fn bootstrap_state(
 
 #[cfg(test)]
 mod tests {
-    use super::{prepare_runtime_bootstrap, run, Cli, RunOutcome};
+    use super::{
+        extension_cards_response_for_pane_with_collector, prepare_runtime_bootstrap, run, Cli,
+        RunOutcome,
+    };
     use crate::app::{
-        inventory, HarnessKind, OperatorAlertSource, PaneBuilder, SelectionTarget, SessionBuilder,
-        SortMode, WindowBuilder,
+        inventory, AppState, HarnessKind, OperatorAlertSource, PaneBuilder, PaneId,
+        SelectionTarget, SessionBuilder, SortMode, WindowBuilder,
     };
     use crate::config::resolve_paths;
     use crate::services::startup_cache::write_startup_cache;
     use crate::services::ui_preferences::{save_ui_preferences, PersistedUiPreferences};
     use crate::ui::theme::ThemeName;
     use clap::Parser;
+    use std::path::PathBuf;
     use tempfile::tempdir;
 
     #[test]
@@ -1486,6 +1876,183 @@ mod tests {
         assert!(error
             .to_string()
             .contains("control subcommands cannot be combined with --doctor"));
+    }
+
+    #[test]
+    fn links_help_guides_agents_to_link_working_sessions() {
+        let help = Cli::try_parse_from(["foreman", "links", "--help"])
+            .expect_err("--help should render help")
+            .to_string();
+
+        assert!(help.contains("Repository links let Foreman associate a tmux pane"));
+        assert!(help.contains("Use when: an agent is running from notes, Obsidian"));
+        assert!(help.contains("echo \"$TMUX_PANE\""));
+        assert!(help.contains("foreman agents --json"));
+        assert!(
+            help.contains("foreman links add --pane %82 --repo ~/git_repositories/foreman --json")
+        );
+        assert!(help.contains("foreman links list --json"));
+        assert!(!help.contains("foreman link --pane"));
+        assert!(!help.contains("foreman unlink --pane"));
+
+        let add_help = Cli::try_parse_from(["foreman", "links", "add", "--help"])
+            .expect_err("--help should render add help")
+            .to_string();
+        assert!(add_help.contains("validates that the pane is live"));
+        assert!(add_help.contains("`echo $TMUX_PANE`"));
+    }
+
+    #[test]
+    fn top_level_link_aliases_are_not_supported() {
+        let link_error = Cli::try_parse_from([
+            "foreman",
+            "link",
+            "--pane",
+            "%82",
+            "--repo",
+            "/tmp/foreman",
+            "--json",
+        ])
+        .expect_err("top-level link should not parse");
+        assert!(link_error
+            .to_string()
+            .contains("unrecognized subcommand 'link'"));
+
+        let unlink_error = Cli::try_parse_from(["foreman", "unlink", "--pane", "%82", "--json"])
+            .expect_err("top-level unlink should not parse");
+        assert!(unlink_error
+            .to_string()
+            .contains("unrecognized subcommand 'unlink'"));
+    }
+
+    #[test]
+    fn extensions_response_uses_valid_linked_repository_target() {
+        let inventory = inventory([SessionBuilder::new("notes").window(
+            WindowBuilder::new("main").pane(
+                PaneBuilder::agent("%52", HarnessKind::Pi)
+                    .working_dir("/tmp/obsidian")
+                    .preview("working from notes"),
+            ),
+        )]);
+        let mut state = AppState::with_inventory(inventory);
+        state
+            .linked_repositories
+            .insert(PaneId::new("%52"), PathBuf::from("/tmp/code"));
+        state
+            .linked_repository_pane_working_dirs
+            .insert(PaneId::new("%52"), Some(PathBuf::from("/tmp/obsidian")));
+
+        let response = extension_cards_response_for_pane_with_collector(
+            &state,
+            &PaneId::new("%52"),
+            |target| {
+                assert_eq!(target, &PathBuf::from("/tmp/code"));
+                vec![test_extension_card("hk")]
+            },
+        )
+        .expect("extension response");
+
+        assert_eq!(response["paneId"], "%52");
+        assert_eq!(response["workspace"], "/tmp/obsidian");
+        assert_eq!(response["linkedRepository"], "/tmp/code");
+        assert_eq!(response["targetPath"], "/tmp/code");
+        assert_eq!(response["extensionCards"][0]["id"], "hk");
+    }
+
+    #[test]
+    fn extensions_response_ignores_stale_linked_repository_target() {
+        let inventory = inventory([SessionBuilder::new("notes")
+            .window(WindowBuilder::new("main").pane(
+                PaneBuilder::agent("%52", HarnessKind::Pi).working_dir("/tmp/current-notes"),
+            ))]);
+        let mut state = AppState::with_inventory(inventory);
+        state
+            .linked_repositories
+            .insert(PaneId::new("%52"), PathBuf::from("/tmp/code"));
+        state
+            .linked_repository_pane_working_dirs
+            .insert(PaneId::new("%52"), Some(PathBuf::from("/tmp/old-notes")));
+
+        let response = extension_cards_response_for_pane_with_collector(
+            &state,
+            &PaneId::new("%52"),
+            |target| {
+                assert_eq!(target, &PathBuf::from("/tmp/current-notes"));
+                Vec::new()
+            },
+        )
+        .expect("extension response");
+
+        assert_eq!(response["linkedRepository"], serde_json::Value::Null);
+        assert_eq!(response["targetPath"], "/tmp/current-notes");
+    }
+
+    #[test]
+    fn extensions_response_rejects_unknown_pane() {
+        let state = AppState::with_inventory(inventory([SessionBuilder::new("empty")]));
+
+        let error = extension_cards_response_for_pane_with_collector(
+            &state,
+            &PaneId::new("%999999"),
+            |_| Vec::new(),
+        )
+        .expect_err("unknown pane should fail");
+
+        assert!(error
+            .to_string()
+            .contains("cannot inspect extensions for unknown pane %999999"));
+    }
+
+    fn test_extension_card(id: &str) -> crate::services::extensions::ControlExtensionCard {
+        crate::services::extensions::ControlExtensionCard {
+            id: id.to_string(),
+            title: "Harness Kit".to_string(),
+            status: "ready".to_string(),
+            status_label: "READY".to_string(),
+            summary: "ready".to_string(),
+            rows: Vec::new(),
+            actions: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn links_list_prints_persisted_links_as_json() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let config = temp_dir.path().join("config.toml");
+        let mut links = crate::services::linked_repositories::LinkedRepositories::default();
+        links.insert(
+            PaneId::new("%82"),
+            PathBuf::from("/tmp/foreman"),
+            Some(PathBuf::from("/tmp/obsidian-vault")),
+        );
+        crate::services::linked_repositories::save_linked_repositories(&config, &links)
+            .expect("save links");
+        let cli = Cli::parse_from([
+            "foreman",
+            "--config-file",
+            config.to_str().expect("utf-8 path"),
+            "links",
+            "list",
+            "--json",
+        ]);
+
+        let outcome = run(cli).expect("run should succeed");
+
+        let RunOutcome::ControlJson(value) = outcome else {
+            panic!("expected links list JSON, got {outcome:?}");
+        };
+        assert_eq!(value["action"], "links.list");
+        assert_eq!(value["links"][0]["paneId"], "%82");
+        assert_eq!(value["links"][0]["linkedRepository"], "/tmp/foreman");
+        assert_eq!(value["links"][0]["paneWorkingDir"], "/tmp/obsidian-vault");
+        assert_eq!(
+            value["path"],
+            temp_dir
+                .path()
+                .join("linked-repositories.json")
+                .to_string_lossy()
+                .as_ref()
+        );
     }
 
     #[test]

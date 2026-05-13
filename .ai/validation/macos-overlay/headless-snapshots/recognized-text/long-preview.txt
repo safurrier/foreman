@@ -21,11 +21,16 @@ pi
 Workspace
 /workspace/foreman
 ATTENTION
+Region: Details
+Focus
+Refresh
+Compose
+Settings
 Pull Request #123
 OPEN
 Polish native Foreman overlay controls
 foreman • spec/macos-overlay → main • @example-user
-Open PR
+Extension cards loading..
 Recent Output
 19: overlay preview line used to prove keyboard
 scrolling and bounded visual layout in the detail
@@ -36,13 +41,8 @@ pane.
 21: overlay preview line used to prove keyboard
 scrolling and bounded visual layout in the detail
 pane.
-22: overlay preview line used to prove keyboard
-scrolling and bounded visual layout in the detail
-Region: Details
-Focus
-Refresh
-Compose
-Settings
+one suantau anavis lins wand to anaus kauhaand
 Details • T/ scroll preview • Enter focus • Cmd+J jump •
 Tab compose • Cmd+, settings • Cmd+T theme
+Open PR
 Theme: System

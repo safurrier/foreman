@@ -3,22 +3,23 @@ project-alpha startup
 Pi • notes • notes-vault • %35
 • project-alpha review
 Pi • notes • notes-vault • %33
-WORKING
-WORKING
 • project-alpha skill
 Pi • notes • notes-vault • %36
+WORKING
+WORKING
 IDLE
 notes-vault
 notes / project-alpha startup / %35
 Harness
-Source
-Command
-Workspace
-Recent Output
 Pi
+Source
 native hook
+Command
 pi
+Workspace
 /workspace/notes-vault
+Extension cards loading...
+Recent Output
 WORKING
 Working on startup notes.
 Region: List

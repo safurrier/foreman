@@ -1,0 +1,6 @@
+id = "hk"
+title = "Harness Kit"
+scope = "repo"
+command = "./hk-provider.py"
+args = ["--repo", "{repo}"]
+timeout-ms = 30000

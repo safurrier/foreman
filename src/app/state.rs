@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use crate::doctor::DoctorFinding;
+use crate::services::extensions::ControlExtensionCard;
 use crate::services::pull_requests::{PullRequestData, PullRequestLookup};
 use crate::services::system_stats::SystemStatsSnapshot;
 
@@ -1116,11 +1117,15 @@ pub struct AppState {
     pub collapsed_sessions: BTreeSet<SessionId>,
     pub search: Option<SearchState>,
     pub flash: Option<FlashState>,
+    pub linked_repositories: BTreeMap<PaneId, PathBuf>,
+    pub linked_repository_pane_working_dirs: BTreeMap<PaneId, Option<PathBuf>>,
     pub pull_request_cache: BTreeMap<PathBuf, PullRequestLookup>,
     pub pull_request_detail_workspace: Option<PathBuf>,
     pub pull_request_detail_manual: bool,
     pub pull_request_auto_open_dismissed: BTreeSet<PathBuf>,
     pub pull_request_refreshing_workspace: Option<PathBuf>,
+    pub extension_cards_cache: BTreeMap<PathBuf, Vec<ControlExtensionCard>>,
+    pub extension_refreshing_workspace: Option<PathBuf>,
     pub notifications: NotificationState,
     pub input_draft: TextDraft,
     pub modal: Option<ModalState>,
@@ -1165,11 +1170,15 @@ impl Default for AppState {
             collapsed_sessions: BTreeSet::new(),
             search: None,
             flash: None,
+            linked_repositories: BTreeMap::new(),
+            linked_repository_pane_working_dirs: BTreeMap::new(),
             pull_request_cache: BTreeMap::new(),
             pull_request_detail_workspace: None,
             pull_request_detail_manual: false,
             pull_request_auto_open_dismissed: BTreeSet::new(),
             pull_request_refreshing_workspace: None,
+            extension_cards_cache: BTreeMap::new(),
+            extension_refreshing_workspace: None,
             notifications: NotificationState::default(),
             input_draft: TextDraft::default(),
             modal: None,
@@ -1471,6 +1480,20 @@ impl AppState {
         self.selected_actionable_pane().map(|pane| pane.id.clone())
     }
 
+    pub fn linked_repository_for_pane(&self, pane: &Pane) -> Option<&PathBuf> {
+        let expected_working_dir = self.linked_repository_pane_working_dirs.get(&pane.id)?;
+        if expected_working_dir != &pane.working_dir {
+            return None;
+        }
+        self.linked_repositories.get(&pane.id)
+    }
+
+    pub fn workspace_target_for_pane(&self, pane: &Pane) -> Option<PathBuf> {
+        self.linked_repository_for_pane(pane)
+            .cloned()
+            .or_else(|| pane.working_dir.clone())
+    }
+
     pub fn selected_actionable_workspace_path(&self) -> Option<PathBuf> {
         let target = self.selection.as_ref()?;
         if let Some(entry) = self.selected_visible_entry() {
@@ -1481,11 +1504,11 @@ impl AppState {
             SelectionTarget::Pane(pane_id) => self
                 .inventory
                 .pane(pane_id)
-                .and_then(|pane| pane.working_dir.clone()),
+                .and_then(|pane| self.workspace_target_for_pane(pane)),
             SelectionTarget::Session(_) | SelectionTarget::Window(_) => self
                 .inventory
                 .actionable_pane_for_target(target, &self.filters, self.sort_mode)
-                .and_then(|pane| pane.working_dir.clone()),
+                .and_then(|pane| self.workspace_target_for_pane(pane)),
         }
     }
 
@@ -1586,25 +1609,28 @@ impl AppState {
     }
 
     pub fn selected_workspace_path(&self) -> Option<PathBuf> {
-        let target = self.selection.as_ref()?;
-        if let Some(entry) = self.selected_visible_entry() {
-            return entry.actionable_workspace_path.clone();
-        }
-        match target {
-            SelectionTarget::Pane(pane_id) => self
-                .inventory
-                .pane(pane_id)
-                .and_then(|pane| pane.working_dir.clone()),
-            SelectionTarget::Session(_) | SelectionTarget::Window(_) => self
-                .inventory
-                .actionable_pane_for_target(target, &self.filters, self.sort_mode)
-                .and_then(|pane| pane.working_dir.clone()),
-        }
+        self.selected_actionable_workspace_path()
     }
 
     pub fn selected_pull_request_lookup(&self) -> Option<&PullRequestLookup> {
         let workspace_path = self.selected_workspace_path()?;
         self.pull_request_cache.get(&workspace_path)
+    }
+
+    pub fn selected_extension_cards(&self) -> Option<&[ControlExtensionCard]> {
+        let workspace_path = self.selected_workspace_path()?;
+        self.extension_cards_cache
+            .get(&workspace_path)
+            .map(Vec::as_slice)
+    }
+
+    pub fn selected_extension_refreshing(&self) -> bool {
+        self.selected_workspace_path()
+            .as_ref()
+            .zip(self.extension_refreshing_workspace.as_ref())
+            .is_some_and(|(selected_workspace, refreshing_workspace)| {
+                selected_workspace == refreshing_workspace
+            })
     }
 
     pub fn selected_pull_request_refreshing(&self) -> bool {
@@ -1797,7 +1823,7 @@ impl AppState {
                 actionable_pane_id: session_visible_panes.first().map(|pane| pane.id.clone()),
                 actionable_workspace_path: session_visible_panes
                     .first()
-                    .and_then(|pane| pane.working_dir.clone()),
+                    .and_then(|pane| self.workspace_target_for_pane(pane)),
                 aggregate_workspace_path: unique_workspace_path(
                     session
                         .windows
@@ -1830,7 +1856,7 @@ impl AppState {
                         actionable_pane_id: visible_panes.first().map(|pane| pane.id.clone()),
                         actionable_workspace_path: visible_panes
                             .first()
-                            .and_then(|pane| pane.working_dir.clone()),
+                            .and_then(|pane| self.workspace_target_for_pane(pane)),
                         aggregate_workspace_path: unique_workspace_path(
                             window
                                 .panes
@@ -1850,7 +1876,7 @@ impl AppState {
                     entries.push(VisibleTargetEntry {
                         target: SelectionTarget::Pane(pane.id.clone()),
                         actionable_pane_id: Some(pane.id.clone()),
-                        actionable_workspace_path: pane.working_dir.clone(),
+                        actionable_workspace_path: self.workspace_target_for_pane(pane),
                         aggregate_workspace_path: pane.working_dir.clone(),
                         sidebar: SidebarRowKind::Pane {
                             navigation_title: if elide_window {
@@ -2005,7 +2031,7 @@ fn flash_label_for_index(mut index: usize, width: usize) -> String {
 mod tests {
     use super::{AppState, SearchState, SelectionTarget, SidebarRowKind, SortMode};
     use crate::app::{
-        inventory, AgentStatus, HarnessKind, PaneBuilder, SessionBuilder, WindowBuilder,
+        inventory, AgentStatus, HarnessKind, PaneBuilder, PaneId, SessionBuilder, WindowBuilder,
     };
     use std::path::PathBuf;
 
@@ -2313,6 +2339,41 @@ mod tests {
             .selected_visible_entry()
             .expect("window entry should exist");
         assert_eq!(window_entry.aggregate_workspace_path, None);
+    }
+
+    #[test]
+    fn selected_workspace_path_prefers_explicit_linked_repository() {
+        let inventory = inventory([SessionBuilder::new("notes").window(
+            WindowBuilder::new("notes:0").pane(
+                PaneBuilder::agent("notes:pane", HarnessKind::Pi)
+                    .working_dir("/tmp/obsidian")
+                    .status(AgentStatus::Working),
+            ),
+        )]);
+
+        let mut state = AppState::with_inventory(inventory);
+        state.linked_repositories.insert(
+            PaneId::new("notes:pane"),
+            PathBuf::from("/tmp/actual-code-repo"),
+        );
+        state.linked_repository_pane_working_dirs.insert(
+            PaneId::new("notes:pane"),
+            Some(PathBuf::from("/tmp/obsidian")),
+        );
+        state.rebuild_visible_state();
+        state.selection = Some(SelectionTarget::Pane(PaneId::new("notes:pane")));
+
+        assert_eq!(
+            state.selected_workspace_path(),
+            Some(PathBuf::from("/tmp/actual-code-repo"))
+        );
+        assert_eq!(
+            state
+                .selected_actionable_pane()
+                .and_then(|pane| pane.working_dir.as_ref())
+                .map(PathBuf::as_path),
+            Some(std::path::Path::new("/tmp/obsidian"))
+        );
     }
 
     #[test]

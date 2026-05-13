@@ -25,14 +25,16 @@ Pull Request #123
 OPEN
 Polish native Foreman overlay controls
 foreman • spec/macos-overlay → main • @example-user
-Open PR
+Extension cards loading...
 Recent Output
 Need input: choose whether the Swift overlay
 validation lane should capture full-screen
 screenshots first or window-scoped captures.
 Recommended next step: start with full-screen
-capture, then tighten to window capture once the
-panel exposes a stable accessibility identifier.
+AAntIIMA
+than tichtan
+tA jadam anatina anan tha
+Open PR
 Can you summarize the current validation failure?
 Send
 Region: Compose

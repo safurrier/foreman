@@ -1,9 +1,16 @@
-2026-05-05 14:40:51.603 foreman-overlay[50262:2606218] Foreman overlay loaded 3 visible entries; total panes: 5
-2026-05-05 14:40:51.647 foreman-overlay[50262:2606218] Foreman overlay loaded 3 visible entries; total panes: 5
-2026-05-05 14:40:52.476 foreman-overlay[50262:2606218] Foreman overlay terminal activation skipped; app not running: com.foreman.NonexistentTerminalFixture
-2026-05-05 14:40:52.975 foreman-overlay[50262:2606218] Foreman overlay loaded 3 visible entries; total panes: 5
-2026-05-05 14:40:53.234 foreman-overlay[50262:2606218] Foreman overlay terminal activation skipped; app not running: com.foreman.NonexistentTerminalFixture
-2026-05-05 14:40:53.724 foreman-overlay[50262:2606218] Foreman overlay loaded 3 visible entries; total panes: 5
-2026-05-05 14:40:54.346 foreman-overlay[50262:2606218] Foreman overlay loaded 3 visible entries; total panes: 5
-2026-05-05 14:40:54.981 foreman-overlay[50262:2606218] Foreman overlay loaded 3 visible entries; total panes: 5
-2026-05-05 14:40:54.981 foreman-overlay[50262:2606218] Foreman overlay loaded 3 visible entries; total panes: 5
+2026-05-15 17:37:05.065 foreman-overlay[40893:595936292] Foreman overlay hotkey configured from settings recorder: ⇧⌘F
+2026-05-15 17:37:05.480 foreman-overlay[40893:595936292] Foreman overlay loaded 3 visible entries; total panes: 5
+2026-05-15 17:37:06.584 foreman-overlay[40893:595936292] overlay gauntlet flash passed
+2026-05-15 17:37:06.743 foreman-overlay[40893:595936292] overlay gauntlet help passed
+2026-05-15 17:37:06.896 foreman-overlay[40893:595936292] overlay gauntlet help scroll passed
+2026-05-15 17:37:07.050 foreman-overlay[40893:595936292] overlay gauntlet arrow navigation passed
+2026-05-15 17:37:07.466 foreman-overlay[40893:595936292] overlay gauntlet focusing pane: [101]
+2026-05-15 17:37:07.569 foreman-overlay[40893:595936292] Foreman overlay terminal activation skipped; app not running: com.foreman.NonexistentTerminalFixture
+2026-05-15 17:37:08.085 foreman-overlay[40893:595936292] Foreman overlay loaded 3 visible entries; total panes: 5
+2026-05-15 17:37:08.342 foreman-overlay[40893:595936292] Foreman overlay terminal activation skipped; app not running: com.foreman.NonexistentTerminalFixture
+2026-05-15 17:37:08.852 foreman-overlay[40893:595936292] Foreman overlay loaded 3 visible entries; total panes: 5
+2026-05-15 17:37:09.495 foreman-overlay[40893:595936292] Foreman overlay loaded 3 visible entries; total panes: 5
+2026-05-15 17:37:10.075 foreman-overlay[40893:595936292] Foreman overlay loaded 3 visible entries; total panes: 5
+2026-05-15 17:37:10.581 foreman-overlay[40893:595936292] Foreman overlay hotkey configured from settings recorder: —
+2026-05-15 17:37:10.609 foreman-overlay[40893:595936292] Foreman overlay hotkey configured from settings recorder: ⌥⌘F
+2026-05-15 17:37:10.636 foreman-overlay[40893:595936292] overlay gauntlet shortcut settings passed

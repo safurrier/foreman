@@ -23,7 +23,7 @@ IDLE
 ERROR
 agent 19
 agent-19 / work-19
-/ %219
+• / %219
 Harness
 Pi
 Source
@@ -32,9 +32,9 @@ Command
 pi
 Workspace
 /workspace/workspace-19
+Extension cards loading...
 Recent Output
-Fixture agent 19 preview. Status IDLE from
-Pi.
+Fixture agent 19 preview. Status IDLE from Pi.
 IDLE
 ATTENTION
 WORKING

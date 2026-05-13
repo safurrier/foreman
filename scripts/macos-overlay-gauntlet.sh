@@ -28,6 +28,16 @@ case "${1:-}" in
   agents)
     cat "${FOREMAN_OVERLAY_FIXTURE_JSON:?}"
     ;;
+  extensions)
+    pane=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --pane) shift; pane="${1:-}" ;;
+      esac
+      shift || true
+    done
+    printf '{"schemaVersion":1,"ok":true,"action":"extensions","paneId":"%s","workspace":"/workspace/foreman","linkedRepository":null,"targetPath":"/workspace/foreman","extensionCards":[{"id":"hk","title":"Harness Kit","status":"ready","statusLabel":"READY","summary":"Ready","rows":[],"actions":[]}]}\n' "$pane"
+    ;;
   focus)
     pane=""
     while [ "$#" -gt 0 ]; do
@@ -95,9 +105,15 @@ else
   exit "$status"
 fi
 
-agents_count=$(grep -Ec '^agents --json( --pull-requests)?$' "$CALL_LOG" || true)
+agents_count=$(grep -Ec '^agents --json --pull-requests$' "$CALL_LOG" || true)
 if [ "$agents_count" -lt 2 ]; then
-  echo "expected at least two agents --json calls, saw $agents_count" >&2
+  echo "expected at least two PR-first agents --json calls, saw $agents_count" >&2
+  cat "$CALL_LOG" >&2
+  exit 1
+fi
+extensions_count=$(grep -Ec '^extensions --pane %[0-9]+ --json$' "$CALL_LOG" || true)
+if [ "$extensions_count" -lt 1 ]; then
+  echo "expected at least one selected-pane extension lookup, saw $extensions_count" >&2
   cat "$CALL_LOG" >&2
   exit 1
 fi
