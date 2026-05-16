@@ -92,6 +92,8 @@ public struct OverlayView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding()
+        } else if store.response == nil && store.isLoading {
+            loadingState
         } else if store.entries.isEmpty && !store.isLoading {
             emptyState
         } else {
@@ -102,6 +104,27 @@ public struct OverlayView: View {
                 detailPane
             }
         }
+    }
+
+    private var loadingState: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "terminal")
+                .font(.system(size: 38, weight: .semibold))
+                .foregroundStyle(themeAccent)
+            Text("Foreman")
+                .font(.title2.weight(.semibold))
+            HStack(spacing: 8) {
+                ProgressView().scaleEffect(0.7)
+                Text("Finding agent sessions…")
+                    .font(.headline)
+            }
+            Text("Checking tmux panes, pull requests, and extension providers.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
     }
 
     @ViewBuilder
@@ -206,6 +229,22 @@ public struct OverlayView: View {
                         .accessibilityLabel(store.activeRegion == .pullRequest ? "Active region: Pull Request" : "Pull Request")
                 }
 
+                ForEach(entry.extensionCards) { card in
+                    ExtensionCardView(card: card, accent: themeAccent) { action in
+                        performExtensionAction(action)
+                    }
+                }
+
+                if entry.extensionCards.isEmpty && store.selectedEntryIsLoadingExtensions {
+                    Text("Extension cards loading…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if entry.extensionCards.isEmpty, let extensionError = store.selectedEntryExtensionError {
+                    Text("Extension cards unavailable: \(extensionError)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Text("Recent Output")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
@@ -226,6 +265,9 @@ public struct OverlayView: View {
             GridRow { metaLabel("Source"); Text(entry.statusSource ?? "Unknown") }
             GridRow { metaLabel("Command"); Text(entry.runtimeCommand ?? entry.currentCommand ?? "Unknown") }
             GridRow { metaLabel("Workspace"); Text(entry.workingDir ?? "Unknown").lineLimit(2) }
+            if let linkedRepository = entry.linkedRepository {
+                GridRow { metaLabel("Linked repo"); Text(linkedRepository).lineLimit(2) }
+            }
         }
         .font(.caption)
     }
@@ -234,6 +276,19 @@ public struct OverlayView: View {
         Text(text).foregroundStyle(.secondary).frame(width: 72, alignment: .trailing)
     }
 
+    private func performExtensionAction(_ action: ControlExtensionAction) {
+        switch action.kind {
+        case "open-file":
+            store.requestOpenURL(URL(fileURLWithPath: action.value).absoluteString)
+        case "open-url":
+            store.requestOpenURL(action.value)
+        case "copy":
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(action.value, forType: .string)
+        default:
+            break
+        }
+    }
 
     private var footer: some View {
         HStack(spacing: 14) {

@@ -12,4 +12,4 @@
 - help scroll via j: passed
 - arrow-key navigation: passed
 - missing terminal activation skip: passed
-- Verified: 2026-05-10T23:13:52Z
+- Verified: 2026-05-16T00:37:10Z

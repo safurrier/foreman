@@ -21,6 +21,7 @@ index:
 ## Operate Foreman
 
 - [Operator Guide](operator-guide.md) — install, setup, dashboard, config, hooks, notifications, and troubleshooting
+- [Harness Kit Provider](providers/harness-kit.md) — install and operate the read-only HK extension card provider
 - [macOS App Bundle](macos-overlay/app-bundle.md) — build, install, launch, and smoke-test `Foreman.app`
 - [macOS Overlay Validation](macos-overlay/validation.md) — required overlay change lane, snapshots, gauntlet, and manual smoke checks
 

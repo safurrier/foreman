@@ -14,9 +14,14 @@ public final class OverlayStore: ObservableObject {
             if activeRegion == .pullRequest, selectedEntry?.pullRequest == nil {
                 activeRegion = .detail
             }
+            scheduleSelectedExtensionLookup()
         }
     }
     @Published public var isLoading = false
+    @Published public var isLoadingExtensions = false
+    @Published public var extensionErrorMessage: String?
+    @Published public var extensionErrorPaneId: String?
+    @Published public var extensionLoadingPaneId: String?
     @Published public var errorMessage: String?
     @Published public var composeText = ""
     @Published public var isComposing = false
@@ -36,8 +41,11 @@ public final class OverlayStore: ObservableObject {
     private var client: ForemanClient
     private var preferenceCancellable: AnyCancellable?
     private var reloadTask: Task<Void, Never>?
+    private var extensionLookupTask: Task<Void, Never>?
     private var preferenceReloadTask: Task<Void, Never>?
     private var reloadGeneration = 0
+    private var extensionLookupGeneration = 0
+    private var extensionLoadedPaneIds = Set<String>()
     private var lastIncludeAllPanes: Bool
 
     public init(client: ForemanClient, preferences: OverlayPreferences = OverlayPreferences()) {
@@ -111,6 +119,16 @@ public final class OverlayStore: ObservableObject {
         return entries.first { $0.id == selectionId }
     }
 
+    public var selectedEntryIsLoadingExtensions: Bool {
+        guard let selectedEntry else { return false }
+        return isLoadingExtensions && extensionLoadingPaneId == selectedEntry.paneId
+    }
+
+    public var selectedEntryExtensionError: String? {
+        guard let selectedEntry, extensionErrorPaneId == selectedEntry.paneId else { return nil }
+        return extensionErrorMessage
+    }
+
     private func normalizeSelection() {
         let visible = entries
         let normalized = visible.contains { $0.id == selectionId } ? selectionId : visible.first?.id
@@ -161,15 +179,22 @@ public final class OverlayStore: ObservableObject {
 
     public func reload() {
         reloadGeneration += 1
+        extensionLookupGeneration += 1
         let generation = reloadGeneration
         reloadTask?.cancel()
+        extensionLookupTask?.cancel()
+        extensionLoadedPaneIds.removeAll()
         isLoading = true
+        isLoadingExtensions = false
+        extensionLoadingPaneId = nil
         errorMessage = nil
+        extensionErrorMessage = nil
+        extensionErrorPaneId = nil
         client.includeAllPanes = preferences.includeAllPanes
         let loadClient = client
         reloadTask = Task { [weak self] in
             do {
-                let loaded = try await loadClient.agents()
+                let loaded = try await loadClient.initialAgents()
                 guard let self, !Task.isCancelled, generation == self.reloadGeneration else { return }
                 response = loaded
                 lastReloadSummary = "Loaded \(loaded.entries.count) agent session(s)"
@@ -178,6 +203,7 @@ public final class OverlayStore: ObservableObject {
                     selectionId = loaded.entries.first?.id
                 }
                 isLoading = false
+                scheduleSelectedExtensionLookup()
             } catch is CancellationError {
                 guard let self, generation == self.reloadGeneration else { return }
                 isLoading = false
@@ -187,6 +213,55 @@ public final class OverlayStore: ObservableObject {
                 lastReloadSummary = "Reload failed: \(error.localizedDescription)"
                 NSLog("Foreman overlay reload failed: \(error.localizedDescription)")
                 isLoading = false
+            }
+        }
+    }
+
+    private func scheduleSelectedExtensionLookup() {
+        guard response != nil else { return }
+        guard let entry = selectedEntry else {
+            extensionLookupGeneration += 1
+            extensionLookupTask?.cancel()
+            isLoadingExtensions = false
+            extensionLoadingPaneId = nil
+            extensionErrorMessage = nil
+            extensionErrorPaneId = nil
+            return
+        }
+        extensionErrorMessage = nil
+        extensionErrorPaneId = nil
+        guard entry.extensionCards.isEmpty else { return }
+        guard !extensionLoadedPaneIds.contains(entry.paneId) else { return }
+        extensionLookupGeneration += 1
+        let lookupGeneration = extensionLookupGeneration
+        let reloadGeneration = reloadGeneration
+        let paneId = entry.paneId
+        extensionLookupTask?.cancel()
+        isLoadingExtensions = true
+        extensionLoadingPaneId = paneId
+        extensionErrorMessage = nil
+        let loadClient = client
+        extensionLookupTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(120))
+                let loaded = try await loadClient.extensionCards(forPane: paneId)
+                guard let self, !Task.isCancelled, reloadGeneration == self.reloadGeneration, lookupGeneration == self.extensionLookupGeneration else { return }
+                guard self.selectedEntry?.paneId == paneId else { return }
+                response = response?.mergingExtensionCards(loaded.extensionCards, forPaneId: paneId)
+                extensionLoadedPaneIds.insert(paneId)
+                isLoadingExtensions = false
+                extensionLoadingPaneId = nil
+            } catch is CancellationError {
+                guard let self, reloadGeneration == self.reloadGeneration, lookupGeneration == self.extensionLookupGeneration else { return }
+                isLoadingExtensions = false
+                extensionLoadingPaneId = nil
+            } catch {
+                guard let self, !Task.isCancelled, reloadGeneration == self.reloadGeneration, lookupGeneration == self.extensionLookupGeneration else { return }
+                extensionErrorMessage = error.localizedDescription
+                extensionErrorPaneId = paneId
+                NSLog("Foreman overlay extension lookup failed for \(paneId): \(error.localizedDescription)")
+                isLoadingExtensions = false
+                extensionLoadingPaneId = nil
             }
         }
     }

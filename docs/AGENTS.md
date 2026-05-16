@@ -12,6 +12,7 @@
 |---|---|
 | [`workflows.md`](workflows.md) | HK lifecycle, validation ladder, and recurring non-code rough edges |
 | [`operator-guide.md`](operator-guide.md) | Install, setup, dashboard, config, hooks, notifications, and troubleshooting |
+| [`providers/harness-kit.md`](providers/harness-kit.md) | Install and operate the read-only Harness Kit extension-card provider |
 | [`macos-overlay/app-bundle.md`](macos-overlay/app-bundle.md) | Build, install, and smoke-test the native Foreman.app bundle |
 | [`macos-overlay/validation.md`](macos-overlay/validation.md) | Required macOS overlay validation lane, snapshots, gauntlet, and manual smoke checks |
 

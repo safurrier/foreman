@@ -20,6 +20,7 @@ WORKING
 IDLE
 ERROR
 ATTENTION
+WORKING
 agent 01
 agent-01 / work-01 / %201
 Harness
@@ -34,11 +35,11 @@ Pull Request #123
 OPEN
 Polish native Foreman overlay controls
 foreman • spec/macos-overlay → main • @example-user
+Extension cards loading..
 Recent Output
 Fixture agent 01 preview. Status ATTENTION from Pi.
 ATTENTION
 Open PR
-WORKING
 IDLE
 ERROR
 Region: List

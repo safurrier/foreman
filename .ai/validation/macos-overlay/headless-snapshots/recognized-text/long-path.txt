@@ -26,6 +26,7 @@ OPEN
 Polish native Foreman overlay controls
 foreman • spec/macos-overlay → main • @example-user
 Open PR
+Extension cards loading...
 Recent Output
 Need input: choose whether the Swift overlay
 validation lane should capture full-screen screenshots
@@ -38,6 +39,6 @@ Focus
 Refresh
 Compose
 Settings
-List • type search • T/J move • Enter focus • Cd+J jump • ?
+List • type search • / move • Enter focus • Cmd+J jump • ?
 help • Cmdt, settings • Cmd+T theme
 Theme: System

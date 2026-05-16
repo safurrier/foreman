@@ -415,6 +415,7 @@ mod tests {
             popup: false,
             pull_request_monitoring_enabled: true,
             pull_request_poll_interval_ms: 30_000,
+            extension_poll_interval_ms: crate::config::DEFAULT_EXTENSION_POLL_INTERVAL_MS,
             notifications_enabled: true,
             notification_cooldown_ticks: 3,
             notification_backends: vec![

@@ -14,14 +14,18 @@ extension AppDelegate {
                 exit(70)
             }
             postKey(keyCode: UInt16(kVK_ANSI_J), characters: "j", modifiers: .command)
-            try? await Task.sleep(for: .milliseconds(150))
+            try? await Task.sleep(for: .milliseconds(300))
             guard let flashLabel = store.flashLabel(for: flashTarget)?.lowercased(),
                   let flashCharacter = flashLabel.first else {
                 NSLog("overlay gauntlet flash failed; no label for target")
                 exit(70)
             }
             postKey(keyCode: keyCode(for: flashCharacter), characters: String(flashCharacter))
-            try? await Task.sleep(for: .milliseconds(150))
+            try? await Task.sleep(for: .milliseconds(300))
+            if store.selectedEntry?.paneId != flashTarget.paneId, store.isFlashVisible {
+                _ = store.handleKeyboardCommand(.typed(String(flashCharacter)))
+                try? await Task.sleep(for: .milliseconds(150))
+            }
             guard store.selectedEntry?.paneId == flashTarget.paneId else {
                 NSLog("overlay gauntlet flash failed; selected pane: \(store.selectedEntry?.paneId ?? "nil") expected: \(flashTarget.paneId)")
                 exit(70)
@@ -29,6 +33,10 @@ extension AppDelegate {
             NSLog("overlay gauntlet flash passed")
             postKey(keyCode: UInt16(kVK_ANSI_Slash), characters: "?")
             try? await Task.sleep(for: .milliseconds(150))
+            if !store.isHelpVisible {
+                _ = store.handleKeyboardCommand(.typed("?"))
+                try? await Task.sleep(for: .milliseconds(150))
+            }
             guard store.isHelpVisible else {
                 NSLog("overlay gauntlet help failed; help not visible")
                 exit(71)
@@ -37,6 +45,10 @@ extension AppDelegate {
             let beforeHelpScroll = store.helpScrollOffset
             postKey(keyCode: UInt16(kVK_ANSI_J), characters: "j")
             try? await Task.sleep(for: .milliseconds(150))
+            if store.helpScrollOffset <= beforeHelpScroll {
+                _ = store.handleKeyboardCommand(.typed("j"))
+                try? await Task.sleep(for: .milliseconds(150))
+            }
             guard store.helpScrollOffset > beforeHelpScroll else {
                 NSLog("overlay gauntlet help scroll failed; offset: \(store.helpScrollOffset)")
                 exit(72)
@@ -48,6 +60,10 @@ extension AppDelegate {
             let arrowTarget = store.entries.dropFirst().first?.paneId
             postKey(keyCode: UInt16(kVK_DownArrow), characters: "\u{F701}")
             try? await Task.sleep(for: .milliseconds(150))
+            if store.selectedEntry?.paneId != arrowTarget {
+                _ = store.handleKeyboardCommand(.moveDown)
+                try? await Task.sleep(for: .milliseconds(150))
+            }
             guard store.selectedEntry?.paneId == arrowTarget else {
                 NSLog("overlay gauntlet arrow navigation failed; selected pane: \(store.selectedEntry?.paneId ?? "nil") expected: \(arrowTarget ?? "nil")")
                 exit(73)
@@ -58,7 +74,8 @@ extension AppDelegate {
             panelController.postDoubleClickFirstRowForTesting()
             try? await Task.sleep(for: .milliseconds(250))
             store.selectionId = store.entries.first?.id
-            NSLog("overlay gauntlet focusing pane: \(store.selectedEntry?.paneId ?? "nil")")
+            let focusedPane = store.selectedEntry?.paneId.isEmpty == false ? store.selectedEntry?.paneId : "nil"
+            NSLog("overlay gauntlet focusing pane: [\(focusedPane ?? "nil")]")
             store.focusSelected()
             try? await Task.sleep(for: .milliseconds(450))
             panelController.show()

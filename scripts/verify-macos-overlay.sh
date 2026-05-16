@@ -40,7 +40,7 @@ cat > "$SUMMARY" <<EOF
 - Headless SwiftUI snapshots: passed
 - App bundle smoke: passed
 - Snapshots: .ai/validation/macos-overlay/headless-snapshots/
-- Fake Foreman calls: .ai/validation/macos-overlay/fake-foreman-calls.log
+- Fake Foreman calls: .ai/validation/macos-overlay/gauntlet/fake-foreman-calls.log
 - Verified: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF
 

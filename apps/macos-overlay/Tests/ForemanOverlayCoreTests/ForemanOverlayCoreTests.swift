@@ -3,6 +3,7 @@ import XCTest
 
 actor SequencedProcessResults {
     private var results: [(delay: Duration, outcome: Result<ProcessResult, Error>)]
+    private(set) var arguments: [[String]] = []
 
     init(_ results: [(delay: Duration, result: ProcessResult)]) {
         self.results = results.map { ($0.delay, .success($0.result)) }
@@ -12,7 +13,8 @@ actor SequencedProcessResults {
         self.results = outcomes
     }
 
-    func next() async throws -> ProcessResult {
+    func next(arguments: [String]) async throws -> ProcessResult {
+        self.arguments.append(arguments)
         let item = results.removeFirst()
         try await Task.sleep(for: item.delay)
         return try item.outcome.get()
@@ -23,7 +25,7 @@ struct SequencedRunner: ProcessRunning {
     let sequence: SequencedProcessResults
 
     func run(_ executable: String, _ arguments: [String], stdin: String?) async throws -> ProcessResult {
-        try await sequence.next()
+        try await sequence.next(arguments: arguments)
     }
 }
 
@@ -42,6 +44,10 @@ actor RecordedProcessCalls {
 
     func lastArguments() -> [String]? {
         arguments.last
+    }
+
+    func allArguments() -> [[String]] {
+        arguments
     }
 }
 
@@ -411,6 +417,80 @@ final class ForemanOverlayCoreTests: XCTestCase {
     }
 
     @MainActor
+    func testReloadStagesPullRequestsBeforeSelectedExtensionLookup() async throws {
+        let fixture = try fixtureStringWithPullRequest()
+        let extensionJSON = extensionCardsJSON(paneId: "%101", cardId: "hk")
+        let sequence = SequencedProcessResults([
+            (.milliseconds(1), ProcessResult(stdout: fixture, stderr: "", status: 0)),
+            (.milliseconds(1), ProcessResult(stdout: extensionJSON, stderr: "", status: 0)),
+        ])
+        let runner = SequencedRunner(sequence: sequence)
+        let store = OverlayStore(client: ForemanClient(foremanPath: "/fake/foreman", runner: runner), preferences: testPreferences())
+
+        store.reload()
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(store.response?.entries.first?.pullRequest?.number, 17)
+        XCTAssertEqual(store.response?.entries.first?.extensionCards.count, 0)
+        try await Task.sleep(for: .milliseconds(220))
+
+        XCTAssertEqual(store.response?.entries.first?.pullRequest?.number, 17)
+        XCTAssertEqual(store.response?.entries.first?.extensionCards.first?.id, "hk")
+        let calls = await sequence.arguments
+        XCTAssertEqual(calls, [
+            ["agents", "--json", "--pull-requests"],
+            ["extensions", "--pane", "%101", "--json"],
+        ])
+        XCTAssertFalse(store.isLoading)
+        XCTAssertFalse(store.isLoadingExtensions)
+    }
+
+    @MainActor
+    func testStaleSelectedExtensionLookupIsDiscarded() async throws {
+        let firstJSON = String(decoding: try fixtureData(), as: UTF8.self)
+        let secondJSON = firstJSON.replacingOccurrences(of: "%101", with: "%999")
+        let sequence = SequencedProcessResults([
+            (.milliseconds(1), ProcessResult(stdout: firstJSON, stderr: "", status: 0)),
+            (.milliseconds(220), ProcessResult(stdout: extensionCardsJSON(paneId: "%101", cardId: "old"), stderr: "", status: 0)),
+            (.milliseconds(1), ProcessResult(stdout: secondJSON, stderr: "", status: 0)),
+            (.milliseconds(1), ProcessResult(stdout: extensionCardsJSON(paneId: "%999", cardId: "new"), stderr: "", status: 0)),
+        ])
+        let runner = SequencedRunner(sequence: sequence)
+        let store = OverlayStore(client: ForemanClient(foremanPath: "/fake/foreman", runner: runner), preferences: testPreferences())
+
+        store.reload()
+        try await Task.sleep(for: .milliseconds(180))
+        store.reload()
+        try await Task.sleep(for: .milliseconds(450))
+
+        XCTAssertEqual(store.response?.entries.first?.paneId, "%999")
+        XCTAssertEqual(store.response?.entries.first?.extensionCards.first?.id, "new")
+        XCTAssertFalse(store.response?.entries.first?.extensionCards.contains { $0.id == "old" } ?? true)
+    }
+
+    @MainActor
+    func testSelectedExtensionLookupFailureKeepsPullRequestInventory() async throws {
+        let fixture = try fixtureStringWithPullRequest()
+        let sequence = SequencedProcessResults([
+            (.milliseconds(1), .success(ProcessResult(stdout: fixture, stderr: "", status: 0))),
+            (.milliseconds(1), .failure(ProcessRunnerError.timedOut(seconds: 10))),
+            (.milliseconds(1), .failure(ProcessRunnerError.timedOut(seconds: 10))),
+        ])
+        let runner = SequencedRunner(sequence: sequence)
+        let store = OverlayStore(client: ForemanClient(foremanPath: "/fake/foreman", runner: runner), preferences: testPreferences())
+
+        store.reload()
+        try await Task.sleep(for: .milliseconds(250))
+
+        XCTAssertEqual(store.response?.entries.first?.pullRequest?.number, 17)
+        XCTAssertEqual(store.response?.entries.first?.extensionCards.count, 0)
+        XCTAssertEqual(store.selectedEntryExtensionError, "process timed out after 10.0 second(s)")
+        store.selectionId = store.response?.entries.dropFirst().first?.id
+        XCTAssertNil(store.selectedEntryExtensionError)
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertFalse(store.isLoadingExtensions)
+    }
+
+    @MainActor
     func testIncludeAllPanesPreferenceSchedulesReload() async throws {
         let fixture = String(decoding: try fixtureData(), as: UTF8.self)
         let calls = RecordedProcessCalls(result: ProcessResult(stdout: fixture, stderr: "", status: 0))
@@ -420,8 +500,9 @@ final class ForemanOverlayCoreTests: XCTestCase {
         preferences.includeAllPanes = true
         try await Task.sleep(for: .milliseconds(250))
 
-        let lastArguments = await calls.lastArguments()
-        XCTAssertEqual(lastArguments, ["agents", "--json", "--pull-requests", "--all-panes"])
+        let allArguments = await calls.allArguments()
+        XCTAssertTrue(allArguments.contains(["agents", "--json", "--pull-requests", "--all-panes"]))
+        XCTAssertFalse(allArguments.contains(["agents", "--json", "--pull-requests", "--all-panes", "--extensions"]))
         XCTAssertFalse(store.isLoading)
     }
 
@@ -431,6 +512,7 @@ final class ForemanOverlayCoreTests: XCTestCase {
         let secondJSON = firstJSON.replacingOccurrences(of: "%101", with: "%999")
         let runner = SequencedRunner(sequence: SequencedProcessResults([
             (.milliseconds(200), ProcessResult(stdout: firstJSON, stderr: "", status: 0)),
+            (.milliseconds(10), ProcessResult(stdout: secondJSON, stderr: "", status: 0)),
             (.milliseconds(10), ProcessResult(stdout: secondJSON, stderr: "", status: 0)),
         ]))
         let store = OverlayStore(client: ForemanClient(foremanPath: "/fake/foreman", runner: runner), preferences: testPreferences())
@@ -465,7 +547,7 @@ final class ForemanOverlayCoreTests: XCTestCase {
         let fixture = try fixtureData()
         let runner = FakeRunner(
             result: ProcessResult(stdout: String(decoding: fixture, as: UTF8.self), stderr: "", status: 0),
-            expectedArguments: ["agents", "--json", "--pull-requests"]
+            expectedArguments: ["agents", "--json", "--pull-requests", "--extensions"]
         )
         let client = ForemanClient(foremanPath: "/fake/foreman", runner: runner)
 
@@ -478,24 +560,51 @@ final class ForemanOverlayCoreTests: XCTestCase {
         let fixture = try fixtureData()
         let runner = FakeRunner(
             result: ProcessResult(stdout: String(decoding: fixture, as: UTF8.self), stderr: "", status: 0),
-            expectedArguments: ["agents", "--json", "--pull-requests", "--all-panes"]
+            expectedArguments: ["agents", "--json", "--pull-requests", "--all-panes", "--extensions"]
         )
         let client = ForemanClient(foremanPath: "/fake/foreman", runner: runner, includeAllPanes: true)
 
         _ = try await client.agents()
     }
 
-    func testForemanClientFallsBackWhenPullRequestLookupTimesOut() async throws {
+    func testForemanClientKeepsPullRequestsWhenExtensionLookupTimesOut() async throws {
         let fixture = try fixtureData()
-        let runner = SequencedRunner(sequence: SequencedProcessResults([
+        let sequence = SequencedProcessResults([
             (.milliseconds(1), .failure(ProcessRunnerError.timedOut(seconds: 10))),
             (.milliseconds(1), .success(ProcessResult(stdout: String(decoding: fixture, as: UTF8.self), stderr: "", status: 0))),
-        ]))
+        ])
+        let runner = SequencedRunner(sequence: sequence)
         let client = ForemanClient(foremanPath: "/fake/foreman", runner: runner, includeAllPanes: true)
 
         let response = try await client.agents()
 
         XCTAssertEqual(response.entries.first?.paneId, "%101")
+        let calls = await sequence.arguments
+        XCTAssertEqual(calls, [
+            ["agents", "--json", "--pull-requests", "--all-panes", "--extensions"],
+            ["agents", "--json", "--pull-requests", "--all-panes"],
+        ])
+    }
+
+    func testForemanClientFallsBackToExtensionsWhenPullRequestRetryAlsoTimesOut() async throws {
+        let fixture = try fixtureData()
+        let sequence = SequencedProcessResults([
+            (.milliseconds(1), .failure(ProcessRunnerError.timedOut(seconds: 10))),
+            (.milliseconds(1), .failure(ProcessRunnerError.timedOut(seconds: 10))),
+            (.milliseconds(1), .success(ProcessResult(stdout: String(decoding: fixture, as: UTF8.self), stderr: "", status: 0))),
+        ])
+        let runner = SequencedRunner(sequence: sequence)
+        let client = ForemanClient(foremanPath: "/fake/foreman", runner: runner, includeAllPanes: true)
+
+        let response = try await client.agents()
+
+        XCTAssertEqual(response.entries.first?.paneId, "%101")
+        let calls = await sequence.arguments
+        XCTAssertEqual(calls, [
+            ["agents", "--json", "--pull-requests", "--all-panes", "--extensions"],
+            ["agents", "--json", "--pull-requests", "--all-panes"],
+            ["agents", "--json", "--all-panes", "--extensions"],
+        ])
     }
 
     func testForemanClientSurfacesCommandFailure() async throws {
@@ -586,6 +695,49 @@ final class ForemanOverlayCoreTests: XCTestCase {
 
     private func fixtureData() throws -> Data {
         try fixtureData(named: "agents-attention")
+    }
+
+    private func fixtureStringWithPullRequest() throws -> String {
+        let fixture = String(decoding: try fixtureData(), as: UTF8.self)
+        let pullRequest = #"""
+      "pullRequest": {
+        "number": 17,
+        "title": "Add extension provider cards",
+        "url": "https://github.com/safurrier/foreman/pull/17",
+        "repository": "foreman",
+        "branch": "feat/hk-provider-dots",
+        "baseBranch": "main",
+        "author": "safurrier",
+        "status": "open",
+        "statusLabel": "OPEN"
+      },
+"""#
+        return fixture.replacingOccurrences(of: "      \"activityScore\": 300", with: pullRequest + "      \"activityScore\": 300")
+    }
+
+    private func extensionCardsJSON(paneId: String, cardId: String) -> String {
+        """
+        {
+          "schemaVersion": 1,
+          "ok": true,
+          "action": "extensions",
+          "paneId": "\(paneId)",
+          "workspace": "/workspace/foreman",
+          "linkedRepository": null,
+          "targetPath": "/workspace/foreman",
+          "extensionCards": [
+            {
+              "id": "\(cardId)",
+              "title": "Harness Kit",
+              "status": "ready",
+              "statusLabel": "READY",
+              "summary": "Ready",
+              "rows": [],
+              "actions": []
+            }
+          ]
+        }
+        """
     }
 
     private func fixtureData(named name: String) throws -> Data {
