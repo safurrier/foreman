@@ -33,6 +33,17 @@ Foreman is built from this source checkout today. Release artifacts are publishe
 from version tags; do not assume a package registry install unless a release note
 or local workflow verifies it.
 
+## Demo
+
+The macOS overlay demo is generated from the real Swift renderer with fixture
+agent data, so it is deterministic rather than a live desktop recording.
+
+![Foreman macOS overlay demo](demos/macos-overlay-demo.gif)
+
+The terminal dashboard demo is a VHS recording of the TUI path:
+
+![Foreman dashboard demo](demos/readme-quickstart.gif)
+
 ## Why operators use it
 
 - One dashboard for agent panes instead of spelunking through tmux windows.
@@ -276,17 +287,6 @@ foreman send --pane %42 --text "continue" --json
 Use `foreman <command> --help` for the exact contract. These commands are the
 stable seam for clients; tmux scraping and native signal details stay behind the
 CLI.
-
-## Demo
-
-The macOS overlay demo is generated from the real Swift renderer with fixture
-agent data, so it is deterministic rather than a live desktop recording.
-
-![Foreman macOS overlay demo](demos/macos-overlay-demo.gif)
-
-The terminal dashboard demo is a VHS recording of the TUI path:
-
-![Foreman dashboard demo](demos/readme-quickstart.gif)
 
 ## Docs
 

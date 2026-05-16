@@ -21,7 +21,6 @@ states=(
   compose
   flash
   help
-  theme-indigo
 )
 
 list_file="$(mktemp)"
