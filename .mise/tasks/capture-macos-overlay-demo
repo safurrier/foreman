@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# MISE description="Build the deterministic macOS overlay README demo GIF/MP4"
+set -euo pipefail
+"$MISE_PROJECT_ROOT/scripts/capture-macos-overlay-demo.sh"

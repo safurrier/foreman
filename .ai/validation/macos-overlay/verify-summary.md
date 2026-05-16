@@ -8,4 +8,4 @@
 - App bundle smoke: passed
 - Snapshots: .ai/validation/macos-overlay/headless-snapshots/
 - Fake Foreman calls: .ai/validation/macos-overlay/gauntlet/fake-foreman-calls.log
-- Verified: 2026-05-16T00:37:41Z
+- Verified: 2026-05-16T03:43:05Z

@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.4.0 - 2026-05-16
+
+### Added
+
+- Added a generic read-only extension provider platform for Foreman control API
+  clients and the TUI Details pane.
+- Added `foreman agents --json --extensions` for all-workspace extension card
+  collection and `foreman extensions --pane <pane-id> --json` for selected-pane
+  extension lookup.
+- Added a Harness Kit provider example and docs that render HK lifecycle state as
+  Foreman cards without mutating HK work state.
+- Added explicit pane-to-repository links with `foreman links add/remove/list` so
+  PR and provider lookups can target a code repo even when an agent runs from
+  notes, scratch space, or a launcher directory.
+
+### Changed
+
+- Updated the macOS overlay to render PR/inventory first and fetch extension
+  cards only for the selected pane in the background.
+- Updated the README around the operator journey, control API, extension
+  provider platform, and release process.
+- Added a separate extension polling interval so local provider refresh cadence
+  is not coupled to pull request polling.
+
+### Fixed
+
+- Preserved PR cards when slow extension providers time out in the macOS overlay.
+- Avoided duplicate SwiftUI row identities for extension rows with the same label
+  and value.
+- Aligned extension status color buckets between the Rust TUI and Swift overlay.
+- Avoided opening an unused stdin pipe when running provider commands without
+  stdin.
+
 ## 1.3.1 - 2026-05-07
 
 ### Added

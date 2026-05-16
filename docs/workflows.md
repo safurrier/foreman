@@ -309,7 +309,12 @@ Foreman releases are tag-triggered. After a version-bump PR is squash-merged:
 ```bash
 git checkout main
 git pull --ff-only origin main
-rg -n '^version = "|Current crate version|## <version>' Cargo.toml README.md CHANGELOG.md
+python3 - <<'PY'
+import tomllib
+from pathlib import Path
+print(tomllib.loads(Path("Cargo.toml").read_text())["package"]["version"])
+PY
+rg -n 'Current crate version:|## <version>' README.md CHANGELOG.md
 git tag -a v<version> -m "Release <version>"
 git push origin v<version>
 gh run list --workflow Release --limit 3
@@ -318,7 +323,7 @@ gh release view v<version>
 ```
 
 The release workflow checks that the pushed tag exactly matches the version in
-`Cargo.toml`. For example, package version `1.3.1` must be tagged `v1.3.1`.
+`Cargo.toml`. For example, package version `1.4.0` must be tagged `v1.4.0`.
 
 The tag workflow runs the release validation lane, builds release archives for
 Linux and macOS targets, publishes checksums, and creates the GitHub release.

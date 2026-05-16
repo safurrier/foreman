@@ -153,9 +153,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func showAbout() {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development"
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "Foreman",
-            .applicationVersion: "0.1.0",
+            .applicationVersion: version,
             .credits: NSAttributedString(string: "A native macOS control surface for Foreman tmux agents."),
         ])
     }
