@@ -4,10 +4,16 @@
   <img src="foreman-logo.png" alt="Foreman logo" width="180">
 </p>
 
-Foreman is an operator console for AI coding agents that run in tmux. It gives
-one keyboard-first place to see Claude Code, Codex CLI, Pi, Gemini CLI, and
-OpenCode panes, understand which ones need attention, and jump back into the
-right pane without spelunking through tmux.
+Foreman is a terminal console and native macOS control app for supervising AI
+coding agents that run in tmux.
+
+It gives one operator view over Claude Code, Codex CLI, Pi, Gemini CLI, and
+OpenCode panes. The dashboard groups tmux sessions, shows which panes are stable
+or need attention, lets you jump directly to the right pane, and can wire native
+status hooks for the harnesses that support them. The optional native macOS app
+packages that same control plane as `Foreman.app` for a global hotkey,
+Spotlight/Raycast launch, quick search, preview, compose/send, and pane focus
+from outside the terminal.
 
 Current crate version: `1.4.0`
 
@@ -27,7 +33,18 @@ Foreman is built from this source checkout today. Release artifacts are publishe
 from version tags; do not assume a package registry install unless a release note
 or local workflow verifies it.
 
-## Install from this checkout
+## Why operators use it
+
+- One dashboard for agent panes instead of spelunking through tmux windows.
+- Native hook signals for Claude Code, Codex, and Pi when they are wired;
+  lower-confidence compatibility detection when they are not.
+- Fast operator actions: focus a pane, compose input, search/filter, inspect
+  status provenance, and get desktop notifications when work finishes or needs
+  attention.
+- Optional PR cards, linked repositories, and extension-provider cards for
+  adjacent context without opening each repo by hand.
+
+## Quick start: terminal dashboard
 
 Requirements:
 
@@ -58,6 +75,12 @@ foreman --doctor
 foreman
 ```
 
+Success signal: `foreman --setup` ends with `Next` steps, `foreman --doctor`
+prints Machine/Config/Repo/Runtime findings, and a ready setup has no `ERROR`
+lines. `WARN` lines are still useful: they tell you which panes are running in
+fallback mode or which hook wiring needs a restart. `foreman` should open the
+operator dashboard; press `?` there for the key map and status legend.
+
 `foreman --setup` is safe to rerun. It writes hook/config files, but it does not
 repair already-running agent panes. Restart affected panes after changing hook
 wiring.
@@ -68,11 +91,22 @@ To try the dashboard from the checkout without installing:
 mise run dev
 ```
 
-## Install the macOS app
+## Native macOS app
 
-The native app packages the same Rust control plane as `Foreman.app`. It is the
-best path when you want Foreman available from a global shortcut, Spotlight,
-Raycast, Finder, or `open -a Foreman`.
+The macOS app is a Swift/AppKit/SwiftUI client for Foreman's Rust control API.
+It does not reimplement tmux discovery; it calls `foreman agents --json`,
+`foreman focus --pane ... --json`, and `foreman send --pane ... --json`.
+
+Use the app for:
+
+- global hotkey access to Foreman from anywhere
+- type-to-search over agent panes
+- attention/recent sorting and filters
+- detail preview and pull request cards
+- compose/send to a selected pane
+- double-click or Enter/Focus to jump the terminal to a pane
+
+Local install/reset:
 
 ```bash
 mise run install-macos-overlay-app
@@ -167,6 +201,12 @@ foreman --setup --project --repo /path/to/repo
 foreman --doctor --repo /path/to/repo
 ```
 
+If an existing pane was started before hook wiring changed, restart that agent
+pane. Setup updates files; it does not repair already-running processes.
+
+See [Operator Guide](docs/operator-guide.md) for setup scopes, doctor fixes,
+native hook examples, notification config, UI preferences, and troubleshooting.
+
 ## Pull requests, provider cards, and linked repositories
 
 Foreman's JSON control API can attach PR metadata and read-only extension cards:
@@ -215,7 +255,9 @@ the related tmux pane. Custom notification sounds can use
 of direct `afplay` audio.
 
 See [Operator Guide — Notifications](docs/operator-guide.md#notifications) for
-configuration, custom sound routes, and troubleshooting.
+configuration, custom sound routes, and troubleshooting. That guide includes both
+macOS custom sound routes: direct file playback and the `alerter --sound`
+notification-sound prefix path that better respects Focus / Do Not Disturb.
 
 ## Control API for scripts and clients
 
@@ -235,7 +277,35 @@ Use `foreman <command> --help` for the exact contract. These commands are the
 stable seam for clients; tmux scraping and native signal details stay behind the
 CLI.
 
-## Development loop
+## Demo
+
+The macOS overlay demo is generated from the real Swift renderer with fixture
+agent data, so it is deterministic rather than a live desktop recording.
+
+![Foreman macOS overlay demo](demos/macos-overlay-demo.gif)
+
+The terminal dashboard demo is a VHS recording of the TUI path:
+
+![Foreman dashboard demo](demos/readme-quickstart.gif)
+
+## Docs
+
+- [Docs index](docs/README.md) — start here for the durable docs map
+- [Operator Guide](docs/operator-guide.md) — setup, dashboard, config, hooks,
+  notifications, extension providers, and troubleshooting
+- [Repo Tour](docs/tour.md) — contributor-oriented code map and reading order
+- [Workflow Guide](docs/workflows.md) — HK lifecycle, validation ladder, release
+  process, and `.ai/` policy
+- [Architecture](docs/architecture.md) — system boundaries and module map
+- [macOS App Bundle](docs/macos-overlay/app-bundle.md) — build, install, launch,
+  and validate `Foreman.app`
+- [macOS Overlay Architecture](docs/macos-overlay/architecture.md) — Swift app
+  boundaries and control API seams
+- [Harness Kit Provider](docs/providers/harness-kit.md) — install and operate
+  the read-only HK provider
+- [Changelog](CHANGELOG.md) — release history
+
+## Development
 
 Start meaningful work on a branch and track it with Harness Kit:
 
@@ -257,12 +327,15 @@ Useful tasks:
 | `mise run build` | Build release binaries |
 | `mise run check` | Fast quality gate; this is what CI calls |
 | `mise run verify` | Heavy validation, including release/UX evidence |
+| `mise run verify-release` | Release-confidence operator gauntlet |
+| `mise run pr-preflight` | Large-PR checklist and cheap merge-prep guardrails |
 | `mise run validate-macos-overlay-change` | Required lane for macOS app, overlay, keyboard/focus, screenshot, or control-API changes |
 | `mise run capture-macos-overlay-demo` | Regenerate the deterministic macOS overlay demo GIF/MP4; requires `ffmpeg` |
 | `mise run install-macos-overlay-app` | Build, install, and reset `~/Applications/Foreman.app` |
+| `mise run verify-macos-overlay-app` | Non-activating app-bundle smoke test |
 | `mise run native-preflight` | Check local real-harness readiness |
 | `mise run verify-native` | Opt-in real Claude, Codex, and Pi E2E drill |
-| `mise run pr-preflight` | Large-PR checklist and cheap merge-prep guardrails |
+| `mise run verify-ux` | TUI runtime smoke and UX artifact refresh |
 
 Validation rule of thumb:
 
@@ -272,14 +345,15 @@ Validation rule of thumb:
   `mise run verify-native` when done.
 - Release-sensitive change: run `mise run verify` before tagging.
 
-See [Workflow Guide](docs/workflows.md) for HK lifecycle, validation layers,
-`.ai/` policy, and release evidence.
+CI calls `mise run ci`, which maps to the fast check gate. See
+[Workflow Guide](docs/workflows.md) for HK lifecycle, validation layers, `.ai/`
+policy, and release evidence.
 
 ## Release plan for `1.4.0`
 
-The extension-provider platform, linked repositories, selected-pane macOS loading,
-and HK provider example are a minor release. The planned release version is
-`1.4.0`.
+The extension-provider platform, linked repositories, selected-pane macOS
+loading, deterministic macOS demo, and HK provider example are a minor release.
+The planned release version is `1.4.0`.
 
 Before tagging:
 
@@ -309,27 +383,3 @@ gh release view v1.4.0
 The release workflow rejects tags that do not match `Cargo.toml`, rebuilds the
 release binaries, uploads validation evidence, and publishes GitHub release
 archives for Linux and macOS.
-
-## Docs
-
-- [Docs index](docs/README.md) — start here for the durable docs map
-- [Repo Tour](docs/tour.md) — contributor-oriented code map and reading order
-- [Operator Guide](docs/operator-guide.md) — setup, dashboard, config, hooks,
-  notifications, extension providers, and troubleshooting
-- [Harness Kit Provider](docs/providers/harness-kit.md) — install and operate the
-  read-only HK provider
-- [Workflow Guide](docs/workflows.md) — HK lifecycle, validation ladder, release
-  process, and `.ai/` policy
-- [Architecture](docs/architecture.md) — system boundaries and module map
-- [Changelog](CHANGELOG.md) — release history
-
-## Demo
-
-The macOS overlay demo is generated from the real Swift renderer with fixture
-agent data, so it is deterministic rather than a live desktop recording.
-
-![Foreman macOS overlay demo](demos/macos-overlay-demo.gif)
-
-The terminal dashboard demo is a VHS recording of the TUI path:
-
-![Foreman dashboard demo](demos/readme-quickstart.gif)
