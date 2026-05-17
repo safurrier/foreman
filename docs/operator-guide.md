@@ -273,8 +273,8 @@ foreman links add --pane %82 --repo ~/git_repositories/foreman --json
 foreman links remove --pane %82 --json
 ```
 
-Linked repositories are stored in `linked-repositories.json` beside Foreman's
-config file. The pane's tmux cwd is still displayed as the workspace, while PR
+Linked repository state is stored beside Foreman's config file. The pane's tmux
+cwd is still displayed as the workspace, while PR
 lookup and extension providers use the linked repo target. The macOS overlay
 loads PR inventory first and asks Foreman for extension cards for the selected
 pane, so slow HK/provider checks do not block PR cards from appearing.

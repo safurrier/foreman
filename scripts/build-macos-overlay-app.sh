@@ -10,6 +10,14 @@ APP_DIR="$DIST_DIR/$APP_NAME.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
+APP_VERSION="$(python3 - <<'PY' "$ROOT/Cargo.toml"
+import sys
+import tomllib
+from pathlib import Path
+print(tomllib.loads(Path(sys.argv[1]).read_text())["package"]["version"])
+PY
+)"
+BUNDLE_VERSION="${APP_VERSION//./}"
 
 cargo build --quiet --manifest-path "$ROOT/Cargo.toml" --bin foreman
 swift build --package-path "$ROOT/apps/macos-overlay" >/dev/null
@@ -62,9 +70,9 @@ cat > "$CONTENTS_DIR/Info.plist" <<EOF
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.1.0</string>
+  <string>$APP_VERSION</string>
   <key>CFBundleVersion</key>
-  <string>2</string>
+  <string>$BUNDLE_VERSION</string>
   <key>LSMinimumSystemVersion</key>
   <string>14.0</string>
   <key>NSHighResolutionCapable</key>
