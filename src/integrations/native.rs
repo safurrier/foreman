@@ -225,10 +225,10 @@ pub fn apply_native_signals<S: NativeSignalSource>(
                 );
                 let native_candidate = match runtime_identity {
                     Some(identity) => identity == harness,
-                    None => pane.agent.as_ref().is_none_or(|agent| {
-                        agent.harness == harness
-                            || agent.integration_mode == IntegrationMode::Compatibility
-                    }),
+                    None => matches!(
+                        pane.agent.as_ref(),
+                        Some(agent) if agent.integration_mode == IntegrationMode::Compatibility
+                    ),
                 };
                 let fallback_candidate = matches!(
                     pane.agent.as_ref(),
@@ -254,7 +254,16 @@ pub fn apply_native_signals<S: NativeSignalSource>(
                             .or(pane.activity_unix_millis);
                         summary.applied += 1;
                     }
-                    Ok(Some(_)) => {}
+                    Ok(Some(_)) => {
+                        summary.warnings.push(format!(
+                            "pane={} ignored stale {} native signal; current_command={} runtime_command={} title={}",
+                            pane.id.as_str(),
+                            harness.filter_label(),
+                            diagnostic_value(pane.current_command.as_deref()),
+                            diagnostic_value(pane.runtime_command.as_deref()),
+                            diagnostic_value(Some(&pane.title)),
+                        ));
+                    }
                     Ok(None) => {
                         if fallback_candidate {
                             summary.fallback_to_compatibility += 1;
@@ -306,6 +315,14 @@ pub fn compatibility_fallback_summary(
     }
 
     summary
+}
+
+fn diagnostic_value(value: Option<&str>) -> String {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.replace('\n', "\\n"))
+        .unwrap_or_else(|| "<none>".to_string())
 }
 
 fn parse_native_status(status: &str) -> Result<AgentStatus, NativeSignalError> {
@@ -490,7 +507,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_native_signals_can_correct_compatibility_mislabel_without_runtime_identity() {
+    fn apply_native_signals_ignores_file_only_shell_pane_candidates() {
         let temp_dir = tempdir().expect("temp dir should exist");
         std::fs::write(
             temp_dir.path().join("%5.json"),
@@ -500,23 +517,86 @@ mod tests {
         let source = FileNativeSignalSource::new(temp_dir.path().to_path_buf());
         let mut inventory = inventory(vec![SessionBuilder::new("s1").window(
             WindowBuilder::new("w1").name("main").pane(
-                PaneBuilder::agent("%5", HarnessKind::ClaudeCode)
+                PaneBuilder::new("%5")
                     .title("plain shell")
-                    .status(AgentStatus::Working),
+                    .current_command("zsh")
+                    .runtime_command("zsh"),
+            ),
+        )]);
+
+        let summary = apply_native_signals(&mut inventory, HarnessKind::CodexCli, &source);
+
+        assert!(inventory
+            .pane(&"%5".into())
+            .expect("pane should exist")
+            .agent
+            .is_none());
+        assert_eq!(summary.applied, 0);
+        assert_eq!(summary.fallback_to_compatibility, 0);
+        assert_eq!(summary.warnings.len(), 1);
+        assert!(summary.warnings[0].contains("ignored stale codex native signal"));
+    }
+
+    #[test]
+    fn apply_native_signals_can_correct_compatibility_mislabel_without_runtime_identity() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        std::fs::write(
+            temp_dir.path().join("%7.json"),
+            r#"{"status":"idle","activity_score":44}"#,
+        )
+        .expect("signal should exist");
+        let source = FileNativeSignalSource::new(temp_dir.path().to_path_buf());
+        let mut inventory = inventory(vec![SessionBuilder::new("s1").window(
+            WindowBuilder::new("w1").name("main").pane(
+                PaneBuilder::agent("%7", HarnessKind::ClaudeCode)
+                    .title("stale claude text")
+                    .status(AgentStatus::Working)
+                    .integration_mode(IntegrationMode::Compatibility),
             ),
         )]);
 
         let summary = apply_native_signals(&mut inventory, HarnessKind::CodexCli, &source);
 
         let agent = inventory
-            .pane(&"%5".into())
+            .pane(&"%7".into())
             .and_then(|pane| pane.agent.as_ref())
-            .expect("pane should remain an agent");
+            .expect("pane should become a native agent");
         assert_eq!(agent.harness, HarnessKind::CodexCli);
         assert_eq!(agent.integration_mode, IntegrationMode::Native);
         assert_eq!(agent.status, AgentStatus::Idle);
         assert_eq!(summary.applied, 1);
-        assert_eq!(summary.fallback_to_compatibility, 0);
+        assert_eq!(summary.warnings.len(), 0);
+    }
+
+    #[test]
+    fn apply_native_signals_still_overlays_runtime_identity_without_compatibility_snapshot() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        std::fs::write(
+            temp_dir.path().join("%6.json"),
+            r#"{"status":"idle","activity_score":44}"#,
+        )
+        .expect("signal should exist");
+        let source = FileNativeSignalSource::new(temp_dir.path().to_path_buf());
+        let mut inventory = inventory(vec![SessionBuilder::new("s1").window(
+            WindowBuilder::new("w1").name("main").pane(
+                PaneBuilder::new("%6")
+                    .title("codex")
+                    .current_command("node")
+                    .runtime_command("npm exec @openai/codex --model gpt-5"),
+            ),
+        )]);
+
+        let summary = apply_native_signals(&mut inventory, HarnessKind::CodexCli, &source);
+
+        let agent = inventory
+            .pane(&"%6".into())
+            .and_then(|pane| pane.agent.as_ref())
+            .expect("pane should become a native agent");
+        assert_eq!(agent.harness, HarnessKind::CodexCli);
+        assert_eq!(agent.integration_mode, IntegrationMode::Native);
+        assert_eq!(agent.status, AgentStatus::Idle);
+        assert_eq!(summary.applied, 1);
+        assert_eq!(summary.warnings.len(), 0);
     }
 
     #[test]

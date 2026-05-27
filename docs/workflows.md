@@ -350,8 +350,8 @@ manual release assets.
 - Native bridges stay outside the reducer. Claude and Codex use hook bridges;
   Pi uses a thin extension that calls `foreman-pi-hook`.
 - The real Codex hook lane now requires a Codex CLI on PATH that exposes the
-  `codex_hooks` feature and supports `UserPromptSubmit`. Old shadow installs can
-  fail even when a newer Codex exists elsewhere on disk, so `mise run
+  `hooks` feature and supports `UserPromptSubmit`. Old shadow installs can fail
+  even when a newer Codex exists elsewhere on disk, so `mise run
   native-preflight` checks the PATH-resolved binary before the real suite runs.
 - Native-over-compatibility precedence belongs in one overlay layer, not inside
   the tmux adapter.

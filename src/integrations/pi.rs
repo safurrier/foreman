@@ -35,16 +35,16 @@ pub(crate) fn recognizes(observation: CompatibilityObservation<'_>) -> bool {
 }
 
 pub(crate) fn recognizes_runtime_identity(observation: CompatibilityObservation<'_>) -> bool {
-    if observation
+    let current_command = observation
         .current_command
         .and_then(|command| command.split_whitespace().next())
-        .map(command_basename)
-        .is_some_and(|command| command == "pi")
-    {
+        .map(command_basename);
+
+    if current_command.is_some_and(|command| command == "pi") {
         return true;
     }
 
-    observation.title.contains('π')
+    observation.title.contains('π') && !current_command.is_some_and(is_shell_or_editor_command)
 }
 
 pub(crate) fn compatibility_status(observation: CompatibilityObservation<'_>) -> AgentStatus {
@@ -75,11 +75,35 @@ fn command_basename(command: &str) -> &str {
     command.rsplit('/').next().unwrap_or(command)
 }
 
+fn is_shell_or_editor_command(command: &str) -> bool {
+    matches!(
+        command,
+        "ash"
+            | "bash"
+            | "csh"
+            | "dash"
+            | "fish"
+            | "ksh"
+            | "nu"
+            | "pwsh"
+            | "sh"
+            | "tcsh"
+            | "xonsh"
+            | "zsh"
+            | "emacs"
+            | "hx"
+            | "nano"
+            | "nvim"
+            | "vi"
+            | "vim"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         apply_native_signals, compatibility_fallback_summary, compatibility_status,
-        FilePiNativeSignalSource,
+        recognizes_runtime_identity, FilePiNativeSignalSource,
     };
     use crate::app::{
         inventory, AgentStatus, HarnessKind, IntegrationMode, PaneBuilder, SessionBuilder,
@@ -94,6 +118,30 @@ mod tests {
         preview: &'a str,
     ) -> CompatibilityObservation<'a> {
         CompatibilityObservation::new(current_command, None, title, preview)
+    }
+
+    #[test]
+    fn runtime_identity_ignores_stale_pi_titles_on_shells_and_editors() {
+        assert!(!recognizes_runtime_identity(observation(
+            Some("zsh"),
+            "π - old",
+            ""
+        )));
+        assert!(!recognizes_runtime_identity(observation(
+            Some("nvim"),
+            "π - old",
+            ""
+        )));
+        assert!(recognizes_runtime_identity(observation(
+            Some("pi"),
+            "π - live",
+            ""
+        )));
+        assert!(recognizes_runtime_identity(observation(
+            Some("node"),
+            "π - live",
+            ""
+        )));
     }
 
     #[test]

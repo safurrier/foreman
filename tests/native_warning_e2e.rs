@@ -54,7 +54,7 @@ fn codex_runtime_identity_prevents_false_claude_native_warnings() {
 }
 
 #[test]
-fn codex_native_signal_corrects_compatibility_mislabel_without_runtime_identity() {
+fn codex_native_signal_does_not_resurrect_plain_shell_after_pane_id_reuse() {
     let fixture = TmuxFixture::new();
     let temp_dir = tempfile::tempdir().expect("temp dir should exist");
     let codex_native = temp_dir.path().join("codex-native");
@@ -63,8 +63,8 @@ fn codex_native_signal_corrects_compatibility_mislabel_without_runtime_identity(
     std::fs::create_dir_all(&claude_native).expect("claude native dir should exist");
 
     let pane_id = fixture.new_session(
-        "codex-mislabel",
-        &fixture.shell_command("Claude Code ready in old scrollback\nCodex CLI waiting"),
+        "codex-stale-shell",
+        &interactive_shell_command("Claude Code ready in old scrollback\nCodex CLI waiting"),
     );
     fixture.wait_for_capture(&pane_id, "Codex CLI waiting");
     write_signal(
@@ -75,17 +75,16 @@ fn codex_native_signal_corrects_compatibility_mislabel_without_runtime_identity(
 
     let summary =
         bootstrap_with_native_dirs(&fixture, &temp_dir, &claude_native, &codex_native, None);
-    let agent = summary
+    let pane = summary
         .state
         .inventory
         .pane(&PaneId::new(&pane_id))
-        .and_then(|pane| pane.agent.as_ref())
-        .expect("agent should exist");
+        .expect("pane should exist");
 
-    assert_eq!(agent.harness, HarnessKind::CodexCli);
-    assert_eq!(agent.integration_mode, IntegrationMode::Native);
-    assert_eq!(agent.status, AgentStatus::Idle);
-    assert_eq!(summary.codex_native.applied, 1);
+    assert!(pane.agent.is_none());
+    assert_eq!(summary.codex_native.applied, 0);
+    assert_eq!(summary.codex_native.warnings.len(), 1);
+    assert!(summary.codex_native.warnings[0].contains("ignored stale codex native signal"));
 }
 
 #[test]
@@ -315,6 +314,11 @@ fn bootstrap_with_native_dirs(
 fn write_signal(native_dir: &std::path::Path, pane_id: &str, contents: &str) {
     std::fs::write(native_dir.join(format!("{pane_id}.json")), contents)
         .expect("native signal should be written");
+}
+
+fn interactive_shell_command(banner: &str) -> String {
+    let script = format!("printf '%s\\n' {}; exec sh -i", shell_escape(banner));
+    format!("sh -lc {}", shell_escape(&script))
 }
 
 fn codex_shaped_command(banner: &str) -> String {

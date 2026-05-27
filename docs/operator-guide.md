@@ -293,7 +293,11 @@ Harness support:
 
 Foreman native mode is hook-only. Compatibility mode can still classify panes
 by tmux-visible behavior for harnesses or states that do not have native
-signals.
+signals. Native signal files are eligible only when the live pane still matches
+the expected harness, or when compatibility has already identified an agent
+pane. This keeps old `%pane.json` files from resurrecting unrelated shell/editor
+panes after tmux reuses pane IDs; ignored stale signals show up in doctor/runtime
+warnings for cleanup audits.
 
 ### Claude Code
 
