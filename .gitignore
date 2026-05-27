@@ -16,3 +16,8 @@
 
 /apps/macos-overlay/.build/
 /apps/macos-overlay/dist/
+
+# Local/generated agent skills not committed to this repo
+.agents/skills/context-engineering/
+.agents/skills/docs-workflow/
+.agents/skills/example-skill/
