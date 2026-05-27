@@ -1158,6 +1158,25 @@ fn live_runtime_context(runtime: &RuntimeConfig) -> Result<Option<LiveRuntimeSna
     }))
 }
 
+fn append_native_warning_findings(
+    findings: &mut Vec<DoctorFinding>,
+    provider: HarnessKind,
+    warnings: &[String],
+) {
+    for warning in warnings {
+        findings.push(
+            DoctorFinding::new(
+                format!("{}-native-warning", provider.filter_label()),
+                DoctorSeverity::Warn,
+                DoctorArea::Runtime,
+                format!("{} reported a native signal warning.", provider.label()),
+            )
+            .with_provider(provider)
+            .with_detail(warning.clone()),
+        );
+    }
+}
+
 fn provider_runtime_findings(
     runtime: &RuntimeConfig,
     inventory: &Inventory,
@@ -1166,6 +1185,10 @@ fn provider_runtime_findings(
     repo_scope: Option<&Path>,
 ) -> Vec<DoctorFinding> {
     let mut findings = Vec::new();
+    if repo_scope.is_none() {
+        append_native_warning_findings(&mut findings, provider, warnings);
+    }
+
     let affected_panes = provider_panes(inventory, provider, repo_scope);
     if affected_panes.is_empty() {
         return findings;
@@ -1248,21 +1271,6 @@ fn provider_runtime_findings(
             )
             .with_provider(provider),
         );
-    }
-
-    if repo_scope.is_none() {
-        for warning in warnings {
-            findings.push(
-                DoctorFinding::new(
-                    format!("{}-native-warning", provider.filter_label()),
-                    DoctorSeverity::Warn,
-                    DoctorArea::Runtime,
-                    format!("{} reported a native signal warning.", provider.label()),
-                )
-                .with_provider(provider)
-                .with_detail(warning.clone()),
-            );
-        }
     }
 
     let mut repo_roots = BTreeMap::<PathBuf, usize>::new();
@@ -2167,23 +2175,31 @@ fn codex_version_findings() -> Vec<DoctorFinding> {
     }
 
     match run_capture("codex", &["features", "list"]) {
-        Ok(output) if output.status.success() => findings.push(
-            DoctorFinding::new(
-                "codex-hook-feature",
-                if String::from_utf8_lossy(&output.stdout).contains("codex_hooks") {
-                    DoctorSeverity::Ok
-                } else {
-                    DoctorSeverity::Error
-                },
-                DoctorArea::Machine,
-                if String::from_utf8_lossy(&output.stdout).contains("codex_hooks") {
-                    "Codex exposes the codex_hooks feature.".to_string()
-                } else {
-                    "Codex does not expose the codex_hooks feature.".to_string()
-                },
-            )
-            .with_provider(HarnessKind::CodexCli),
-        ),
+        Ok(output) if output.status.success() => {
+            let features = String::from_utf8_lossy(&output.stdout);
+            let hooks_available = codex_hooks_feature_available(&features);
+            findings.push(
+                DoctorFinding::new(
+                    "codex-hook-feature",
+                    if hooks_available {
+                        DoctorSeverity::Ok
+                    } else {
+                        DoctorSeverity::Error
+                    },
+                    DoctorArea::Machine,
+                    if hooks_available {
+                        "Codex exposes the hooks feature.".to_string()
+                    } else {
+                        "Codex does not expose the hooks feature required for native hooks."
+                            .to_string()
+                    },
+                )
+                .with_provider(HarnessKind::CodexCli)
+                .with_next_step(
+                    "Enable Codex hooks with `codex --enable hooks` or update Codex CLI.",
+                ),
+            );
+        }
         Ok(output) => findings.push(
             DoctorFinding::new(
                 "codex-feature-check-failed",
@@ -2396,6 +2412,12 @@ fn stderr_or_stdout(output: &std::process::Output) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
+fn codex_hooks_feature_available(features_stdout: &str) -> bool {
+    features_stdout
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
+        .any(|token| matches!(token, "hooks" | "codex_hooks"))
+}
+
 fn parse_semver(text: &str) -> Option<(u64, u64, u64)> {
     let mut parts = text
         .split(|ch: char| !(ch.is_ascii_digit() || ch == '.'))
@@ -2497,8 +2519,8 @@ impl LoggedNativeSummary {
 mod tests {
     use super::{
         apply_claude_fix, apply_codex_fix, apply_pi_fix, apply_safe_fixes, claude_repo_findings,
-        codex_repo_findings, config_findings, hook_error_signature, merge_claude_hooks,
-        merge_codex_hooks, parse_latest_log_summaries, pi_repo_findings,
+        codex_hooks_feature_available, codex_repo_findings, config_findings, hook_error_signature,
+        merge_claude_hooks, merge_codex_hooks, parse_latest_log_summaries, pi_repo_findings,
         resolve_requested_repo_root, runtime_findings, runtime_findings_scoped, DoctorFixMode,
         DoctorFixStatus, DoctorSeverity, LoggedNativeSummary, RuntimeDoctorContext,
         SetupProviderSelection, SetupScopeSelection,
@@ -2527,6 +2549,14 @@ mod tests {
             AppConfig::default(),
             &crate::cli::Cli::parse_from(["foreman"]),
         )
+    }
+
+    #[test]
+    fn codex_feature_detection_accepts_new_and_legacy_hook_flags() {
+        assert!(codex_hooks_feature_available("hooks\nother_feature\n"));
+        assert!(codex_hooks_feature_available("codex_hooks\n"));
+        assert!(codex_hooks_feature_available("- hooks (enabled)\n"));
+        assert!(!codex_hooks_feature_available("webhooks\nother_feature\n"));
     }
 
     fn with_temp_home<T>(f: impl FnOnce(&std::path::Path) -> T) -> T {
@@ -2799,6 +2829,45 @@ mod tests {
         assert!(findings
             .iter()
             .any(|finding| finding.id == "codex-no-native-signals"));
+    }
+
+    #[test]
+    fn runtime_findings_surface_native_warnings_without_provider_panes() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let runtime = sample_runtime(
+            &temp_dir.path().join("config.toml"),
+            &temp_dir.path().join("logs"),
+        );
+        let inventory = inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:shell").pane(PaneBuilder::new("%1").current_command("zsh")),
+        )]);
+        let claude_summary = crate::integrations::ClaudeNativeOverlaySummary::default();
+        let codex_summary = crate::integrations::CodexNativeOverlaySummary {
+            applied: 0,
+            fallback_to_compatibility: 0,
+            warnings: vec!["pane=%1 ignored stale codex native signal".to_string()],
+        };
+        let pi_summary = crate::integrations::PiNativeOverlaySummary::default();
+        let context = RuntimeDoctorContext {
+            runtime: &runtime,
+            config_exists: false,
+            inventory: &inventory,
+            claude_native: &claude_summary,
+            codex_native: &codex_summary,
+            pi_native: &pi_summary,
+        };
+
+        let findings = runtime_findings(&context);
+
+        let warning = findings
+            .iter()
+            .find(|finding| finding.id == "codex-native-warning")
+            .expect("native warning should be surfaced");
+        assert_eq!(warning.severity, DoctorSeverity::Warn);
+        assert!(warning
+            .detail
+            .as_deref()
+            .is_some_and(|detail| { detail.contains("ignored stale codex native signal") }));
     }
 
     #[test]

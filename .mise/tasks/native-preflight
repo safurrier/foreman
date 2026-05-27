@@ -48,6 +48,11 @@ def format_semver(version: tuple[int, int, int]) -> str:
     return ".".join(str(part) for part in version)
 
 
+def codex_hooks_feature_available(features_stdout: str) -> bool:
+    tokens = re.split(r"[^A-Za-z0-9_]+", features_stdout)
+    return "hooks" in tokens or "codex_hooks" in tokens
+
+
 def ensure_tmux() -> list[str]:
     result = run_capture(["tmux", "-V"])
     if result.returncode != 0:
@@ -103,12 +108,12 @@ def ensure_codex() -> list[str]:
     if features.returncode != 0:
         detail = features.stderr or features.stdout or "codex features list failed"
         failures.append(f"codex feature inventory unavailable: {detail}")
-    elif "codex_hooks" not in features.stdout:
+    elif not codex_hooks_feature_available(features.stdout):
         failures.append(
-            "codex on PATH does not expose the codex_hooks feature required by the real E2E"
+            "codex on PATH does not expose the hooks feature required by the real E2E"
         )
     else:
-        log_ok("codex hook feature detected")
+        log_ok("codex hooks feature detected")
 
     return failures
 

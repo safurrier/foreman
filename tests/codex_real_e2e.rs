@@ -60,6 +60,33 @@ fn parse_semver(text: &str) -> Option<(u64, u64, u64)> {
     Some((major, minor, patch))
 }
 
+fn codex_hooks_feature_name(features_stdout: &str) -> Option<&'static str> {
+    let tokens = features_stdout
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
+        .collect::<Vec<_>>();
+    if tokens.contains(&"hooks") {
+        Some("hooks")
+    } else if tokens.contains(&"codex_hooks") {
+        Some("codex_hooks")
+    } else {
+        None
+    }
+}
+
+fn codex_hook_feature_flag() -> Result<&'static str, String> {
+    let features_output = Command::new("codex")
+        .args(["features", "list"])
+        .output()
+        .map_err(|error| format!("failed to execute codex features list: {error}"))?;
+    if !features_output.status.success() {
+        return Err("codex features list failed".to_string());
+    }
+    let features = String::from_utf8_lossy(&features_output.stdout);
+    codex_hooks_feature_name(&features).ok_or_else(|| {
+        "codex on PATH does not expose the hooks feature required by the real E2E".to_string()
+    })
+}
+
 fn codex_hook_support_error() -> Option<String> {
     let version_output = match Command::new("codex").arg("--version").output() {
         Ok(output) => output,
@@ -89,20 +116,8 @@ fn codex_hook_support_error() -> Option<String> {
         ));
     }
 
-    let features_output = match Command::new("codex").args(["features", "list"]).output() {
-        Ok(output) => output,
-        Err(error) => return Some(format!("failed to execute codex features list: {error}")),
-    };
-    if !features_output.status.success() {
-        return Some("codex features list failed".to_string());
-    }
-
-    let features = String::from_utf8_lossy(&features_output.stdout);
-    if !features.contains("codex_hooks") {
-        return Some(
-            "codex on PATH does not expose the codex_hooks feature required by the real E2E"
-                .to_string(),
-        );
+    if let Err(message) = codex_hook_feature_flag() {
+        return Some(message);
     }
 
     None
@@ -181,8 +196,9 @@ fn real_codex_exec_emits_native_hook_signals() {
     )
     .expect("hooks config should be written");
 
+    let hook_feature = codex_hook_feature_flag().expect("codex hook feature should be available");
     let output = Command::new("codex")
-        .args(["--enable", "codex_hooks"])
+        .args(["--enable", hook_feature])
         .args(["-a", "never", "exec"])
         .args(["-C"])
         .arg(&work_dir)
