@@ -1,11 +1,12 @@
 use crate::app::{
-    Inventory, Pane, PaneId, PreviewProvenance, Session, SessionId, Window, WindowId,
+    Inventory, Pane, PaneId, PreviewProvenance, Session, SessionId, SourceMetadata, Window,
+    WindowId,
 };
 use crate::integrations::{compatibility_snapshot, CompatibilityObservation};
 use std::collections::BTreeSet;
 use std::fmt;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::Instant;
 
@@ -201,7 +202,7 @@ impl<B: TmuxBackend> TmuxAdapter<B> {
 
         for record in pane_records {
             let previous_pane =
-                previous_inventory.and_then(|inventory| inventory.pane(&record.pane_id));
+                previous_inventory.and_then(|inventory| inventory.local_pane(&record.pane_id));
             let (preview, preview_provenance) =
                 match preview_resolution(previous_pane, &record, policy) {
                     Some(reason) => {
@@ -260,6 +261,7 @@ impl<B: TmuxBackend> TmuxAdapter<B> {
             ));
             let pane = Pane {
                 id: record.pane_id.clone(),
+                source: SourceMetadata::local(),
                 title: non_empty(pane_title, record.pane_id.as_str()),
                 current_command,
                 runtime_command,
@@ -284,6 +286,7 @@ impl<B: TmuxBackend> TmuxAdapter<B> {
                         Some(window_index) => session.windows[window_index].panes.push(pane),
                         None => session.windows.push(Window {
                             id: record.window_id,
+                            source: SourceMetadata::local(),
                             name: non_empty(record.window_name, ""),
                             panes: vec![pane],
                         }),
@@ -291,9 +294,11 @@ impl<B: TmuxBackend> TmuxAdapter<B> {
                 }
                 None => sessions.push(Session {
                     id: record.session_id,
+                    source: SourceMetadata::local(),
                     name: non_empty(record.session_name, ""),
                     windows: vec![Window {
                         id: record.window_id,
+                        source: SourceMetadata::local(),
                         name: non_empty(record.window_name, ""),
                         panes: vec![pane],
                     }],
@@ -369,20 +374,46 @@ fn pane_metadata_changed(previous_pane: &Pane, record: &TmuxPaneRecord) -> bool 
         || previous_pane.working_dir != record.current_path
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum TmuxTarget {
+    #[default]
+    Default,
+    Socket(PathBuf),
+    ServerName(String),
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct SystemTmuxBackend {
-    socket_path: Option<PathBuf>,
+    target: TmuxTarget,
 }
 
 impl SystemTmuxBackend {
     pub fn new(socket_path: Option<PathBuf>) -> Self {
-        Self { socket_path }
+        Self {
+            target: socket_path.map(TmuxTarget::Socket).unwrap_or_default(),
+        }
+    }
+
+    pub fn with_server_name(server_name: impl Into<String>) -> Self {
+        Self {
+            target: TmuxTarget::ServerName(server_name.into()),
+        }
+    }
+
+    pub fn with_target(target: TmuxTarget) -> Self {
+        Self { target }
     }
 
     fn run_tmux(&self, args: &[&str]) -> Result<String, TmuxError> {
         let mut command = Command::new("tmux");
-        if let Some(socket_path) = &self.socket_path {
-            command.arg("-S").arg(socket_path);
+        match &self.target {
+            TmuxTarget::Default => {}
+            TmuxTarget::Socket(socket_path) => {
+                command.arg("-S").arg(socket_path);
+            }
+            TmuxTarget::ServerName(server_name) => {
+                command.arg("-L").arg(server_name);
+            }
         }
         command.args(args);
 
@@ -392,7 +423,7 @@ impl SystemTmuxBackend {
         }
 
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let rendered_command = render_tmux_command(self.socket_path.as_deref(), args);
+        let rendered_command = render_tmux_command(&self.target, args);
         if is_unavailable_message(&stderr) {
             return Err(TmuxError::Unavailable(stderr));
         }
@@ -405,8 +436,14 @@ impl SystemTmuxBackend {
 
     fn run_tmux_with_input(&self, args: &[&str], input: &str) -> Result<String, TmuxError> {
         let mut command = Command::new("tmux");
-        if let Some(socket_path) = &self.socket_path {
-            command.arg("-S").arg(socket_path);
+        match &self.target {
+            TmuxTarget::Default => {}
+            TmuxTarget::Socket(socket_path) => {
+                command.arg("-S").arg(socket_path);
+            }
+            TmuxTarget::ServerName(server_name) => {
+                command.arg("-L").arg(server_name);
+            }
         }
         command.args(args);
         command.stdin(Stdio::piped());
@@ -424,7 +461,7 @@ impl SystemTmuxBackend {
         }
 
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let rendered_command = render_tmux_command(self.socket_path.as_deref(), args);
+        let rendered_command = render_tmux_command(&self.target, args);
         if is_unavailable_message(&stderr) {
             return Err(TmuxError::Unavailable(stderr));
         }
@@ -669,11 +706,18 @@ fn foreground_command_from_processes(pane_pid: u32, processes: &[ProcessRow]) ->
         .or(pane_command)
 }
 
-fn render_tmux_command(socket_path: Option<&Path>, args: &[&str]) -> String {
+fn render_tmux_command(target: &TmuxTarget, args: &[&str]) -> String {
     let mut rendered = String::from("tmux");
-    if let Some(socket_path) = socket_path {
-        rendered.push_str(" -S ");
-        rendered.push_str(&socket_path.display().to_string());
+    match target {
+        TmuxTarget::Default => {}
+        TmuxTarget::Socket(socket_path) => {
+            rendered.push_str(" -S ");
+            rendered.push_str(&socket_path.display().to_string());
+        }
+        TmuxTarget::ServerName(server_name) => {
+            rendered.push_str(" -L ");
+            rendered.push_str(server_name);
+        }
     }
     for arg in args {
         rendered.push(' ');
@@ -925,12 +969,12 @@ mod tests {
         assert_eq!(inventory.session_count(), 3);
         assert_eq!(inventory.pane_count(), 3);
         assert!(inventory
-            .pane(&PaneId::new("%1"))
+            .local_pane(&PaneId::new("%1"))
             .expect("pane should exist")
             .agent
             .is_some());
         assert!(inventory
-            .pane(&PaneId::new("%3"))
+            .local_pane(&PaneId::new("%3"))
             .expect("pane should exist")
             .agent
             .is_none());
@@ -982,28 +1026,28 @@ mod tests {
 
         assert_eq!(
             inventory
-                .pane(&PaneId::new("%1"))
+                .local_pane(&PaneId::new("%1"))
                 .and_then(|pane| pane.agent.as_ref())
                 .map(|agent| agent.status),
             Some(AgentStatus::Working)
         );
         assert_eq!(
             inventory
-                .pane(&PaneId::new("%2"))
+                .local_pane(&PaneId::new("%2"))
                 .and_then(|pane| pane.agent.as_ref())
                 .map(|agent| agent.status),
             Some(AgentStatus::NeedsAttention)
         );
         assert_eq!(
             inventory
-                .pane(&PaneId::new("%3"))
+                .local_pane(&PaneId::new("%3"))
                 .and_then(|pane| pane.agent.as_ref())
                 .map(|agent| agent.status),
             Some(AgentStatus::Idle)
         );
         assert_eq!(
             inventory
-                .pane(&PaneId::new("%4"))
+                .local_pane(&PaneId::new("%4"))
                 .and_then(|pane| pane.agent.as_ref())
                 .map(|agent| agent.status),
             Some(AgentStatus::Error)
@@ -1031,7 +1075,7 @@ mod tests {
             .expect("inventory should load");
 
         assert!(inventory
-            .pane(&PaneId::new("%1"))
+            .local_pane(&PaneId::new("%1"))
             .expect("pane should exist")
             .agent
             .is_none());
@@ -1057,7 +1101,7 @@ mod tests {
             .load_inventory(50)
             .expect("inventory should still load");
         let pane = inventory
-            .pane(&PaneId::new("%1"))
+            .local_pane(&PaneId::new("%1"))
             .expect("pane should exist");
 
         assert_eq!(pane.preview, "");
@@ -1101,7 +1145,7 @@ mod tests {
         assert!(metrics.capture_total_ms >= metrics.capture_max_ms);
         assert_eq!(
             inventory
-                .pane(&PaneId::new("%2"))
+                .local_pane(&PaneId::new("%2"))
                 .expect("pane should exist")
                 .preview_provenance,
             PreviewProvenance::CaptureFailed
@@ -1167,14 +1211,14 @@ mod tests {
         assert_eq!(metrics.reused_preview_count, 1);
         assert_eq!(
             inventory
-                .pane(&PaneId::new("%2"))
+                .local_pane(&PaneId::new("%2"))
                 .expect("pane should exist")
                 .preview,
             "Codex CLI cached offscreen preview"
         );
         assert_eq!(
             inventory
-                .pane(&PaneId::new("%2"))
+                .local_pane(&PaneId::new("%2"))
                 .expect("pane should exist")
                 .preview_provenance,
             PreviewProvenance::ReusedCached
@@ -1215,7 +1259,7 @@ mod tests {
         assert_eq!(metrics.forced_capture_count, 1);
         assert_eq!(metrics.reused_preview_count, 0);
         let pane = inventory
-            .pane(&PaneId::new("%1"))
+            .local_pane(&PaneId::new("%1"))
             .expect("pane should exist");
         assert_eq!(pane.preview, "plain shell");
         assert_eq!(pane.preview_provenance, PreviewProvenance::Captured);
@@ -1248,7 +1292,7 @@ mod tests {
             .expect("inventory should load");
 
         let pane = inventory
-            .pane(&PaneId::new("%1"))
+            .local_pane(&PaneId::new("%1"))
             .expect("pane should exist");
         assert_eq!(metrics.capture_count, 0);
         assert_eq!(metrics.reused_preview_count, 1);
@@ -1302,7 +1346,7 @@ mod tests {
         assert_eq!(summary.visible_panes, 1);
         assert_eq!(
             state.selection,
-            Some(SelectionTarget::Session(SessionId::new("$1")))
+            Some(SelectionTarget::Session(SessionId::new("$1").into()))
         );
     }
 

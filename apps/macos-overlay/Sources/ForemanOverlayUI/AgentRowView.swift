@@ -22,9 +22,14 @@ struct AgentRow: View {
                 .fill(statusColor(entry.status))
                 .frame(width: 9, height: 9)
             VStack(alignment: .leading, spacing: 3) {
-                Text(presentation.title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    if entry.sourceShowLabel {
+                        SourceBadge(entry: entry)
+                    }
+                    Text(presentation.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
+                }
                 Text(presentation.subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -37,12 +42,26 @@ struct AgentRow: View {
         }
         .padding(.vertical, 4)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(presentation.title), \(entry.statusLabel), \(presentation.subtitle)")
+        .accessibilityLabel("\(entry.sourceDisplayLabel), \(presentation.title), \(entry.statusLabel), \(presentation.subtitle)")
         .accessibilityValue(entry.pullRequest == nil ? "No pull request" : "Has pull request")
     }
 
     private func flashMatches(label: String) -> Bool {
         !flashQuery.isEmpty && label.lowercased().hasPrefix(flashQuery.lowercased())
+    }
+}
+
+struct SourceBadge: View {
+    let entry: AgentEntry
+
+    var body: some View {
+        Text(entry.sourceDisplayLabel)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(entry.isDefaultSource ? Color.secondary : Color.blue)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background((entry.isDefaultSource ? Color.secondary : Color.blue).opacity(0.12), in: Capsule())
+            .accessibilityLabel("Source: \(entry.sourceDisplayLabel)")
     }
 }
 

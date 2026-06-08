@@ -46,7 +46,8 @@ testable as the app grows.
 | Runtime loop | Own terminal setup, event polling, redraw cadence, effect execution, and runtime-level soft-failure alerting during interactive runs |
 | App state core | Own `Command`, `Action`, `Mode`, `Focus`, selection state, filters, sort mode, modal state, and reducer logic |
 | Ratatui renderer | Render header, sidebar, preview, input, footer, help, search/modal overlays, inline flash labels, and loading states from pure state using semantic theme tokens, built-in palette themes, compact harness marks, and no-color-safe glyph fallbacks |
-| tmux adapter | Discover sessions/windows/panes, capture pane output, focus panes, send input, rename windows, create windows, and kill panes |
+| tmux adapter | Discover sessions/windows/panes, capture pane output, focus panes, send input, rename windows, create windows, and kill panes. It can target the default tmux server, a socket path, or a named `tmux -L` server. |
+| Source aggregator | Query local and configured remote tmux-backed sources, normalize source-scoped identities, enforce per-source deadlines/stale diagnostics, and return one aggregate inventory for every Foreman surface. |
 | Harness integrations | Detect supported harness families, translate compatibility signals for Claude, Codex, Pi, Gemini CLI, and OpenCode, and overlay native signals for Claude, Codex, and Pi when available |
 | Pull request service | Resolve pull request metadata for the selected workspace, and own browser-open and clipboard-copy seams with graceful degradation |
 | Notification service | Apply pure suppression and cooldown policy, build dispatcher order from typed config, dispatch best-effort notifications with backend fallback, and surface observable decisions |
@@ -61,8 +62,11 @@ testable as the app grows.
    long-running dashboard loop that redraws the shell, polls tmux, and executes
    reducer-emitted effects.
 2. **Refresh and status loop**
-   Poll tick triggers tmux discovery and pane capture, harness interpreters
-   derive status signals, reducer updates state, and renderer redraws.
+   Poll tick triggers source aggregation. The local source performs tmux
+   discovery and pane capture, remote sources perform bounded source probes, the
+   aggregator normalizes source-scoped rows/diagnostics, harness interpreters
+   derive status signals for each source-local pane, reducer updates state, and
+   renderer redraws.
 3. **Operator action loop**
    Key input maps to `Command`, then `Action`, then reducer state
    transition, then optional Effects through adapters, then redraw. Draft text
@@ -77,6 +81,11 @@ testable as the app grows.
   text, and direct pane input are untrusted until parsed and validated.
 - **tmux boundary**: session inventory, pane metadata, and captured terminal
   content come from an external process and may be stale, partial, or missing.
+  In merged inventories, tmux pane ids are source-local and must be paired with
+  a Foreman source id before being used as stable identity.
+- **remote source boundary**: SSH-backed sources run Foreman probes on another
+  host. Remote timeouts, stale tmux sockets, missing binaries, and schema
+  mismatches are source diagnostics rather than whole-dashboard failures.
 - **Harness boundary**: native integration signals are more structured but still
   external to Foreman and may disconnect or downgrade to compatibility mode.
   For Claude Code and Codex CLI, those signals arrive through official hook
@@ -129,6 +138,9 @@ testable as the app grows.
   in `AppState`; cancel behavior is reducer-owned rather than widget-local.
 - Selected workspace identity is derived from tmux pane working directories, not
   sidebar row indexes or cursor position.
+- In a merged source inventory, `SourcePaneId` (`source_id` + tmux `pane_id`) is
+  the canonical key for selection, actions, extension cards, linked repository
+  records, PR/cache entries, notification cooldowns, and Swift row identity.
 - Pull request cache entries, detail-panel state, and auto-open suppression are
   keyed by workspace path in `AppState`.
 - Notification mute state, profile, refresh tick, configured cooldown, and

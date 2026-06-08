@@ -56,6 +56,8 @@ yet expose a stable contract.
 - **compatibility mode**: A fallback integration path that infers state from tmux-visible process and terminal behavior when no structured integration is available.
 - **macOS control app**: A native `Foreman.app` wrapper and overlay that exposes Foreman's core control plane from outside the terminal.
 - **control API**: Machine-readable CLI subcommands used by GUI clients and automation to list agents, focus panes, and send text without parsing the TUI.
+- **source**: A configured local or remote tmux-backed place Foreman can query and control.
+- **source-scoped pane**: A pane identified by both Foreman source id and tmux pane id; tmux pane ids are not globally unique across sources.
 
 ## Goals / Non-Goals
 
@@ -111,11 +113,14 @@ yet expose a stable contract.
 
 **R4. Multi-session monitoring**
 
-- Foreman monitors panes across all tmux sessions, not just the currently attached session.
+- Foreman monitors panes across all tmux sessions for each enabled source, not just the currently attached session.
 - Monitoring refreshes on a configurable interval.
 - Foreman captures recent pane output for analysis and preview.
 - Foreman keeps tmux pane metadata fresh across the full inventory, but it does
   not need to recapture full preview text for every pane on every refresh.
+- When multiple sources are configured, Foreman preserves source identity in the
+  control API, terminal dashboard, and macOS overlay so duplicate tmux pane ids
+  from different sources do not collide.
 - Preview freshness is prioritized for the selected row, the current sidebar
   viewport, and panes that have changed identity or need attention.
 - Off-screen panes may temporarily reuse cached preview text and are refreshed

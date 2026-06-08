@@ -228,6 +228,76 @@ resolved config file. Explicit theme and default sort config values in the
 `[ui]` table win over persisted values. Persisted values fill in only when those
 keys are omitted.
 
+## Sources and Remote tmux
+
+Foreman can be configured to treat multiple tmux-backed places as operator
+sources. The local tmux server is the default source. SSH sources let the local
+terminal dashboard, tmux popup, and macOS overlay show remote agent work through
+the same source-aware control API.
+
+A Coder source should be persisted once in Foreman's config instead of selected
+manually on every launch:
+
+```toml
+[sources]
+default_scope = "all" # all | current | local
+current_source_first = true
+query_timeout_ms = 5000
+
+[sources.local]
+kind = "local"
+label = "Local Mac"
+enabled = true
+
+[sources.local.display]
+show_label = false
+
+[sources.coder-dev-gpu-1]
+kind = "ssh"
+label = "Coder"
+host = "coder.alex-furrier-dev-gpu-1"
+foreman = "/home/discord/.cargo/bin/foreman-coder-source"
+tmux_server_name = "user"
+ssh = "ssh"
+enabled = true
+query_timeout_ms = 5000
+extra_ssh_args = []
+
+[sources.coder-dev-gpu-1.display]
+show_label = true
+
+[sources.coder-dev-gpu-1.jump]
+# Optional local command to activate the terminal/tab displaying this source
+# after Foreman focuses the remote tmux pane.
+activation_command = "~/.config/foreman/focus-coder-ghostty-tab.sh"
+```
+
+Source-scoped commands route actions to the selected host and tmux server:
+
+```bash
+foreman sources list --json
+foreman sources doctor coder-dev-gpu-1
+foreman agents --json --sources all
+foreman focus --source coder-dev-gpu-1 --pane %42 --json
+foreman send --source coder-dev-gpu-1 --pane %42 --stdin --json
+```
+
+Rows from different sources may share the same tmux pane id, so source-aware
+clients must treat `sourcePaneId` as the stable row/action identity and `paneId`
+as source-local display data. If a source is unreachable, Foreman reports a
+source diagnostic and continues rendering healthy sources.
+
+For Alex's Coder workflow, `coder_connect` attaches to `tmux -L user`. Foreman
+supports this through `--tmux-server-name user` and the persisted
+`tmux_server_name = "user"` source setting. If noninteractive SSH resolves a
+different tmux binary than the attached Coder shell, point `foreman` at a small
+remote wrapper that loads the same Homebrew/Nix/login PATH before execing the
+Foreman binary. The fast popup binding should stay in direct argv form:
+
+```tmux
+bind a display-popup -h 80% -w 80% -E -- "$HOME/.cargo/bin/foreman" --popup
+```
+
 ## Extension Providers
 
 Extension providers are read-only commands that attach operator cards to agent

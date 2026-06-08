@@ -139,6 +139,7 @@ fn navigation_burst_keeps_move_selection_latency_bounded_with_many_sessions() {
 
     fixture.wait_for_alt_capture(&dashboard_pane, "Foreman | NORMAL");
     let latest_log_path = log_dir.join("latest.log");
+    wait_for_log_contains(&latest_log_path, "timing operation=inventory_tmux", 120);
     let burst_keys = vec!["j"; NAVIGATION_BURST_KEY_COUNT];
     let burst_started = Instant::now();
     fixture.send_keys(&dashboard_pane, &burst_keys);
@@ -153,9 +154,7 @@ fn navigation_burst_keeps_move_selection_latency_bounded_with_many_sessions() {
     let timings = read_action_timings(&latest_log_path, "move-selection");
     assert!(
         timings.len() >= NAVIGATION_BURST_KEY_COUNT,
-        "expected at least {} move-selection timings, got {:?}",
-        NAVIGATION_BURST_KEY_COUNT,
-        timings
+        "expected at least {NAVIGATION_BURST_KEY_COUNT} move-selection timings, got {timings:?}"
     );
     let recent_timings = &timings[timings.len() - NAVIGATION_BURST_KEY_COUNT..];
     let p95 = percentile(recent_timings, 95);
@@ -371,6 +370,303 @@ fn stable_inventory_writes_startup_cache_once_without_slowdowns() {
 
     fixture.send_keys(&dashboard_pane, &["q"]);
     fixture.wait_for_capture(&dashboard_pane, "FOREMAN_EXITED");
+}
+
+#[test]
+#[ignore = "heavy perf smoke for verify-ux and verify"]
+fn all_sources_popup_renders_local_rows_before_slow_ssh_source() {
+    let fixture = TmuxFixture::new();
+    let root = tempdir().expect("temp dir should exist");
+    let config_dir = root.path().join("config");
+    let log_dir = root.path().join("logs");
+    let remote_done = root.path().join("remote-done");
+    fs::create_dir_all(&config_dir).expect("config dir should exist");
+    fs::create_dir_all(&log_dir).expect("log dir should exist");
+
+    let repo = root.path().join("local-work");
+    let fake_bin = root.path().join("fake-bin");
+    fs::create_dir_all(&repo).expect("repo dir should exist");
+    fs::create_dir_all(&fake_bin).expect("fake bin should exist");
+    let fake_pi = fake_bin.join("pi");
+    std::os::unix::fs::symlink("/bin/sleep", &fake_pi).expect("fake pi symlink should be created");
+    let local_agent_command = format!(
+        "sh -lc {}",
+        shell_quote(&format!(
+            "cd {} && PATH={}:$PATH exec pi 600",
+            shell_quote(&repo.display().to_string()),
+            shell_quote(&fake_bin.display().to_string())
+        ))
+    );
+    let _pane_id = fixture.new_session("local-work", &local_agent_command);
+
+    let local_log_dir = log_dir.join("local");
+    fs::create_dir_all(&local_log_dir).expect("local log dir should exist");
+    let local_command = format!(
+        "FOREMAN_CONFIG_HOME={} FOREMAN_LOG_DIR={} {} --popup --debug --tmux-socket {} --poll-interval-ms 5000 --capture-lines 20 --no-notify",
+        config_dir.join("local-config").display(),
+        local_log_dir.display(),
+        foreman_bin(),
+        fixture.socket_path().display()
+    );
+    let local_dashboard = fixture.new_session(
+        "dashboard-local",
+        &fixture.keep_alive_command(&local_command, "FOREMAN_LOCAL_EXITED"),
+    );
+    let local_started = Instant::now();
+    fixture.wait_for_alt_capture(&local_dashboard, "2 targets");
+    let local_first_target_ms = local_started.elapsed().as_millis();
+    fixture.send_keys(&local_dashboard, &["q"]);
+    fixture.wait_for_capture(&local_dashboard, "FOREMAN_LOCAL_EXITED");
+
+    let fake_ssh = root.path().join("fake-ssh");
+    write_slow_fake_ssh_source(&fake_ssh, &remote_done, 10_000);
+    let source_config = root.path().join("source-config.toml");
+    fs::write(
+        &source_config,
+        format!(
+            r#"
+[sources]
+default_scope = "all"
+query_timeout_ms = 12000
+
+[sources.coder]
+kind = "ssh"
+label = "Coder"
+host = "fake-coder"
+foreman = "foreman"
+ssh = "{}"
+
+[sources.coder.display]
+show_label = true
+label = "Coder"
+"#,
+            fake_ssh.display()
+        ),
+    )
+    .expect("source config should be written");
+
+    let source_log_dir = log_dir.join("sources");
+    fs::create_dir_all(&source_log_dir).expect("source log dir should exist");
+    let source_command = format!(
+        "FOREMAN_LOG_DIR={} {} --config-file {} --popup --debug --tmux-socket {} --sources all --poll-interval-ms 5000 --capture-lines 20 --no-notify",
+        source_log_dir.display(),
+        foreman_bin(),
+        source_config.display(),
+        fixture.socket_path().display()
+    );
+    let source_dashboard = fixture.new_session(
+        "dashboard-sources",
+        &fixture.keep_alive_command(&source_command, "FOREMAN_SOURCE_EXITED"),
+    );
+    let source_started = Instant::now();
+    fixture.wait_for_alt_capture(&source_dashboard, "2 targets");
+    let source_first_local_ms = source_started.elapsed().as_millis();
+    assert!(
+        !remote_done.exists(),
+        "expected local rows to render before slow fake SSH source completed"
+    );
+    fixture.wait_for_alt_capture_attempts(&source_dashboard, "4 targets", 260);
+    let source_remote_merge_ms = source_started.elapsed().as_millis();
+    assert!(
+        source_first_local_ms <= local_first_target_ms + 750,
+        "expected all-source local first render to stay close to local-only baseline; local={local_first_target_ms}ms source={source_first_local_ms}ms"
+    );
+    assert!(
+        source_remote_merge_ms >= 9_000,
+        "remote merge should reflect fake SSH delay, got {source_remote_merge_ms}ms"
+    );
+
+    let latest_log = fs::read_to_string(source_log_dir.join("latest.log"))
+        .expect("source latest log should be readable");
+    assert!(
+        latest_log.contains("timing operation=inventory_refresh outcome=loaded"),
+        "expected source inventory timing logs:\n{latest_log}"
+    );
+
+    fixture.send_keys(&source_dashboard, &["q"]);
+    fixture.wait_for_capture(&source_dashboard, "FOREMAN_SOURCE_EXITED");
+
+    write_failing_fake_ssh_source(&fake_ssh);
+    let failing_dashboard = fixture.new_session(
+        "dashboard-sources-failing",
+        &fixture.keep_alive_command(&source_command, "FOREMAN_SOURCE_FAILING_EXITED"),
+    );
+    fixture.wait_for_alt_capture(&failing_dashboard, "4 targets");
+    wait_for_log_occurrence_count(
+        &source_log_dir.join("latest.log"),
+        "timing operation=inventory_refresh outcome=loaded",
+        2,
+        120,
+    );
+    let failing_capture = fixture.capture_alt(&failing_dashboard);
+    assert!(
+        failing_capture.contains("4 targets"),
+        "expected cached remote rows to survive failed SSH refresh; capture:\n{failing_capture}"
+    );
+    fixture.send_keys(&failing_dashboard, &["q"]);
+    fixture.wait_for_capture(&failing_dashboard, "FOREMAN_SOURCE_FAILING_EXITED");
+}
+
+#[test]
+#[ignore = "heavy perf smoke for verify-ux and verify"]
+fn popup_defers_all_source_merge_until_navigation_is_idle() {
+    let fixture = TmuxFixture::new();
+    let root = tempdir().expect("temp dir should exist");
+    let config_dir = root.path().join("config");
+    let log_dir = root.path().join("logs");
+    let release_remote = root.path().join("release-remote");
+    fs::create_dir_all(&config_dir).expect("config dir should exist");
+    fs::create_dir_all(&log_dir).expect("log dir should exist");
+
+    let repo = root.path().join("local-work");
+    let fake_bin = root.path().join("fake-bin");
+    fs::create_dir_all(&repo).expect("repo dir should exist");
+    fs::create_dir_all(&fake_bin).expect("fake bin should exist");
+    let fake_pi = fake_bin.join("pi");
+    std::os::unix::fs::symlink("/bin/sleep", &fake_pi).expect("fake pi symlink should be created");
+    let local_agent_command = format!(
+        "sh -lc {}",
+        shell_quote(&format!(
+            "cd {} && PATH={}:$PATH exec pi 600",
+            shell_quote(&repo.display().to_string()),
+            shell_quote(&fake_bin.display().to_string())
+        ))
+    );
+    let _pane_id = fixture.new_session("local-work", &local_agent_command);
+
+    let fake_ssh = root.path().join("fake-ssh");
+    write_released_fake_ssh_source(&fake_ssh, &release_remote);
+    let source_config = root.path().join("source-config.toml");
+    fs::write(
+        &source_config,
+        format!(
+            r#"
+[sources]
+default_scope = "all"
+query_timeout_ms = 12000
+
+[sources.coder]
+kind = "ssh"
+label = "Coder"
+host = "fake-coder"
+foreman = "foreman"
+ssh = "{}"
+
+[sources.coder.display]
+show_label = true
+label = "Coder"
+"#,
+            fake_ssh.display()
+        ),
+    )
+    .expect("source config should be written");
+
+    let source_command = format!(
+        "FOREMAN_LOG_DIR={} {} --config-file {} --popup --debug --tmux-socket {} --sources all --poll-interval-ms 5000 --capture-lines 20 --no-notify",
+        log_dir.display(),
+        foreman_bin(),
+        source_config.display(),
+        fixture.socket_path().display()
+    );
+    let dashboard = fixture.new_session(
+        "dashboard-sources-deferred",
+        &fixture.keep_alive_command(&source_command, "FOREMAN_DEFER_EXITED"),
+    );
+    fixture.wait_for_alt_capture(&dashboard, "2 targets");
+    let latest_log_path = log_dir.join("latest.log");
+
+    fs::write(&release_remote, "go").expect("release marker should be writable");
+    let popup_key_count = 20;
+    let burst_started = Instant::now();
+    let socket_path = fixture.socket_path().to_path_buf();
+    let dashboard_target = dashboard.clone();
+    let sender = thread::spawn(move || {
+        for _ in 0..popup_key_count {
+            let status = std::process::Command::new("tmux")
+                .arg("-S")
+                .arg(&socket_path)
+                .arg("send-keys")
+                .arg("-t")
+                .arg(&dashboard_target)
+                .arg("j")
+                .status()
+                .expect("tmux send-keys should run");
+            assert!(status.success(), "tmux send-keys should succeed");
+            thread::sleep(Duration::from_millis(8));
+        }
+    });
+    wait_for_action_timing_count(&latest_log_path, "move-selection", popup_key_count, 120);
+    sender.join().expect("key sender should finish");
+    let burst_elapsed_ms = burst_started.elapsed().as_millis();
+    wait_for_log_contains(&latest_log_path, "inventory_refresh_deferred", 120);
+    wait_for_log_contains(&latest_log_path, "inventory_refresh_deferred_apply", 120);
+    fixture.wait_for_alt_capture(&dashboard, "4 targets");
+
+    let latest_log = fs::read_to_string(&latest_log_path).expect("latest log should be readable");
+    let timings = read_action_timings(&latest_log_path, "move-selection");
+    let recent_timings = &timings[timings.len() - popup_key_count..];
+    let p95 = percentile(recent_timings, 95);
+    let max = recent_timings.iter().copied().max().unwrap_or_default();
+    assert!(
+        burst_elapsed_ms <= MOVE_SELECTION_BURST_BUDGET_MS,
+        "expected key burst to finish within {MOVE_SELECTION_BURST_BUDGET_MS}ms while remote merge is deferred, got {burst_elapsed_ms}ms"
+    );
+    assert!(
+        p95 <= MOVE_SELECTION_P95_BUDGET_MS,
+        "expected p95 move-selection <= {MOVE_SELECTION_P95_BUDGET_MS}ms, got {p95} from {recent_timings:?}"
+    );
+    assert!(
+        max <= MOVE_SELECTION_MAX_BUDGET_MS,
+        "expected max move-selection <= {MOVE_SELECTION_MAX_BUDGET_MS}ms, got {max} from {recent_timings:?}"
+    );
+    assert!(
+        !latest_log
+            .contains("slow_operation operation=action threshold_ms=40 action=move-selection"),
+        "expected no slow move-selection warnings while deferring source merge:\n{latest_log}"
+    );
+
+    fixture.send_keys(&dashboard, &["q"]);
+    fixture.wait_for_capture(&dashboard, "FOREMAN_DEFER_EXITED");
+}
+
+fn write_released_fake_ssh_source(fake_ssh: &Path, release_marker: &Path) {
+    let script = format!(
+        "#!/bin/sh\nwhile [ ! -f {} ]; do sleep 0.01; done\nsleep 0.05\ncat <<'JSON'\n{{\"schemaVersion\":2,\"generatedAtUnixMs\":1,\"inventory\":{{\"totalSessions\":1,\"totalWindows\":1,\"totalPanes\":1,\"visibleSessions\":1,\"visibleWindows\":1,\"visiblePanes\":1}},\"entries\":[{{\"id\":\"source:local:pane:%42\",\"sourcePaneId\":\"source:local:pane:%42\",\"sourceId\":\"local\",\"sourceLabel\":\"Local\",\"sourceKind\":\"local\",\"paneId\":\"%42\",\"sessionId\":\"$remote\",\"sessionName\":\"0\",\"windowId\":\"@remote\",\"windowName\":\"zsh\",\"title\":\"remote-dots\",\"navigationTitle\":\"dots\",\"harness\":\"pi\",\"harnessLabel\":\"Pi\",\"status\":\"idle\",\"statusLabel\":\"IDLE\",\"statusSource\":\"compatibility\",\"integrationMode\":\"compatibility\",\"isAgent\":true,\"currentCommand\":\"pi\",\"runtimeCommand\":\"pi\",\"workingDir\":\"/home/discord/dots\",\"linkedRepository\":null,\"workspaceName\":\"dots\",\"preview\":\"remote ready\",\"previewProvenance\":\"captured\",\"activityScore\":1,\"statusRank\":3,\"lastActivityUnixMs\":1,\"lastStatusChangeUnixMs\":1,\"activeRunCount\":null,\"pullRequest\":null,\"extensionCards\":[]}}],\"diagnostics\":[]}}\nJSON\n",
+        shell_quote(&release_marker.display().to_string())
+    );
+    fs::write(fake_ssh, script).expect("fake ssh should be written");
+    let mut permissions = fs::metadata(fake_ssh)
+        .expect("fake ssh should exist")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(fake_ssh, permissions).expect("fake ssh should be executable");
+}
+
+fn write_slow_fake_ssh_source(fake_ssh: &Path, done_marker: &Path, sleep_ms: u64) {
+    let sleep_seconds = format!("{}.{:03}", sleep_ms / 1000, sleep_ms % 1000);
+    let script = format!(
+        "#!/bin/sh\nsleep {sleep_seconds}\ntouch {}\ncat <<'JSON'\n{{\"schemaVersion\":2,\"generatedAtUnixMs\":1,\"inventory\":{{\"totalSessions\":1,\"totalWindows\":1,\"totalPanes\":1,\"visibleSessions\":1,\"visibleWindows\":1,\"visiblePanes\":1}},\"entries\":[{{\"id\":\"source:local:pane:%42\",\"sourcePaneId\":\"source:local:pane:%42\",\"sourceId\":\"local\",\"sourceLabel\":\"Local\",\"sourceKind\":\"local\",\"paneId\":\"%42\",\"sessionId\":\"$remote\",\"sessionName\":\"0\",\"windowId\":\"@remote\",\"windowName\":\"zsh\",\"title\":\"remote-dots\",\"navigationTitle\":\"dots\",\"harness\":\"pi\",\"harnessLabel\":\"Pi\",\"status\":\"idle\",\"statusLabel\":\"IDLE\",\"statusSource\":\"compatibility\",\"integrationMode\":\"compatibility\",\"isAgent\":true,\"currentCommand\":\"pi\",\"runtimeCommand\":\"pi\",\"workingDir\":\"/home/discord/dots\",\"linkedRepository\":null,\"workspaceName\":\"dots\",\"preview\":\"remote ready\",\"previewProvenance\":\"captured\",\"activityScore\":1,\"statusRank\":3,\"lastActivityUnixMs\":1,\"lastStatusChangeUnixMs\":1,\"activeRunCount\":null,\"pullRequest\":null,\"extensionCards\":[]}}],\"diagnostics\":[]}}\nJSON\n",
+        shell_quote(&done_marker.display().to_string())
+    );
+    fs::write(fake_ssh, script).expect("fake ssh should be written");
+    let mut permissions = fs::metadata(fake_ssh)
+        .expect("fake ssh should exist")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(fake_ssh, permissions).expect("fake ssh should be executable");
+}
+
+fn write_failing_fake_ssh_source(fake_ssh: &Path) {
+    fs::write(
+        fake_ssh,
+        "#!/bin/sh\nprintf 'remote unavailable\\n' >&2\nexit 1\n",
+    )
+    .expect("failing fake ssh should be written");
+    let mut permissions = fs::metadata(fake_ssh)
+        .expect("fake ssh should exist")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(fake_ssh, permissions).expect("fake ssh should be executable");
 }
 
 fn write_fake_gh(fake_bin: &Path, lookup_log: &Path) {

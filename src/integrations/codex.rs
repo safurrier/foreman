@@ -129,7 +129,7 @@ mod tests {
         );
 
         let agent = inventory
-            .pane(&"%1".into())
+            .pane(&crate::app::PaneKey::from("%1"))
             .expect("pane should exist")
             .agent
             .as_ref()
@@ -158,7 +158,7 @@ mod tests {
         );
 
         let agent = inventory
-            .pane(&"%1".into())
+            .pane(&crate::app::PaneKey::from("%1"))
             .expect("pane should exist")
             .agent
             .as_ref()

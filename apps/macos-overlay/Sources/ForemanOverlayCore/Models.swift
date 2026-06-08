@@ -5,28 +5,47 @@ public struct AgentsResponse: Decodable, Sendable {
     public let inventory: InventorySummary
     public let entries: [AgentEntry]
     public let diagnostics: [ControlDiagnostic]
+    public let sourceDiagnostics: [ControlDiagnostic]
 
-    public init(schemaVersion: Int, inventory: InventorySummary, entries: [AgentEntry], diagnostics: [ControlDiagnostic]) {
+    public init(schemaVersion: Int, inventory: InventorySummary, entries: [AgentEntry], diagnostics: [ControlDiagnostic], sourceDiagnostics: [ControlDiagnostic] = []) {
         self.schemaVersion = schemaVersion
         self.inventory = inventory
         self.entries = entries
         self.diagnostics = diagnostics
+        self.sourceDiagnostics = sourceDiagnostics
+    }
+
+    public var allDiagnostics: [ControlDiagnostic] {
+        diagnostics + sourceDiagnostics
     }
 
     public func mergingExtensionCards(from extensionResponse: AgentsResponse) -> AgentsResponse {
-        let cardsByPane = Dictionary(uniqueKeysWithValues: extensionResponse.entries.map { ($0.paneId, $0.extensionCards) })
+        let cardsBySourcePane = Dictionary(uniqueKeysWithValues: extensionResponse.entries.map { ($0.sourcePaneId, $0.extensionCards) })
         let mergedEntries = entries.map { entry in
-            guard let cards = cardsByPane[entry.paneId] else { return entry }
+            guard let cards = cardsBySourcePane[entry.sourcePaneId] else { return entry }
             return entry.withExtensionCards(cards)
         }
-        return AgentsResponse(schemaVersion: schemaVersion, inventory: inventory, entries: mergedEntries, diagnostics: diagnostics)
+        return AgentsResponse(schemaVersion: schemaVersion, inventory: inventory, entries: mergedEntries, diagnostics: diagnostics, sourceDiagnostics: sourceDiagnostics)
     }
 
-    public func mergingExtensionCards(_ cards: [ControlExtensionCard], forPaneId paneId: String) -> AgentsResponse {
+    public func mergingExtensionCards(_ cards: [ControlExtensionCard], forSourcePaneId sourcePaneId: String) -> AgentsResponse {
         let mergedEntries = entries.map { entry in
-            entry.paneId == paneId ? entry.withExtensionCards(cards) : entry
+            entry.sourcePaneId == sourcePaneId ? entry.withExtensionCards(cards) : entry
         }
-        return AgentsResponse(schemaVersion: schemaVersion, inventory: inventory, entries: mergedEntries, diagnostics: diagnostics)
+        return AgentsResponse(schemaVersion: schemaVersion, inventory: inventory, entries: mergedEntries, diagnostics: diagnostics, sourceDiagnostics: sourceDiagnostics)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, inventory, entries, diagnostics, sourceDiagnostics
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        inventory = try container.decode(InventorySummary.self, forKey: .inventory)
+        entries = try container.decode([AgentEntry].self, forKey: .entries)
+        diagnostics = try container.decodeIfPresent([ControlDiagnostic].self, forKey: .diagnostics) ?? []
+        sourceDiagnostics = try container.decodeIfPresent([ControlDiagnostic].self, forKey: .sourceDiagnostics) ?? []
     }
 }
 
@@ -35,10 +54,30 @@ public struct ExtensionCardsResponse: Decodable, Sendable {
     public let ok: Bool
     public let action: String
     public let paneId: String
+    public let sourceId: String
+    public let sourcePaneId: String
     public let workspace: String?
     public let linkedRepository: String?
     public let targetPath: String
     public let extensionCards: [ControlExtensionCard]
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, ok, action, paneId, sourceId, sourcePaneId, workspace, linkedRepository, targetPath, extensionCards
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        ok = try container.decode(Bool.self, forKey: .ok)
+        action = try container.decode(String.self, forKey: .action)
+        paneId = try container.decode(String.self, forKey: .paneId)
+        sourceId = try container.decodeIfPresent(String.self, forKey: .sourceId) ?? AgentEntry.defaultSourceId
+        sourcePaneId = try container.decodeIfPresent(String.self, forKey: .sourcePaneId) ?? AgentEntry.defaultSourcePaneId(sourceId: sourceId, paneId: paneId)
+        workspace = try container.decodeIfPresent(String.self, forKey: .workspace)
+        linkedRepository = try container.decodeIfPresent(String.self, forKey: .linkedRepository)
+        targetPath = try container.decode(String.self, forKey: .targetPath)
+        extensionCards = try container.decodeIfPresent([ControlExtensionCard].self, forKey: .extensionCards) ?? []
+    }
 }
 
 public struct InventorySummary: Decodable, Sendable {
@@ -51,9 +90,28 @@ public struct InventorySummary: Decodable, Sendable {
 }
 
 public struct ControlDiagnostic: Decodable, Identifiable, Sendable {
-    public var id: String { "\(level):\(message)" }
+    public var id: String { [sourceId, code, level, message].compactMap { $0 }.joined(separator: ":") }
     public let level: String
+    public let code: String?
+    public let sourceId: String?
+    public let sourceLabel: String?
+    public let sourceKind: String?
     public let message: String
+    public let retryable: Bool?
+    public let durationMs: UInt64?
+    public let lastSuccessUnixMs: UInt64?
+
+    public init(level: String, code: String? = nil, sourceId: String? = nil, sourceLabel: String? = nil, sourceKind: String? = nil, message: String, retryable: Bool? = nil, durationMs: UInt64? = nil, lastSuccessUnixMs: UInt64? = nil) {
+        self.level = level
+        self.code = code
+        self.sourceId = sourceId
+        self.sourceLabel = sourceLabel
+        self.sourceKind = sourceKind
+        self.message = message
+        self.retryable = retryable
+        self.durationMs = durationMs
+        self.lastSuccessUnixMs = lastSuccessUnixMs
+    }
 }
 
 public struct ControlPullRequest: Decodable, Sendable {
@@ -92,7 +150,18 @@ public struct ControlExtensionAction: Decodable, Identifiable, Sendable {
 }
 
 public struct AgentEntry: Decodable, Identifiable, Sendable {
-    public let id: String
+    public static let defaultSourceId = "local"
+    public static let defaultSourceLabel = "Local"
+    public static let defaultSourceKind = "local"
+
+    public var id: String { sourcePaneId }
+    public let controlId: String?
+    public let sourcePaneId: String
+    public let sourceId: String
+    public let sourceLabel: String
+    public let sourceDisplayLabel: String
+    public let sourceShowLabel: Bool
+    public let sourceKind: String
     public let paneId: String
     public let sessionName: String
     public let windowName: String
@@ -122,6 +191,12 @@ public struct AgentEntry: Decodable, Identifiable, Sendable {
 
     public init(
         id: String,
+        sourcePaneId: String? = nil,
+        sourceId: String = AgentEntry.defaultSourceId,
+        sourceLabel: String = AgentEntry.defaultSourceLabel,
+        sourceDisplayLabel: String? = nil,
+        sourceShowLabel: Bool = false,
+        sourceKind: String = AgentEntry.defaultSourceKind,
         paneId: String,
         sessionName: String,
         windowName: String,
@@ -149,8 +224,14 @@ public struct AgentEntry: Decodable, Identifiable, Sendable {
         pullRequest: ControlPullRequest?,
         extensionCards: [ControlExtensionCard]
     ) {
-        self.id = id
+        self.controlId = id
         self.paneId = paneId
+        self.sourceId = sourceId
+        self.sourceLabel = sourceLabel
+        self.sourceDisplayLabel = sourceDisplayLabel ?? sourceLabel
+        self.sourceShowLabel = sourceShowLabel
+        self.sourceKind = sourceKind
+        self.sourcePaneId = sourcePaneId ?? Self.defaultSourcePaneId(sourceId: sourceId, paneId: paneId)
         self.sessionName = sessionName
         self.windowName = windowName
         self.title = title
@@ -178,9 +259,23 @@ public struct AgentEntry: Decodable, Identifiable, Sendable {
         self.extensionCards = extensionCards
     }
 
+    public static func defaultSourcePaneId(sourceId: String, paneId: String) -> String {
+        "source:\(sourceId):pane:\(paneId)"
+    }
+
+    public var isDefaultSource: Bool {
+        sourceId == Self.defaultSourceId && sourceKind == Self.defaultSourceKind
+    }
+
     public func withExtensionCards(_ extensionCards: [ControlExtensionCard]) -> AgentEntry {
         AgentEntry(
-            id: id,
+            id: controlId ?? sourcePaneId,
+            sourcePaneId: sourcePaneId,
+            sourceId: sourceId,
+            sourceLabel: sourceLabel,
+            sourceDisplayLabel: sourceDisplayLabel,
+            sourceShowLabel: sourceShowLabel,
+            sourceKind: sourceKind,
             paneId: paneId,
             sessionName: sessionName,
             windowName: windowName,
@@ -211,7 +306,8 @@ public struct AgentEntry: Decodable, Identifiable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, paneId, sessionName, windowName, title, navigationTitle, harness, harnessLabel
+        case id, sourcePaneId, sourceId, sourceLabel, sourceDisplayLabel, sourceShowLabel, sourceKind
+        case paneId, sessionName, windowName, title, navigationTitle, harness, harnessLabel
         case status, statusLabel, statusSource, integrationMode, isAgent, currentCommand
         case runtimeCommand, workingDir, linkedRepository, workspaceName, preview, previewProvenance, activityScore
         case statusRank, lastActivityUnixMs, lastStatusChangeUnixMs, activeRunCount
@@ -220,8 +316,14 @@ public struct AgentEntry: Decodable, Identifiable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(String.self, forKey: .id)
+        controlId = try container.decodeIfPresent(String.self, forKey: .id)
         paneId = try container.decode(String.self, forKey: .paneId)
+        sourceId = try container.decodeIfPresent(String.self, forKey: .sourceId) ?? Self.defaultSourceId
+        sourceLabel = try container.decodeIfPresent(String.self, forKey: .sourceLabel) ?? Self.defaultSourceLabel
+        sourceDisplayLabel = try container.decodeIfPresent(String.self, forKey: .sourceDisplayLabel) ?? sourceLabel
+        sourceShowLabel = try container.decodeIfPresent(Bool.self, forKey: .sourceShowLabel) ?? false
+        sourceKind = try container.decodeIfPresent(String.self, forKey: .sourceKind) ?? Self.defaultSourceKind
+        sourcePaneId = try container.decodeIfPresent(String.self, forKey: .sourcePaneId) ?? Self.defaultSourcePaneId(sourceId: sourceId, paneId: paneId)
         sessionName = try container.decode(String.self, forKey: .sessionName)
         windowName = try container.decode(String.self, forKey: .windowName)
         title = try container.decode(String.self, forKey: .title)

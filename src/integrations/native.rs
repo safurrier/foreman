@@ -461,14 +461,14 @@ mod tests {
         let summary = apply_native_signals(&mut inventory, HarnessKind::ClaudeCode, &source);
 
         let claude = inventory
-            .pane(&"%2".into())
+            .pane(&crate::app::PaneKey::from("%2"))
             .and_then(|pane| pane.agent.as_ref())
             .expect("claude pane should exist");
         assert_eq!(claude.integration_mode, IntegrationMode::Native);
         assert_eq!(claude.status, AgentStatus::Idle);
 
         let codex = inventory
-            .pane(&"%3".into())
+            .pane(&crate::app::PaneKey::from("%3"))
             .and_then(|pane| pane.agent.as_ref())
             .expect("codex pane should exist");
         assert_eq!(codex.integration_mode, IntegrationMode::Compatibility);
@@ -496,7 +496,7 @@ mod tests {
         let summary = apply_native_signals(&mut inventory, HarnessKind::CodexCli, &source);
 
         let agent = inventory
-            .pane(&"%4".into())
+            .pane(&crate::app::PaneKey::from("%4"))
             .and_then(|pane| pane.agent.as_ref())
             .expect("pane should remain an agent");
         assert_eq!(agent.harness, HarnessKind::Pi);
@@ -527,7 +527,7 @@ mod tests {
         let summary = apply_native_signals(&mut inventory, HarnessKind::CodexCli, &source);
 
         assert!(inventory
-            .pane(&"%5".into())
+            .pane(&crate::app::PaneKey::from("%5"))
             .expect("pane should exist")
             .agent
             .is_none());
@@ -558,7 +558,7 @@ mod tests {
         let summary = apply_native_signals(&mut inventory, HarnessKind::CodexCli, &source);
 
         let agent = inventory
-            .pane(&"%7".into())
+            .pane(&crate::app::PaneKey::from("%7"))
             .and_then(|pane| pane.agent.as_ref())
             .expect("pane should become a native agent");
         assert_eq!(agent.harness, HarnessKind::CodexCli);
@@ -589,7 +589,7 @@ mod tests {
         let summary = apply_native_signals(&mut inventory, HarnessKind::CodexCli, &source);
 
         let agent = inventory
-            .pane(&"%6".into())
+            .pane(&crate::app::PaneKey::from("%6"))
             .and_then(|pane| pane.agent.as_ref())
             .expect("pane should become a native agent");
         assert_eq!(agent.harness, HarnessKind::CodexCli);

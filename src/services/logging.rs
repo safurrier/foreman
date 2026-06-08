@@ -405,6 +405,9 @@ mod tests {
             startup_cache_dir: log_dir.join("../cache"),
             ui_preferences_file: log_dir.join("../ui-state.json"),
             tmux_socket: None,
+            tmux_server_name: None,
+            sources: Default::default(),
+            source: None,
             claude_native_dir: None,
             codex_native_dir: None,
             pi_native_dir: None,
@@ -688,6 +691,7 @@ mod tests {
             RunLogger::start(temp_dir.path(), 2, LogVerbosity::Info).expect("logger should start");
         let request = NotificationRequest {
             pane_id: "alpha:claude".into(),
+            pane_key: crate::app::PaneKey::local("alpha:claude".into()),
             pane_title: "claude-main".to_string(),
             kind: NotificationKind::Completion,
             title: "Agent ready: claude-main".to_string(),
@@ -701,6 +705,7 @@ mod tests {
         logger
             .log_notification_decision(&NotificationDecision {
                 pane_id: "alpha:claude".into(),
+                pane_key: crate::app::PaneKey::local("alpha:claude".into()),
                 kind: NotificationKind::Completion,
                 reason: NotificationDecisionReason::WorkingBecameReady,
                 request: Some(request.clone()),

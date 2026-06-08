@@ -120,6 +120,7 @@ pub struct AppConfig {
     pub pull_requests: PullRequestConfig,
     pub extensions: ExtensionConfig,
     pub integrations: IntegrationConfig,
+    pub sources: crate::sources::SourcesConfig,
     pub ui: UiConfig,
     #[serde(skip)]
     pub ui_sources: UiConfigSources,
@@ -333,6 +334,7 @@ struct DefaultConfigTemplate {
     pull_requests: PullRequestConfig,
     extensions: ExtensionConfig,
     integrations: IntegrationConfig,
+    sources: crate::sources::SourcesConfig,
 }
 
 impl Default for DefaultConfigTemplate {
@@ -345,6 +347,7 @@ impl Default for DefaultConfigTemplate {
             pull_requests: config.pull_requests,
             extensions: config.extensions,
             integrations: config.integrations,
+            sources: config.sources,
         }
     }
 }
@@ -356,6 +359,9 @@ pub struct RuntimeConfig {
     pub startup_cache_dir: PathBuf,
     pub ui_preferences_file: PathBuf,
     pub tmux_socket: Option<PathBuf>,
+    pub tmux_server_name: Option<String>,
+    pub sources: crate::sources::SourcesConfig,
+    pub source: Option<String>,
     pub claude_native_dir: Option<PathBuf>,
     pub codex_native_dir: Option<PathBuf>,
     pub pi_native_dir: Option<PathBuf>,
@@ -384,6 +390,16 @@ pub struct RuntimeConfig {
 }
 
 impl RuntimeConfig {
+    pub fn tmux_target(&self) -> crate::adapters::tmux::TmuxTarget {
+        match (&self.tmux_socket, &self.tmux_server_name) {
+            (Some(socket), _) => crate::adapters::tmux::TmuxTarget::Socket(socket.clone()),
+            (None, Some(server_name)) => {
+                crate::adapters::tmux::TmuxTarget::ServerName(server_name.clone())
+            }
+            (None, None) => crate::adapters::tmux::TmuxTarget::Default,
+        }
+    }
+
     pub fn from_sources(paths: AppPaths, file_config: AppConfig, cli: &crate::cli::Cli) -> Self {
         let claude_native_dir = cli
             .claude_native_dir
@@ -401,12 +417,22 @@ impl RuntimeConfig {
             .or(file_config.integrations.pi.native_dir.clone())
             .or_else(|| Some(default_pi_native_dir(&paths.log_dir)));
 
+        let mut sources = file_config.sources;
+        if let Some(scope) = cli.sources.as_deref() {
+            if let Ok(scope) = crate::sources::SourceScope::parse(scope) {
+                sources.default_scope = scope;
+            }
+        }
+
         Self {
             config_file: paths.config_file,
             log_dir: paths.log_dir,
             startup_cache_dir: paths.startup_cache_dir,
             ui_preferences_file: paths.ui_preferences_file,
             tmux_socket: cli.tmux_socket.clone(),
+            tmux_server_name: cli.tmux_server_name.clone(),
+            source: cli.source.clone(),
+            sources,
             claude_native_dir,
             codex_native_dir,
             pi_native_dir,
@@ -718,6 +744,10 @@ mod tests {
             "--popup",
             "--no-notify",
             "--debug",
+            "--source",
+            "coder",
+            "--sources",
+            "all",
         ]);
 
         let runtime = RuntimeConfig::from_sources(
@@ -799,9 +829,44 @@ mod tests {
             IntegrationPreference::Auto
         );
         assert_eq!(runtime.theme, ThemeName::Catppuccin);
+        assert_eq!(runtime.source.as_deref(), Some("coder"));
+        assert_eq!(
+            runtime.sources.default_scope,
+            crate::sources::SourceScope::All
+        );
         assert_eq!(runtime.default_sort, SortMode::Stable);
         assert!(!runtime.ui_theme_configured);
         assert!(!runtime.ui_default_sort_configured);
+    }
+
+    #[test]
+    fn config_parsing_supports_source_jump_activate_command_alias() {
+        let parsed: AppConfig = toml::from_str(
+            r#"
+[sources.coder]
+kind = "ssh"
+label = "Coder"
+host = "coder.example"
+foreman = "foreman"
+
+[sources.coder.jump]
+activate_command = "~/.config/foreman/focus-coder.sh"
+"#,
+        )
+        .expect("config should parse");
+
+        let source = parsed
+            .sources
+            .entries
+            .get("coder")
+            .expect("coder source should exist");
+        let crate::sources::SourceConfig::Ssh { jump, .. } = source else {
+            panic!("expected ssh source");
+        };
+        assert_eq!(
+            jump.activation_command.as_deref(),
+            Some("~/.config/foreman/focus-coder.sh")
+        );
     }
 
     #[test]

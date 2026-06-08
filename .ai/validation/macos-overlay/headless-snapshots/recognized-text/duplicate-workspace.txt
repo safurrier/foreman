@@ -9,10 +9,12 @@ WORKING
 WORKING
 IDLE
 notes-vault
-notes / project-alpha startup / %35
+Local / notes / project-alpha startup / %35
+Source
+Local
 Harness
 Pi
-Source
+Status src
 native hook
 Command
 pi

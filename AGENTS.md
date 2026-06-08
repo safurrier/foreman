@@ -80,6 +80,14 @@ Claude, Codex, and Pi E2Es with `mise run verify-native`.
   **BECAUSE** double-click-to-open/focus is expected macOS list behavior for
   this overlay.
 
+- **DO** verify remote SSH sources use the same remote tmux binary/path as the
+  attached terminal session, especially on Coder. **NOT** assume `/usr/bin/tmux`
+  can query a server created by Homebrew/Nix tmux. **BECAUSE** Coder's
+  non-login SSH path can pick `/usr/bin/tmux 3.2a`, while the interactive
+  `tmux -L user` server may be `tmux 3.6a`; the symptom is `server exited
+  unexpectedly` or missing remote agent panes until the source command loads
+  the login PATH or uses a wrapper.
+
 - **DO** treat normal typing in the macOS overlay as search input and arrow
   keys as agent navigation. **NOT** require users to manually re-focus the
   search field after clicking around. **BECAUSE** the overlay should behave like
@@ -143,6 +151,32 @@ Claude, Codex, and Pi E2Es with `mise run verify-native`.
   plain `swift test` as sufficient for these paths. **BECAUSE** the required
   lane also proves fake-Foreman UI events, real tmux smoke, snapshots/OCR, and
   app bundle launch.
+
+- **DO** preserve direct-argv tmux popup bindings like
+  `display-popup -h 80% -w 80% -E -- "$HOME/.cargo/bin/foreman" --popup`.
+  **NOT** wrap the popup command in a shell unless expansion is required.
+  **BECAUSE** shell startup, especially zsh init, can add seconds of latency to
+  Foreman's quick popup path.
+
+- **DO** keep the tmux popup and macOS overlay conceptually parallel as Foreman
+  surfaces. **NOT** make cross-source visibility a Mac-only capability by
+  default. **BECAUSE** divergent surfaces make the product harder to reason
+  about; operators should not need to remember that "global overview" only
+  exists in the native app.
+
+- **DO** make all-source popup UX stay fast and readable with local-first,
+  config-driven source labels, deduped session grouping, and async/cached remote
+  refresh. **NOT** block every popup open or navigation move on live SSH, or
+  force users to cycle source targets manually. **BECAUSE** Foreman is a
+  command-palette-like operator console where users expect all work at a glance
+  and Enter/focus to jump directly to the selected local or Coder pane.
+
+- **DO** keep popup keypress performance covered by `mise run verify-ux` and
+  `scripts/smoke-popup-key-latency.sh` when touching runtime scheduling,
+  inventory refresh, source aggregation, PR/extension lookup cadence, or tmux
+  capture. **NOT** rely on subjective manual popup testing. **BECAUSE** key-lag
+  regressions have recurred, and the smoke enforces local-only, all-source idle,
+  and refresh-overlap navigation budgets.
 
 ## Related Context
 

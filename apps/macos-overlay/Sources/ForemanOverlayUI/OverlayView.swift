@@ -98,8 +98,11 @@ public struct OverlayView: View {
             emptyState
         } else {
             HStack(spacing: 0) {
-                agentList
-                    .frame(width: 360)
+                VStack(spacing: 0) {
+                    sourceDiagnosticsBanner
+                    agentList
+                }
+                .frame(width: 360)
                 Divider()
                 detailPane
             }
@@ -135,7 +138,7 @@ public struct OverlayView: View {
                 Button("Clear Search") { store.query = "" }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if let diagnostic = store.response?.diagnostics.first {
+        } else if let diagnostic = store.response?.allDiagnostics.first {
             VStack(spacing: 10) {
                 ContentUnavailableView("Foreman control diagnostic", systemImage: "exclamationmark.triangle", description: Text(diagnostic.message))
                 Text("Try: foreman --doctor")
@@ -159,6 +162,29 @@ public struct OverlayView: View {
                     .frame(maxWidth: 520)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    @ViewBuilder
+    private var sourceDiagnosticsBanner: some View {
+        if let diagnostic = store.response?.sourceDiagnostics.first {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(diagnostic.sourceLabel ?? "Source diagnostic")
+                        .font(.caption.weight(.semibold))
+                    Text(diagnostic.message)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.orange.opacity(0.10))
+            Divider()
         }
     }
 
@@ -211,7 +237,7 @@ public struct OverlayView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(entry.navigationTitle)
                             .font(.title3.weight(.semibold))
-                        Text("\(entry.sessionName) / \(entry.windowName) / \(entry.paneId)")
+                        Text("\(entry.sourceLabel) / \(entry.sessionName) / \(entry.windowName) / \(entry.paneId)")
                             .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
                     }
@@ -261,8 +287,9 @@ public struct OverlayView: View {
 
     private func metadata(_ entry: AgentEntry) -> some View {
         Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+            GridRow { metaLabel("Source"); Text(entry.sourceLabel) }
             GridRow { metaLabel("Harness"); Text(entry.harnessLabel ?? "Unknown") }
-            GridRow { metaLabel("Source"); Text(entry.statusSource ?? "Unknown") }
+            GridRow { metaLabel("Status src"); Text(entry.statusSource ?? "Unknown") }
             GridRow { metaLabel("Command"); Text(entry.runtimeCommand ?? entry.currentCommand ?? "Unknown") }
             GridRow { metaLabel("Workspace"); Text(entry.workingDir ?? "Unknown").lineLimit(2) }
             if let linkedRepository = entry.linkedRepository {

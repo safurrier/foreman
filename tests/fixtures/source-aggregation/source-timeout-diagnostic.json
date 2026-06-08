@@ -1,0 +1,11 @@
+{
+  "level": "warning",
+  "code": "source.ssh.timeout",
+  "sourceId": "coder",
+  "sourceLabel": "Coder",
+  "sourceKind": "ssh",
+  "message": "Coder unreachable: ssh timed out after 2500ms",
+  "retryable": true,
+  "durationMs": 2500,
+  "lastSuccessUnixMs": null
+}

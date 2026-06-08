@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 2,
+  "generatedAtUnixMs": 1780000000000,
+  "inventory": {"totalSessions": 2, "totalWindows": 2, "totalPanes": 2, "visibleSessions": 2, "visibleWindows": 2, "visiblePanes": 2},
+  "sources": [
+    {"id": "local", "label": "Local", "kind": "local", "status": "ok"},
+    {"id": "coder", "label": "Coder", "kind": "ssh", "status": "ok"}
+  ],
+  "entries": [
+    {"id": "source:local:pane:%42", "sourcePaneId": "source:local:pane:%42", "sourceId": "local", "sourceLabel": "Local", "sourceKind": "local", "paneId": "%42", "sessionId": "$1", "sessionName": "local", "windowId": "@1", "windowName": "foreman", "title": "local", "navigationTitle": "foreman", "harness": "claude", "harnessLabel": "Claude Code", "status": "working", "statusLabel": "WORKING", "statusSource": "compatibility", "integrationMode": "compatibility", "isAgent": true, "currentCommand": "claude", "runtimeCommand": "claude", "workingDir": "/repo/foreman", "linkedRepository": null, "workspaceName": "foreman", "preview": "", "previewProvenance": "captured", "activityScore": 0, "statusRank": 1, "lastActivityUnixMs": null, "lastStatusChangeUnixMs": null, "activeRunCount": null, "pullRequest": null},
+    {"id": "source:coder:pane:%42", "sourcePaneId": "source:coder:pane:%42", "sourceId": "coder", "sourceLabel": "Coder", "sourceKind": "ssh", "paneId": "%42", "sessionId": "$2", "sessionName": "dots", "windowId": "@2", "windowName": "discord", "title": "coder", "navigationTitle": "discord", "harness": "pi", "harnessLabel": "Pi", "status": "idle", "statusLabel": "IDLE", "statusSource": "native hook", "integrationMode": "native", "isAgent": true, "currentCommand": "pi", "runtimeCommand": "pi", "workingDir": "/home/discord/discord", "linkedRepository": null, "workspaceName": "discord", "preview": "", "previewProvenance": "captured", "activityScore": 0, "statusRank": 3, "lastActivityUnixMs": null, "lastStatusChangeUnixMs": null, "activeRunCount": null, "pullRequest": null}
+  ],
+  "diagnostics": []
+}

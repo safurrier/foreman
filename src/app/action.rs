@@ -47,6 +47,7 @@ pub enum Action {
         refreshing: bool,
     },
     SetRuntimeDiagnostics(Vec<DoctorFinding>),
+    SetSourceDiagnostics(Vec<crate::sources::SourceDiagnostic>),
     SetSystemStats(SystemStatsSnapshot),
     SetStartupLoading(bool),
     SetStartupCacheAge(Option<u64>),
@@ -119,6 +120,7 @@ impl Action {
             Self::SetExtensionCards { .. } => "set-extension-cards",
             Self::SetExtensionRefreshing { .. } => "set-extension-refreshing",
             Self::SetRuntimeDiagnostics(_) => "set-runtime-diagnostics",
+            Self::SetSourceDiagnostics(_) => "set-source-diagnostics",
             Self::SetSystemStats(_) => "set-system-stats",
             Self::SetStartupLoading(_) => "set-startup-loading",
             Self::SetStartupCacheAge(_) => "set-startup-cache-age",
@@ -197,8 +199,12 @@ pub fn action_for_command(state: &AppState, command: Command) -> Action {
                 Action::CommitSearchSelection
             } else {
                 match state.selection.as_ref() {
-                    Some(SelectionTarget::Session(session_id)) => {
-                        Action::ToggleSessionCollapsed(session_id.clone())
+                    Some(SelectionTarget::Session(session_key)) => {
+                        if state.popup_mode && state.selected_actionable_pane_key().is_some() {
+                            Action::FocusSelectedPane
+                        } else {
+                            Action::ToggleSessionCollapsed(session_key.session_id.clone())
+                        }
                     }
                     Some(SelectionTarget::Window(_)) => Action::FocusSelectedPane,
                     Some(SelectionTarget::Pane(_)) => Action::FocusSelectedPane,
@@ -219,9 +225,11 @@ pub fn action_for_command(state: &AppState, command: Command) -> Action {
         Command::FocusPreview => Action::SetFocus(Focus::Preview),
         Command::FocusInput => Action::SetFocus(Focus::Input),
         Command::FocusSelectedPane => Action::FocusSelectedPane,
-        Command::RequestKill => match state.selected_actionable_pane_id() {
-            Some(pane_id) => Action::OpenKillConfirmation { pane_id },
-            None => Action::Noop,
+        Command::RequestKill => match state.selected_actionable_pane_key() {
+            Some(pane_key) if pane_key.is_local() => Action::OpenKillConfirmation {
+                pane_id: pane_key.pane_id,
+            },
+            _ => Action::Noop,
         },
         Command::InsertChar(ch) => Action::EditDraft(DraftEdit::InsertChar(ch)),
         Command::Backspace => Action::EditDraft(DraftEdit::Backspace),
@@ -272,16 +280,22 @@ pub fn action_for_command(state: &AppState, command: Command) -> Action {
                 Action::Noop
             }
         }
-        Command::RenameWindow => match (state.selected_window_id(), state.selected_window_name()) {
-            (Some(window_id), Some(current_name)) => Action::OpenRenameModal {
-                window_id,
-                current_name,
+        Command::RenameWindow => {
+            match (state.selected_window_key(), state.selected_window_name()) {
+                (Some(window_key), Some(current_name)) if window_key.is_local() => {
+                    Action::OpenRenameModal {
+                        window_id: window_key.window_id,
+                        current_name,
+                    }
+                }
+                _ => Action::Noop,
+            }
+        }
+        Command::SpawnAgent => match state.selected_session_key() {
+            Some(session_key) if session_key.is_local() => Action::OpenSpawnModal {
+                session_id: session_key.session_id,
             },
             _ => Action::Noop,
-        },
-        Command::SpawnAgent => match state.selected_session_id() {
-            Some(session_id) => Action::OpenSpawnModal { session_id },
-            None => Action::Noop,
         },
         Command::ToggleNonAgentSessions => Action::ToggleShowNonAgentSessions,
         Command::ToggleNonAgentPanes => Action::ToggleShowNonAgentPanes,
@@ -333,6 +347,13 @@ mod tests {
             Action::ToggleSessionCollapsed("alpha".into())
         );
 
+        let mut state = state_with_selection(Some(SelectionTarget::Session("alpha".into())));
+        state.popup_mode = true;
+        assert_eq!(
+            action_for_command(&state, Command::Select),
+            Action::FocusSelectedPane
+        );
+
         let state = state_with_selection(Some(SelectionTarget::Window("alpha:agents".into())));
         assert_eq!(
             action_for_command(&state, Command::Select),
@@ -343,6 +364,39 @@ mod tests {
         assert_eq!(
             action_for_command(&state, Command::Select),
             Action::FocusSelectedPane
+        );
+    }
+
+    #[test]
+    fn destructive_tmux_commands_are_noops_for_remote_selection() {
+        let inventory = inventory([SessionBuilder::new("remote").window(
+            WindowBuilder::new("remote:agents").pane(
+                PaneBuilder::agent("%42", HarnessKind::ClaudeCode)
+                    .source("coder", "Coder", "ssh")
+                    .working_dir("/tmp/remote"),
+            ),
+        )]);
+        let mut state = AppState::with_inventory(inventory);
+        let source = crate::app::SourceMetadata::new("coder", "Coder", "ssh");
+        state.inventory.sessions[0].source = source.clone();
+        state.inventory.sessions[0].windows[0].source = source;
+        state.rebuild_visible_state();
+        state.selection = Some(SelectionTarget::Pane(crate::app::PaneKey::new(
+            crate::app::SourceId::new("coder"),
+            "%42".into(),
+        )));
+
+        assert_eq!(
+            action_for_command(&state, Command::RequestKill),
+            Action::Noop
+        );
+        assert_eq!(
+            action_for_command(&state, Command::RenameWindow),
+            Action::Noop
+        );
+        assert_eq!(
+            action_for_command(&state, Command::SpawnAgent),
+            Action::Noop
         );
     }
 

@@ -1,4 +1,4 @@
-use crate::adapters::tmux::{InventoryLoadMetrics, SystemTmuxBackend, TmuxAdapter};
+use crate::adapters::tmux::{InventoryLoadMetrics, SystemTmuxBackend, TmuxAdapter, TmuxTarget};
 use crate::app::{
     AppState, InventorySummary, OperatorAlert, OperatorAlertLevel, OperatorAlertSource,
     SelectionTarget,
@@ -30,6 +30,10 @@ use crate::services::startup_cache::{load_startup_cache, StartupCacheLoadResult}
 use crate::services::system_stats::{SysinfoSystemStatsBackend, SystemStatsService};
 use crate::services::ui_preferences::{
     apply_preferences_to_runtime, load_ui_preferences, reset_ui_preferences, PersistedUiPreferences,
+};
+use crate::sources::{
+    ForemanSource, LocalSource, SourceConfig, SourceDescriptor, SourceError, SourceId, SourceScope,
+    SourcesConfig, SshSource,
 };
 use clap::{Args, Parser, Subcommand};
 use std::fmt;
@@ -235,8 +239,34 @@ pub struct Cli {
     #[arg(long, hide = true)]
     pub log_dir: Option<PathBuf>,
 
-    #[arg(long, hide = true)]
+    #[arg(long, hide = true, global = true)]
     pub tmux_socket: Option<PathBuf>,
+
+    #[arg(
+        long,
+        global = true,
+        help_heading = "Runtime",
+        help = "Target a named tmux server as if using `tmux -L <name>`."
+    )]
+    pub tmux_server_name: Option<String>,
+
+    #[arg(
+        long,
+        global = true,
+        value_name = "SOURCE_ID",
+        help_heading = "Runtime",
+        help = "Limit control commands to one configured source."
+    )]
+    pub source: Option<String>,
+
+    #[arg(
+        long,
+        global = true,
+        value_name = "SCOPE",
+        help_heading = "Runtime",
+        help = "Source scope for inventory commands: all, current, or local."
+    )]
+    pub sources: Option<String>,
 
     #[arg(long, hide = true)]
     pub claude_native_dir: Option<PathBuf>,
@@ -252,6 +282,15 @@ pub struct Cli {
 
     #[command(subcommand)]
     pub command: Option<CliCommand>,
+}
+
+fn tmux_backend_from_cli(cli: &Cli) -> SystemTmuxBackend {
+    let target = match (&cli.tmux_socket, &cli.tmux_server_name) {
+        (Some(socket), _) => TmuxTarget::Socket(socket.clone()),
+        (None, Some(server_name)) => TmuxTarget::ServerName(server_name.clone()),
+        (None, None) => TmuxTarget::Default,
+    };
+    SystemTmuxBackend::with_target(target)
 }
 
 #[derive(Debug, Subcommand, Clone, PartialEq, Eq)]
@@ -292,6 +331,19 @@ pub enum CliCommand {
     Links {
         #[command(subcommand)]
         command: Option<LinksCommand>,
+    },
+    /// Inspect and manage persisted Foreman inventory sources.
+    Sources {
+        #[command(subcommand)]
+        command: SourcesCommand,
+    },
+    /// Internal non-recursive source probe used by remote source transports.
+    #[command(hide = true)]
+    SourceProbe {
+        #[arg(long)]
+        local_only: bool,
+        #[command(subcommand)]
+        command: SourceProbeCommand,
     },
     /// Print read-only extension/provider cards for one live tmux pane as JSON.
     Extensions {
@@ -340,6 +392,87 @@ pub enum LinksCommand {
     )]
     List {
         #[arg(long, help = "Print persisted links as JSON for agent workflows.")]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand, Clone, PartialEq, Eq)]
+pub enum SourcesCommand {
+    /// List configured sources.
+    List {
+        #[arg(long, help = "Print sources as JSON.")]
+        json: bool,
+    },
+    /// Add or replace a source.
+    Add {
+        #[command(subcommand)]
+        command: SourcesAddCommand,
+    },
+    /// Remove a configured source.
+    Remove {
+        source_id: String,
+        #[arg(long, help = "Print a JSON action result.")]
+        json: bool,
+    },
+    /// Run source health checks.
+    Doctor {
+        source_id: String,
+        #[arg(long, help = "Print a JSON health report.")]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand, Clone, PartialEq, Eq)]
+pub enum SourcesAddCommand {
+    /// Add an SSH-backed source.
+    Ssh(SourcesAddSshArgs),
+}
+
+#[derive(Debug, Args, Clone, PartialEq, Eq)]
+pub struct SourcesAddSshArgs {
+    pub source_id: String,
+    #[arg(long)]
+    pub host: String,
+    #[arg(long, default_value = "foreman")]
+    pub foreman: String,
+    #[arg(long)]
+    pub tmux_server_name: Option<String>,
+    #[arg(long)]
+    pub tmux_socket: Option<PathBuf>,
+    #[arg(long)]
+    pub label: String,
+    #[arg(long, default_value = "ssh")]
+    pub ssh: String,
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Subcommand, Clone, PartialEq, Eq)]
+pub enum SourceProbeCommand {
+    Agents {
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        all_panes: bool,
+    },
+    Focus {
+        #[arg(long)]
+        pane: String,
+        #[arg(long)]
+        json: bool,
+    },
+    Send {
+        #[arg(long)]
+        pane: String,
+        #[arg(long)]
+        stdin: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    Extensions {
+        #[arg(long)]
+        pane: String,
+        #[arg(long)]
         json: bool,
     },
 }
@@ -522,14 +655,14 @@ fn link_pane_to_repository(
     args: &LinkArgs,
 ) -> Result<RunOutcome, RunError> {
     let pane_id = crate::app::PaneId::new(args.pane.clone());
-    let adapter = TmuxAdapter::new(SystemTmuxBackend::new(cli.tmux_socket.clone()));
+    let adapter = TmuxAdapter::new(tmux_backend_from_cli(cli));
     let inventory = adapter.load_inventory(1).map_err(|error| {
         RunError::Usage(format!(
             "failed to inspect tmux panes before linking: {error}"
         ))
     })?;
     let pane_working_dir = inventory
-        .pane(&pane_id)
+        .local_pane(&pane_id)
         .map(|pane| pane.working_dir.clone())
         .ok_or_else(|| {
             RunError::Usage(format!(
@@ -659,6 +792,455 @@ fn list_repository_links(
     Ok(RunOutcome::ControlJson(value))
 }
 
+fn local_agents_response(
+    cli: &Cli,
+    paths: &crate::config::AppPaths,
+    include_non_agents: bool,
+) -> Result<crate::services::control_api::AgentsResponse, RunError> {
+    let file_config = load_config(&paths.config_file)?;
+    let runtime = RuntimeConfig::from_sources(paths.clone(), file_config, cli);
+    let (mut state, ..) = bootstrap_state(&runtime);
+    apply_linked_repositories_to_state(&mut state, &runtime);
+    Ok(agents_response(&state, include_non_agents))
+}
+
+fn save_app_config(path: &Path, config: &AppConfig) -> Result<(), RunError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(ConfigError::Io)?;
+    }
+    let contents = toml::to_string_pretty(config).map_err(ConfigError::SerializeToml)?;
+    std::fs::write(path, contents).map_err(ConfigError::Io)?;
+    Ok(())
+}
+
+fn source_scope(cli: &Cli, config: &SourcesConfig) -> Result<SourceScope, RunError> {
+    if let Some(source) = &cli.source {
+        SourceId::validate(source).map_err(RunError::Usage)?;
+        return Ok(SourceScope::All);
+    }
+    match &cli.sources {
+        Some(scope) => SourceScope::parse(scope).map_err(RunError::Usage),
+        None => Ok(config.default_scope),
+    }
+}
+
+fn build_source_provider(
+    cli: &Cli,
+    paths: &crate::config::AppPaths,
+    id: SourceId,
+    config: SourceConfig,
+    include_non_agents: bool,
+    query_timeout_ms: u64,
+) -> Box<dyn ForemanSource + Send + Sync> {
+    match &config {
+        SourceConfig::Local {
+            tmux_server_name, ..
+        } => {
+            let descriptor = SourceDescriptor::new(&id, &config);
+            let mut agents_cli = cli.clone();
+            let agents_paths = paths.clone();
+            let mut focus_cli = cli.clone();
+            let mut send_cli = cli.clone();
+            let mut extensions_cli = cli.clone();
+            if cli.tmux_socket.is_none() && cli.tmux_server_name.is_none() {
+                agents_cli.tmux_server_name = tmux_server_name.clone();
+                focus_cli.tmux_server_name = tmux_server_name.clone();
+                send_cli.tmux_server_name = tmux_server_name.clone();
+                extensions_cli.tmux_server_name = tmux_server_name.clone();
+            }
+            let extensions_paths = paths.clone();
+            Box::new(LocalSource::new(
+                descriptor,
+                Box::new(move || {
+                    local_agents_response(&agents_cli, &agents_paths, include_non_agents).map_err(
+                        |error| SourceError::new("source.local.failed", error.to_string(), true),
+                    )
+                }),
+                Box::new(move |pane| {
+                    let adapter = TmuxAdapter::new(tmux_backend_from_cli(&focus_cli));
+                    let pane_id = crate::app::PaneId::new(pane.to_string());
+                    adapter.focus_pane(&pane_id).map_err(|error| {
+                        SourceError::new(
+                            "source.local.focus-failed",
+                            format!("failed to focus pane {}: {error}", pane_id.as_str()),
+                            true,
+                        )
+                    })?;
+                    Ok(focus_response(pane_id.as_str()))
+                }),
+                Box::new(move |pane, text| {
+                    let adapter = TmuxAdapter::new(tmux_backend_from_cli(&send_cli));
+                    let pane_id = crate::app::PaneId::new(pane.to_string());
+                    let result = adapter.send_input(&pane_id, text).map_err(|error| {
+                        SourceError::new(
+                            "source.local.send-failed",
+                            format!("failed to send input to pane {}: {error}", pane_id.as_str()),
+                            true,
+                        )
+                    })?;
+                    Ok(send_response(pane_id.as_str(), result.bytes_sent))
+                }),
+                Box::new(move |pane| {
+                    let file_config =
+                        load_config(&extensions_paths.config_file).map_err(|error| {
+                            SourceError::new(
+                                "source.local.extensions-failed",
+                                error.to_string(),
+                                true,
+                            )
+                        })?;
+                    let runtime = RuntimeConfig::from_sources(
+                        extensions_paths.clone(),
+                        file_config,
+                        &extensions_cli,
+                    );
+                    let (mut state, ..) = bootstrap_state(&runtime);
+                    apply_linked_repositories_to_state(&mut state, &runtime);
+                    let pane_id = crate::app::PaneId::new(pane.to_string());
+                    extension_cards_response_for_pane(&state, &pane_id).map_err(|error| {
+                        SourceError::new("source.local.extensions-failed", error.to_string(), true)
+                    })
+                }),
+            ))
+        }
+        SourceConfig::Ssh { .. } => Box::new(SshSource::new(id, config, query_timeout_ms)),
+    }
+}
+
+fn configured_source_providers(
+    cli: &Cli,
+    paths: &crate::config::AppPaths,
+    config: &SourcesConfig,
+    include_non_agents: bool,
+) -> Result<Vec<Box<dyn ForemanSource + Send + Sync>>, RunError> {
+    let scope = source_scope(cli, config)?;
+    let mut providers = Vec::new();
+    for (id, source_config) in config.enabled_sources() {
+        let include = match scope {
+            SourceScope::All => true,
+            SourceScope::Current | SourceScope::Local => {
+                id.as_str() == crate::sources::LOCAL_SOURCE_ID
+            }
+        } && cli
+            .source
+            .as_ref()
+            .is_none_or(|requested| requested == id.as_str());
+        if include {
+            providers.push(build_source_provider(
+                cli,
+                paths,
+                id,
+                source_config,
+                include_non_agents,
+                config.query_timeout_ms,
+            ));
+        }
+    }
+    if providers.is_empty() {
+        return Err(RunError::Usage(
+            "no enabled sources matched the requested scope".to_string(),
+        ));
+    }
+    Ok(providers)
+}
+
+fn run_source_action(
+    cli: &Cli,
+    paths: &crate::config::AppPaths,
+    pane: &str,
+    send_text: Option<&str>,
+) -> Result<crate::services::control_api::ActionResponse, RunError> {
+    let file_config = load_config(&paths.config_file)?;
+    let source_id = cli
+        .source
+        .clone()
+        .unwrap_or_else(|| crate::sources::LOCAL_SOURCE_ID.to_string());
+    SourceId::validate(&source_id).map_err(RunError::Usage)?;
+    let source_id = SourceId::new(source_id);
+    let source_config = file_config
+        .sources
+        .get(&source_id)
+        .ok_or_else(|| RunError::Usage(format!("unknown source {}", source_id.as_str())))?;
+    let source = build_source_provider(
+        cli,
+        paths,
+        source_id.clone(),
+        source_config,
+        true,
+        file_config.sources.query_timeout_ms,
+    );
+    let descriptor = source.descriptor();
+    let mut response = match send_text {
+        Some(text) => source.send(pane, text),
+        None => source.focus(pane),
+    }
+    .map_err(|error| RunError::Usage(error.message))?;
+    response.wrap_source(&descriptor);
+    Ok(response)
+}
+
+fn handle_source_probe(
+    cli: &Cli,
+    paths: &crate::config::AppPaths,
+    command: &SourceProbeCommand,
+) -> Result<RunOutcome, RunError> {
+    match command {
+        SourceProbeCommand::Agents { json: _, all_panes } => {
+            let response = local_agents_response(cli, paths, *all_panes)?;
+            let value = serde_json::to_value(&response).map_err(|error| {
+                RunError::Usage(format!("failed to encode source probe JSON: {error}"))
+            })?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&response).map_err(|error| {
+                    RunError::Usage(format!("failed to encode source probe JSON: {error}"))
+                })?
+            );
+            Ok(RunOutcome::ControlJson(value))
+        }
+        SourceProbeCommand::Focus { pane, json: _ } => {
+            let adapter = TmuxAdapter::new(tmux_backend_from_cli(cli));
+            let pane_id = crate::app::PaneId::new(pane.clone());
+            adapter.focus_pane(&pane_id).map_err(|error| {
+                RunError::Usage(format!(
+                    "failed to focus pane {}: {error}",
+                    pane_id.as_str()
+                ))
+            })?;
+            let response = focus_response(pane_id.as_str());
+            let value = serde_json::to_value(&response).map_err(|error| {
+                RunError::Usage(format!("failed to encode source probe JSON: {error}"))
+            })?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&response).map_err(|error| {
+                    RunError::Usage(format!("failed to encode source probe JSON: {error}"))
+                })?
+            );
+            Ok(RunOutcome::ControlJson(value))
+        }
+        SourceProbeCommand::Send {
+            pane,
+            stdin,
+            json: _,
+        } => {
+            if !stdin {
+                return Err(RunError::Usage(
+                    "source-probe send requires --stdin".to_string(),
+                ));
+            }
+            let mut input = String::new();
+            std::io::stdin()
+                .read_to_string(&mut input)
+                .map_err(|error| RunError::Usage(format!("failed to read stdin: {error}")))?;
+            let adapter = TmuxAdapter::new(tmux_backend_from_cli(cli));
+            let pane_id = crate::app::PaneId::new(pane.clone());
+            let result = adapter.send_input(&pane_id, &input).map_err(|error| {
+                RunError::Usage(format!(
+                    "failed to send input to pane {}: {error}",
+                    pane_id.as_str()
+                ))
+            })?;
+            let response = send_response(pane_id.as_str(), result.bytes_sent);
+            let value = serde_json::to_value(&response).map_err(|error| {
+                RunError::Usage(format!("failed to encode source probe JSON: {error}"))
+            })?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&response).map_err(|error| {
+                    RunError::Usage(format!("failed to encode source probe JSON: {error}"))
+                })?
+            );
+            Ok(RunOutcome::ControlJson(value))
+        }
+        SourceProbeCommand::Extensions { pane, json: _ } => {
+            let file_config = load_config(&paths.config_file)?;
+            let runtime = RuntimeConfig::from_sources(paths.clone(), file_config, cli);
+            let (mut state, ..) = bootstrap_state(&runtime);
+            apply_linked_repositories_to_state(&mut state, &runtime);
+            let pane_id = crate::app::PaneId::new(pane.clone());
+            let value = extension_cards_response_for_pane(&state, &pane_id)?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&value).map_err(|error| {
+                    RunError::Usage(format!("failed to encode source probe JSON: {error}"))
+                })?
+            );
+            Ok(RunOutcome::ControlJson(value))
+        }
+    }
+}
+
+fn source_action_response(
+    value: serde_json::Value,
+    json: bool,
+    human: impl FnOnce(),
+) -> Result<RunOutcome, RunError> {
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&value).map_err(|error| {
+                RunError::Usage(format!("failed to encode source JSON: {error}"))
+            })?
+        );
+    } else {
+        human();
+    }
+    Ok(RunOutcome::ControlJson(value))
+}
+
+fn handle_sources_command(
+    paths: &crate::config::AppPaths,
+    command: &SourcesCommand,
+) -> Result<RunOutcome, RunError> {
+    let mut config = load_config(&paths.config_file)?;
+    match command {
+        SourcesCommand::List { json } => {
+            let sources: Vec<_> = config
+                .sources
+                .enabled_sources()
+                .into_iter()
+                .map(|(id, source_config)| SourceDescriptor::new(&id, &source_config))
+                .collect();
+            let value = serde_json::json!({
+                "schemaVersion": crate::services::control_api::CONTROL_API_SCHEMA_VERSION,
+                "sources": sources,
+                "path": paths.config_file,
+            });
+            source_action_response(value, *json, || {
+                println!("Configured sources:");
+                for (id, source_config) in config.sources.enabled_sources() {
+                    println!("  {} ({})", id.as_str(), source_config.label());
+                }
+            })
+        }
+        SourcesCommand::Add {
+            command: SourcesAddCommand::Ssh(args),
+        } => {
+            SourceId::validate(&args.source_id).map_err(RunError::Usage)?;
+            let source_config = SourceConfig::Ssh {
+                label: args.label.clone(),
+                host: args.host.clone(),
+                foreman: args.foreman.clone(),
+                tmux_server_name: args.tmux_server_name.clone(),
+                tmux_socket: args.tmux_socket.clone(),
+                ssh: args.ssh.clone(),
+                enabled: true,
+                query_timeout_ms: None,
+                extra_ssh_args: Vec::new(),
+                display: crate::sources::SourceDisplayConfig::default(),
+                jump: crate::sources::SourceJumpConfig::default(),
+            };
+            config
+                .sources
+                .entries
+                .insert(args.source_id.clone(), source_config.clone());
+            save_app_config(&paths.config_file, &config)?;
+            let value = serde_json::json!({
+                "schemaVersion": crate::services::control_api::CONTROL_API_SCHEMA_VERSION,
+                "ok": true,
+                "action": "sources.add",
+                "source": SourceDescriptor::new(&SourceId::new(args.source_id.clone()), &source_config),
+                "path": paths.config_file,
+            });
+            source_action_response(value, args.json, || {
+                println!("Added source {}", args.source_id)
+            })
+        }
+        SourcesCommand::Remove { source_id, json } => {
+            if source_id == crate::sources::LOCAL_SOURCE_ID {
+                return Err(RunError::Usage(
+                    "local source cannot be removed".to_string(),
+                ));
+            }
+            let removed = config.sources.entries.remove(source_id).is_some();
+            save_app_config(&paths.config_file, &config)?;
+            let value = serde_json::json!({
+                "schemaVersion": crate::services::control_api::CONTROL_API_SCHEMA_VERSION,
+                "ok": true,
+                "action": "sources.remove",
+                "sourceId": source_id,
+                "removed": removed,
+                "path": paths.config_file,
+            });
+            source_action_response(value, *json, || {
+                println!("Removed source {source_id}: {removed}")
+            })
+        }
+        SourcesCommand::Doctor { source_id, json } => {
+            let source_id = SourceId::new(source_id.clone());
+            let source_config = config
+                .sources
+                .get(&source_id)
+                .ok_or_else(|| RunError::Usage(format!("unknown source {}", source_id.as_str())))?;
+            let tmux_endpoint = source_tmux_endpoint_summary(&source_config);
+            let provider = build_source_provider(
+                &Cli::parse_from(["foreman", "agents"]),
+                paths,
+                source_id.clone(),
+                source_config,
+                true,
+                config.sources.query_timeout_ms,
+            );
+            let descriptor = provider.descriptor();
+            let started = std::time::Instant::now();
+            let result = provider.agents();
+            let duration_ms = started.elapsed().as_millis() as u64;
+            let (ok, diagnostics) = match result {
+                Ok(_) => (true, Vec::<crate::sources::SourceDiagnostic>::new()),
+                Err(error) => (
+                    false,
+                    vec![crate::sources::SourceDiagnostic::warning(
+                        &descriptor,
+                        error.code,
+                        error.message,
+                        error.retryable,
+                        Some(duration_ms),
+                    )],
+                ),
+            };
+            let value = serde_json::json!({
+                "schemaVersion": crate::services::control_api::CONTROL_API_SCHEMA_VERSION,
+                "ok": ok,
+                "source": descriptor,
+                "durationMs": duration_ms,
+                "tmuxEndpoint": tmux_endpoint,
+                "diagnostics": diagnostics,
+            });
+            source_action_response(value, *json, || {
+                println!(
+                    "Source {}: {}",
+                    source_id.as_str(),
+                    if ok { "ok" } else { "failed" }
+                )
+            })
+        }
+    }
+}
+
+fn source_tmux_endpoint_summary(source_config: &SourceConfig) -> serde_json::Value {
+    match source_config {
+        SourceConfig::Local {
+            tmux_server_name, ..
+        } => serde_json::json!({
+            "kind": "local",
+            "configuredServerName": tmux_server_name,
+            "configuredSocket": null,
+            "note": "Local sources use the current tmux environment unless a server name or socket override is configured."
+        }),
+        SourceConfig::Ssh {
+            tmux_server_name,
+            tmux_socket,
+            ..
+        } => serde_json::json!({
+            "kind": "ssh",
+            "configuredServerName": tmux_server_name,
+            "configuredSocket": tmux_socket.as_ref().map(|path| path.display().to_string()),
+            "note": "Noninteractive SSH does not inherit the $TMUX value from an attached terminal tab; configure tmux_server_name or tmux_socket when the source should query a specific remote tmux endpoint."
+        }),
+    }
+}
+
 fn maybe_handle_control_command(
     cli: &Cli,
     paths: &crate::config::AppPaths,
@@ -680,37 +1262,49 @@ fn maybe_handle_control_command(
             ..
         } => {
             let file_config = load_config(&paths.config_file)?;
-            let runtime = RuntimeConfig::from_sources(paths.clone(), file_config, cli);
-            let (mut state, ..) = bootstrap_state(&runtime);
-            apply_linked_repositories_to_state(&mut state, &runtime);
-            let mut response = agents_response(&state, *all_panes);
+            let providers =
+                configured_source_providers(cli, paths, &file_config.sources, *all_panes)?;
+            let aggregate = crate::sources::SourceAggregator::new(providers).aggregate();
+            let mut response = aggregate.response;
             if *pull_requests {
                 attach_pull_requests_to_response(&mut response);
             }
             if *extensions {
                 attach_extensions_to_response(&mut response);
             }
-            let value = serde_json::to_value(&response).map_err(|error| {
+            let mut value = serde_json::to_value(&response).map_err(|error| {
                 RunError::Usage(format!("failed to encode agents JSON: {error}"))
             })?;
+            if let serde_json::Value::Object(object) = &mut value {
+                object.insert(
+                    "sources".to_string(),
+                    serde_json::to_value(aggregate.sources).map_err(|error| {
+                        RunError::Usage(format!("failed to encode sources JSON: {error}"))
+                    })?,
+                );
+                object.insert(
+                    "sourceDiagnostics".to_string(),
+                    serde_json::to_value(aggregate.source_diagnostics).map_err(|error| {
+                        RunError::Usage(format!(
+                            "failed to encode source diagnostics JSON: {error}"
+                        ))
+                    })?,
+                );
+                object.insert(
+                    "partialFailureCount".to_string(),
+                    serde_json::json!(aggregate.partial_failure_count),
+                );
+            }
             println!(
                 "{}",
-                serde_json::to_string_pretty(&response).map_err(|error| {
+                serde_json::to_string_pretty(&value).map_err(|error| {
                     RunError::Usage(format!("failed to encode agents JSON: {error}"))
                 })?
             );
             Ok(Some(RunOutcome::ControlJson(value)))
         }
         CliCommand::Focus { pane, json } => {
-            let adapter = TmuxAdapter::new(SystemTmuxBackend::new(cli.tmux_socket.clone()));
-            let pane_id = crate::app::PaneId::new(pane.clone());
-            adapter.focus_pane(&pane_id).map_err(|error| {
-                RunError::Usage(format!(
-                    "failed to focus pane {}: {error}",
-                    pane_id.as_str()
-                ))
-            })?;
-            let response = focus_response(pane_id.as_str());
+            let response = run_source_action(cli, paths, pane, None)?;
             let value = serde_json::to_value(&response).map_err(|error| {
                 RunError::Usage(format!("failed to encode focus JSON: {error}"))
             })?;
@@ -722,7 +1316,7 @@ fn maybe_handle_control_command(
                     })?
                 );
             } else {
-                println!("Focused pane {}", pane_id.as_str());
+                println!("Focused pane {pane}");
             }
             Ok(Some(RunOutcome::ControlJson(value)))
         }
@@ -732,6 +1326,61 @@ fn maybe_handle_control_command(
             Some(LinksCommand::List { json }) => Ok(Some(list_repository_links(paths, *json)?)),
             None => Ok(Some(list_repository_links(paths, false)?)),
         },
+        CliCommand::Sources { command } => Ok(Some(handle_sources_command(paths, command)?)),
+        CliCommand::SourceProbe {
+            local_only,
+            command,
+        } => {
+            if !local_only {
+                return Err(RunError::Usage(
+                    "source-probe requires --local-only".to_string(),
+                ));
+            }
+            Ok(Some(handle_source_probe(cli, paths, command)?))
+        }
+        CliCommand::Extensions { pane, json } if cli.source.is_some() => {
+            let file_config = load_config(&paths.config_file)?;
+            let source_id = SourceId::new(cli.source.clone().expect("source checked"));
+            let source_config = file_config
+                .sources
+                .get(&source_id)
+                .ok_or_else(|| RunError::Usage(format!("unknown source {}", source_id.as_str())))?;
+            let source = build_source_provider(
+                cli,
+                paths,
+                source_id,
+                source_config,
+                true,
+                file_config.sources.query_timeout_ms,
+            );
+            let descriptor = source.descriptor();
+            let mut value = source
+                .extensions(pane)
+                .map_err(|error| RunError::Usage(error.message))?;
+            if let serde_json::Value::Object(object) = &mut value {
+                object.insert("sourceId".to_string(), serde_json::json!(descriptor.id));
+                object.insert(
+                    "sourcePaneId".to_string(),
+                    serde_json::json!(crate::sources::SourcePaneId::new(
+                        SourceId::new(descriptor.id.clone()),
+                        pane.clone()
+                    )
+                    .stable_id()),
+                );
+            }
+            if *json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&value).map_err(|error| {
+                        RunError::Usage(format!("failed to encode extension JSON: {error}"))
+                    })?
+                );
+            } else {
+                let count = value["extensionCards"].as_array().map_or(0, Vec::len);
+                println!("Extension cards for {}: {}", pane, count);
+            }
+            Ok(Some(RunOutcome::ControlJson(value)))
+        }
         CliCommand::Extensions { pane, json } => {
             let file_config = load_config(&paths.config_file)?;
             let runtime = RuntimeConfig::from_sources(paths.clone(), file_config, cli);
@@ -769,15 +1418,7 @@ fn maybe_handle_control_command(
                     RunError::Usage("send requires --text <TEXT> or --stdin".to_string())
                 })?
             };
-            let adapter = TmuxAdapter::new(SystemTmuxBackend::new(cli.tmux_socket.clone()));
-            let pane_id = crate::app::PaneId::new(pane.clone());
-            let result = adapter.send_input(&pane_id, &input).map_err(|error| {
-                RunError::Usage(format!(
-                    "failed to send input to pane {}: {error}",
-                    pane_id.as_str()
-                ))
-            })?;
-            let response = send_response(pane_id.as_str(), result.bytes_sent);
+            let response = run_source_action(cli, paths, pane, Some(&input))?;
             let value = serde_json::to_value(&response)
                 .map_err(|error| RunError::Usage(format!("failed to encode send JSON: {error}")))?;
             if *json {
@@ -790,8 +1431,8 @@ fn maybe_handle_control_command(
             } else {
                 println!(
                     "Sent {} byte(s) to pane {}",
-                    result.bytes_sent,
-                    pane_id.as_str()
+                    response.bytes_sent.unwrap_or(0),
+                    response.pane_id
                 );
             }
             Ok(Some(RunOutcome::ControlJson(value)))
@@ -819,7 +1460,7 @@ fn extension_cards_response_for_pane_with_collector<F>(
 where
     F: FnOnce(&PathBuf) -> Vec<crate::services::extensions::ControlExtensionCard>,
 {
-    let pane = state.inventory.pane(pane_id).ok_or_else(|| {
+    let pane = state.inventory.local_pane(pane_id).ok_or_else(|| {
         RunError::Usage(format!(
             "cannot inspect extensions for unknown pane {}; choose a live tmux pane id",
             pane_id.as_str()
@@ -860,6 +1501,7 @@ fn attach_extensions_to_response(response: &mut crate::services::control_api::Ag
     let workspaces = response
         .entries
         .iter()
+        .filter(|entry| entry.source_id == crate::sources::LOCAL_SOURCE_ID)
         .filter_map(entry_workspace_target)
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
@@ -867,6 +1509,9 @@ fn attach_extensions_to_response(response: &mut crate::services::control_api::Ag
     let cache = collect_workspace_extensions(&workspaces);
 
     for entry in &mut response.entries {
+        if entry.source_id != crate::sources::LOCAL_SOURCE_ID {
+            continue;
+        }
         let Some(path) = entry_workspace_target(entry) else {
             continue;
         };
@@ -883,6 +1528,9 @@ fn attach_pull_requests_to_response(response: &mut crate::services::control_api:
     let mut cache = BTreeMap::<PathBuf, PullRequestLookup>::new();
 
     for entry in &mut response.entries {
+        if entry.source_id != crate::sources::LOCAL_SOURCE_ID {
+            continue;
+        }
         let Some(path) = entry_workspace_target(entry) else {
             continue;
         };
@@ -1376,7 +2024,8 @@ fn prepare_runtime_bootstrap(
         .snapshot()
         .unwrap_or_default();
     let cache_load_started = Instant::now();
-    let cache_result = if runtime.popup {
+    let cache_enabled_for_scope = runtime.source.is_none();
+    let cache_result = if runtime.popup && cache_enabled_for_scope {
         match load_startup_cache(&runtime, runtime.startup_cache_max_age_ms) {
             Ok(result) => Some(result),
             Err(error) => {
@@ -1577,15 +2226,17 @@ fn apply_linked_repositories_to_state(state: &mut AppState, runtime: &RuntimeCon
             for (pane_id, link) in links.links {
                 match resolve_git_repository(&link.repository) {
                     Ok(repo_root) => {
-                        if let Some(pane) = state.inventory.pane(&pane_id) {
+                        if let Some(pane) = state.inventory.local_pane(&pane_id) {
                             if link.pane_working_dir != pane.working_dir {
                                 skipped
                                     .push(format!("{}: pane identity changed", pane_id.as_str()));
                                 continue;
                             }
                         }
-                        linked_repository_pane_working_dirs
-                            .insert(pane_id.clone(), link.pane_working_dir);
+                        linked_repository_pane_working_dirs.insert(
+                            crate::app::PaneKey::local(pane_id.clone()),
+                            link.pane_working_dir,
+                        );
                         linked_repositories.insert(pane_id, repo_root);
                     }
                     Err(error) => {
@@ -1694,7 +2345,7 @@ pub(crate) fn bootstrap_state(
     let system_stats = SystemStatsService::new(SysinfoSystemStatsBackend::new())
         .snapshot()
         .unwrap_or_default();
-    let adapter = TmuxAdapter::new(SystemTmuxBackend::new(runtime.tmux_socket.clone()));
+    let adapter = TmuxAdapter::new(SystemTmuxBackend::with_target(runtime.tmux_target()));
     match adapter.load_inventory_profiled(runtime.capture_lines) {
         Ok((mut inventory, tmux_metrics)) => {
             let native_started = Instant::now();
@@ -1938,9 +2589,10 @@ mod tests {
         state
             .linked_repositories
             .insert(PaneId::new("%52"), PathBuf::from("/tmp/code"));
-        state
-            .linked_repository_pane_working_dirs
-            .insert(PaneId::new("%52"), Some(PathBuf::from("/tmp/obsidian")));
+        state.linked_repository_pane_working_dirs.insert(
+            crate::app::PaneKey::local(PaneId::new("%52")),
+            Some(PathBuf::from("/tmp/obsidian")),
+        );
 
         let response = extension_cards_response_for_pane_with_collector(
             &state,
@@ -1969,9 +2621,10 @@ mod tests {
         state
             .linked_repositories
             .insert(PaneId::new("%52"), PathBuf::from("/tmp/code"));
-        state
-            .linked_repository_pane_working_dirs
-            .insert(PaneId::new("%52"), Some(PathBuf::from("/tmp/old-notes")));
+        state.linked_repository_pane_working_dirs.insert(
+            crate::app::PaneKey::local(PaneId::new("%52")),
+            Some(PathBuf::from("/tmp/old-notes")),
+        );
 
         let response = extension_cards_response_for_pane_with_collector(
             &state,
@@ -2204,6 +2857,46 @@ default_sort = "attention-recent"
     }
 
     #[test]
+    fn runtime_bootstrap_skips_startup_cache_for_explicit_source_scope() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let config_file = temp_dir.path().join("config.toml");
+        let log_dir = temp_dir.path().join("logs");
+        let cli = Cli::parse_from([
+            "foreman",
+            "--popup",
+            "--source",
+            "coder",
+            "--config-file",
+            config_file.to_str().expect("utf-8 path"),
+            "--log-dir",
+            log_dir.to_str().expect("utf-8 path"),
+        ]);
+        std::fs::write(&config_file, "[sources]\ndefault_scope = \"all\"\n")
+            .expect("config should be writable");
+        let paths =
+            resolve_paths(Some(&config_file), Some(&log_dir)).expect("paths should resolve");
+        let runtime = crate::config::RuntimeConfig::from_sources(
+            paths.clone(),
+            crate::config::AppConfig::default(),
+            &cli,
+        );
+        let inventory = inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:agents").pane(
+                PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
+                    .working_dir("/tmp/alpha"),
+            ),
+        )]);
+        write_startup_cache(&runtime, &inventory).expect("cache write should succeed");
+
+        let prepared =
+            prepare_runtime_bootstrap(&cli, paths).expect("runtime bootstrap should succeed");
+
+        assert!(prepared.state.inventory.sessions.is_empty());
+        assert!(prepared.state.startup_cache_age_ms.is_none());
+        assert!(prepared.startup_cache_generated_at_ms.is_none());
+    }
+
+    #[test]
     fn generated_default_config_allows_persisted_theme_and_sort() {
         let temp_dir = tempdir().expect("temp dir should exist");
         let config_file = temp_dir.path().join("config.toml");
@@ -2339,6 +3032,106 @@ default_sort = "stable"
             }
             other => panic!("expected reset outcome, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn sources_add_ssh_persists_and_lists_source() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let config_file = temp_dir.path().join("config.toml");
+        let log_dir = temp_dir.path().join("logs");
+        let add = Cli::parse_from([
+            "foreman",
+            "--config-file",
+            config_file.to_str().expect("utf-8 path"),
+            "--log-dir",
+            log_dir.to_str().expect("utf-8 path"),
+            "sources",
+            "add",
+            "ssh",
+            "coder",
+            "--host",
+            "coder.example",
+            "--foreman",
+            "/bin/foreman",
+            "--tmux-server-name",
+            "user",
+            "--label",
+            "Coder",
+            "--json",
+        ]);
+        run(add).expect("add source should succeed");
+
+        let list = Cli::parse_from([
+            "foreman",
+            "--config-file",
+            config_file.to_str().expect("utf-8 path"),
+            "--log-dir",
+            log_dir.to_str().expect("utf-8 path"),
+            "sources",
+            "list",
+            "--json",
+        ]);
+        let outcome = run(list).expect("list sources should succeed");
+
+        let RunOutcome::ControlJson(value) = outcome else {
+            panic!("expected JSON outcome, got {outcome:?}");
+        };
+        let sources = value["sources"].as_array().expect("sources array");
+        assert!(sources.iter().any(|source| source["id"] == "local"));
+        assert!(sources.iter().any(|source| source["id"] == "coder"));
+        let config = std::fs::read_to_string(config_file).expect("config should be readable");
+        assert!(config.contains("[sources.coder]"));
+        assert!(config.contains("tmux_server_name = \"user\""));
+    }
+
+    #[test]
+    fn agents_sources_all_merges_fake_ssh_response_with_source_identity() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let config_file = temp_dir.path().join("config.toml");
+        let log_dir = temp_dir.path().join("logs");
+        let fake_ssh = temp_dir.path().join("ssh");
+        std::fs::write(
+            &fake_ssh,
+            "#!/bin/sh\ncat <<'JSON'\n{\"schemaVersion\":2,\"generatedAtUnixMs\":1,\"inventory\":{\"totalSessions\":1,\"totalWindows\":1,\"totalPanes\":1,\"visibleSessions\":1,\"visibleWindows\":1,\"visiblePanes\":1},\"entries\":[{\"id\":\"pane:%42\",\"paneId\":\"%42\",\"sessionId\":\"$0\",\"sessionName\":\"remote\",\"windowId\":\"@0\",\"windowName\":\"remote\",\"title\":\"remote\",\"navigationTitle\":\"remote\",\"harness\":null,\"harnessLabel\":null,\"status\":\"unknown\",\"statusLabel\":\"UNKNOWN\",\"statusSource\":null,\"integrationMode\":null,\"isAgent\":false,\"currentCommand\":null,\"runtimeCommand\":null,\"workingDir\":null,\"linkedRepository\":null,\"workspaceName\":null,\"preview\":\"\",\"previewProvenance\":\"captured\",\"activityScore\":0,\"statusRank\":4,\"lastActivityUnixMs\":null,\"lastStatusChangeUnixMs\":null,\"activeRunCount\":null,\"pullRequest\":null}],\"diagnostics\":[]}\nJSON\n",
+        )
+        .expect("fake ssh should be writable");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&fake_ssh).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&fake_ssh, perms).unwrap();
+        }
+        std::fs::write(
+            &config_file,
+            format!(
+                "[sources]\ndefault_scope = \"all\"\n\n[sources.coder]\nkind = \"ssh\"\nlabel = \"Coder\"\nhost = \"coder.example\"\nforeman = \"/bin/foreman\"\nssh = \"{}\"\n",
+                fake_ssh.display()
+            ),
+        )
+        .expect("config should be writable");
+        let cli = Cli::parse_from([
+            "foreman",
+            "--config-file",
+            config_file.to_str().expect("utf-8 path"),
+            "--log-dir",
+            log_dir.to_str().expect("utf-8 path"),
+            "agents",
+            "--json",
+            "--all-panes",
+        ]);
+        let outcome = run(cli).expect("agents should succeed");
+
+        let RunOutcome::ControlJson(value) = outcome else {
+            panic!("expected JSON outcome, got {outcome:?}");
+        };
+        let entries = value["entries"].as_array().expect("entries array");
+        assert!(entries.iter().any(|entry| {
+            entry["sourceId"] == "coder"
+                && entry["sourcePaneId"] == "source:coder:pane:%42"
+                && entry["paneId"] == "%42"
+        }));
+        assert_eq!(value["partialFailureCount"], 0);
     }
 
     #[test]

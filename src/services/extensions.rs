@@ -947,8 +947,7 @@ esac
         std::fs::write(
             &script,
             format!(
-                "#!/bin/sh\nprintf '%s\\n' '{{\"cards\":[{{\"id\":\"demo\",\"title\":\"Demo\",\"status\":\"ready\",\"statusLabel\":\"READY\",\"summary\":\"{}\"}}]}}'\n",
-                summary
+                "#!/bin/sh\nprintf '%s\\n' '{{\"cards\":[{{\"id\":\"demo\",\"title\":\"Demo\",\"status\":\"ready\",\"statusLabel\":\"READY\",\"summary\":\"{summary}\"}}]}}'\n"
             ),
         )
         .unwrap();

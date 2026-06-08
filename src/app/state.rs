@@ -40,6 +40,201 @@ macro_rules! id_type {
 id_type!(SessionId);
 id_type!(WindowId);
 id_type!(PaneId);
+id_type!(SourceId);
+
+pub const LOCAL_SOURCE_ID: &str = "local";
+pub const LOCAL_SOURCE_LABEL: &str = "Local";
+pub const LOCAL_SOURCE_KIND: &str = "local";
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct SourceMetadata {
+    pub id: SourceId,
+    pub label: String,
+    pub kind: String,
+    #[serde(default)]
+    pub show_label: bool,
+}
+
+impl SourceMetadata {
+    pub fn local() -> Self {
+        Self {
+            id: SourceId::new(LOCAL_SOURCE_ID),
+            label: LOCAL_SOURCE_LABEL.to_string(),
+            kind: LOCAL_SOURCE_KIND.to_string(),
+            show_label: false,
+        }
+    }
+
+    pub fn new(id: impl Into<String>, label: impl Into<String>, kind: impl Into<String>) -> Self {
+        let id = id.into();
+        Self {
+            show_label: id != LOCAL_SOURCE_ID,
+            id: SourceId::new(id),
+            label: label.into(),
+            kind: kind.into(),
+        }
+    }
+
+    pub fn with_display(
+        id: impl Into<String>,
+        label: impl Into<String>,
+        kind: impl Into<String>,
+        show_label: bool,
+    ) -> Self {
+        Self {
+            id: SourceId::new(id.into()),
+            label: label.into(),
+            kind: kind.into(),
+            show_label,
+        }
+    }
+}
+
+impl Default for SourceMetadata {
+    fn default() -> Self {
+        Self::local()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct SessionKey {
+    pub source_id: SourceId,
+    pub session_id: SessionId,
+}
+
+impl SessionKey {
+    pub fn new(source_id: SourceId, session_id: SessionId) -> Self {
+        Self {
+            source_id,
+            session_id,
+        }
+    }
+
+    pub fn local(session_id: SessionId) -> Self {
+        Self::new(SourceId::new(LOCAL_SOURCE_ID), session_id)
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.session_id.as_str()
+    }
+
+    pub fn is_local(&self) -> bool {
+        self.source_id.as_str() == LOCAL_SOURCE_ID
+    }
+}
+
+impl From<&str> for SessionKey {
+    fn from(value: &str) -> Self {
+        Self::local(SessionId::from(value))
+    }
+}
+
+impl From<String> for SessionKey {
+    fn from(value: String) -> Self {
+        Self::local(SessionId::from(value))
+    }
+}
+
+impl From<SessionId> for SessionKey {
+    fn from(value: SessionId) -> Self {
+        Self::local(value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct WindowKey {
+    pub source_id: SourceId,
+    pub window_id: WindowId,
+}
+
+impl WindowKey {
+    pub fn new(source_id: SourceId, window_id: WindowId) -> Self {
+        Self {
+            source_id,
+            window_id,
+        }
+    }
+
+    pub fn local(window_id: WindowId) -> Self {
+        Self::new(SourceId::new(LOCAL_SOURCE_ID), window_id)
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.window_id.as_str()
+    }
+
+    pub fn is_local(&self) -> bool {
+        self.source_id.as_str() == LOCAL_SOURCE_ID
+    }
+}
+
+impl From<&str> for WindowKey {
+    fn from(value: &str) -> Self {
+        Self::local(WindowId::from(value))
+    }
+}
+
+impl From<String> for WindowKey {
+    fn from(value: String) -> Self {
+        Self::local(WindowId::from(value))
+    }
+}
+
+impl From<WindowId> for WindowKey {
+    fn from(value: WindowId) -> Self {
+        Self::local(value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct PaneKey {
+    pub source_id: SourceId,
+    pub pane_id: PaneId,
+}
+
+impl PaneKey {
+    pub fn new(source_id: SourceId, pane_id: PaneId) -> Self {
+        Self { source_id, pane_id }
+    }
+
+    pub fn local(pane_id: PaneId) -> Self {
+        Self::new(SourceId::new(LOCAL_SOURCE_ID), pane_id)
+    }
+
+    pub fn stable_id(&self) -> String {
+        format!(
+            "source:{}:pane:{}",
+            self.source_id.as_str(),
+            self.pane_id.as_str()
+        )
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.pane_id.as_str()
+    }
+
+    pub fn is_local(&self) -> bool {
+        self.source_id.as_str() == LOCAL_SOURCE_ID
+    }
+}
+
+impl From<&str> for PaneKey {
+    fn from(value: &str) -> Self {
+        Self::local(PaneId::from(value))
+    }
+}
+
+impl From<String> for PaneKey {
+    fn from(value: String) -> Self {
+        Self::local(PaneId::from(value))
+    }
+}
+
+impl From<PaneId> for PaneKey {
+    fn from(value: PaneId) -> Self {
+        Self::local(value)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Mode {
@@ -318,6 +513,8 @@ pub struct AgentSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Pane {
     pub id: PaneId,
+    #[serde(default)]
+    pub source: SourceMetadata,
     pub title: String,
     pub current_command: Option<String>,
     pub runtime_command: Option<String>,
@@ -329,6 +526,14 @@ pub struct Pane {
 }
 
 impl Pane {
+    pub fn key(&self) -> PaneKey {
+        PaneKey::new(self.source.id.clone(), self.id.clone())
+    }
+
+    pub fn source_label(&self) -> &str {
+        &self.source.label
+    }
+
     pub fn is_agent(&self) -> bool {
         self.agent.is_some()
     }
@@ -414,11 +619,17 @@ impl PreviewProvenance {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Window {
     pub id: WindowId,
+    #[serde(default)]
+    pub source: SourceMetadata,
     pub name: String,
     pub panes: Vec<Pane>,
 }
 
 impl Window {
+    pub fn key(&self) -> WindowKey {
+        WindowKey::new(self.source.id.clone(), self.id.clone())
+    }
+
     pub fn has_agent_panes(&self) -> bool {
         self.panes.iter().any(Pane::is_agent)
     }
@@ -481,11 +692,17 @@ impl Window {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Session {
     pub id: SessionId,
+    #[serde(default)]
+    pub source: SourceMetadata,
     pub name: String,
     pub windows: Vec<Window>,
 }
 
 impl Session {
+    pub fn key(&self) -> SessionKey {
+        SessionKey::new(self.source.id.clone(), self.id.clone())
+    }
+
     pub fn has_agent_panes(&self) -> bool {
         self.windows.iter().any(Window::has_agent_panes)
     }
@@ -543,6 +760,54 @@ impl Session {
     }
 }
 
+pub trait SessionLookupKey {
+    fn matches_session(&self, session: &Session) -> bool;
+}
+
+impl SessionLookupKey for SessionKey {
+    fn matches_session(&self, session: &Session) -> bool {
+        &session.key() == self
+    }
+}
+
+impl SessionLookupKey for SessionId {
+    fn matches_session(&self, session: &Session) -> bool {
+        session.key().is_local() && &session.id == self
+    }
+}
+
+pub trait WindowLookupKey {
+    fn matches_window(&self, window: &Window) -> bool;
+}
+
+impl WindowLookupKey for WindowKey {
+    fn matches_window(&self, window: &Window) -> bool {
+        &window.key() == self
+    }
+}
+
+impl WindowLookupKey for WindowId {
+    fn matches_window(&self, window: &Window) -> bool {
+        window.key().is_local() && &window.id == self
+    }
+}
+
+pub trait PaneLookupKey {
+    fn matches_pane(&self, pane: &Pane) -> bool;
+}
+
+impl PaneLookupKey for PaneKey {
+    fn matches_pane(&self, pane: &Pane) -> bool {
+        &pane.key() == self
+    }
+}
+
+impl PaneLookupKey for PaneId {
+    fn matches_pane(&self, pane: &Pane) -> bool {
+        pane.key().is_local() && &pane.id == self
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Inventory {
     pub sessions: Vec<Session>,
@@ -553,39 +818,49 @@ impl Inventory {
         Self { sessions }
     }
 
-    pub fn contains_session(&self, session_id: &SessionId) -> bool {
-        self.sessions
-            .iter()
-            .any(|session| &session.id == session_id)
+    pub fn contains_session<K: SessionLookupKey + ?Sized>(&self, session_key: &K) -> bool {
+        self.session(session_key).is_some()
     }
 
     pub fn contains_target(&self, target: &SelectionTarget) -> bool {
         match target {
-            SelectionTarget::Session(session_id) => self.contains_session(session_id),
-            SelectionTarget::Window(window_id) => self.parent_for_window(window_id).is_some(),
-            SelectionTarget::Pane(pane_id) => self.parent_for_pane(pane_id).is_some(),
+            SelectionTarget::Session(session_key) => self.contains_session(session_key),
+            SelectionTarget::Window(window_key) => self.parent_for_window(window_key).is_some(),
+            SelectionTarget::Pane(pane_key) => self.parent_for_pane(pane_key).is_some(),
         }
     }
 
-    pub fn session(&self, session_id: &SessionId) -> Option<&Session> {
+    pub fn session<K: SessionLookupKey + ?Sized>(&self, session_key: &K) -> Option<&Session> {
         self.sessions
             .iter()
-            .find(|session| &session.id == session_id)
+            .find(|session| session_key.matches_session(session))
     }
 
-    pub fn window(&self, window_id: &WindowId) -> Option<&Window> {
+    pub fn window<K: WindowLookupKey + ?Sized>(&self, window_key: &K) -> Option<&Window> {
         self.sessions
             .iter()
             .flat_map(|session| session.windows.iter())
-            .find(|window| &window.id == window_id)
+            .find(|window| window_key.matches_window(window))
     }
 
-    pub fn pane(&self, pane_id: &PaneId) -> Option<&Pane> {
+    pub fn pane<K: PaneLookupKey + ?Sized>(&self, pane_key: &K) -> Option<&Pane> {
         self.sessions
             .iter()
             .flat_map(|session| session.windows.iter())
             .flat_map(|window| window.panes.iter())
-            .find(|pane| &pane.id == pane_id)
+            .find(|pane| pane_key.matches_pane(pane))
+    }
+
+    pub fn local_session(&self, session_id: &SessionId) -> Option<&Session> {
+        self.session(&SessionKey::local(session_id.clone()))
+    }
+
+    pub fn local_window(&self, window_id: &WindowId) -> Option<&Window> {
+        self.window(&WindowKey::local(window_id.clone()))
+    }
+
+    pub fn local_pane(&self, pane_id: &PaneId) -> Option<&Pane> {
+        self.pane(&PaneKey::local(pane_id.clone()))
     }
 
     pub fn actionable_pane_for_target<'a>(
@@ -595,18 +870,22 @@ impl Inventory {
         sort_mode: SortMode,
     ) -> Option<&'a Pane> {
         match target {
-            SelectionTarget::Pane(pane_id) => {
-                self.pane(pane_id).filter(|pane| pane.is_visible(filters))
+            SelectionTarget::Pane(pane_key) => {
+                self.pane(pane_key).filter(|pane| pane.is_visible(filters))
             }
-            SelectionTarget::Window(window_id) => self
-                .window(window_id)
+            SelectionTarget::Window(window_key) => self
+                .window(window_key)
                 .and_then(|window| window.visible_panes(filters, sort_mode).into_iter().next()),
-            SelectionTarget::Session(session_id) => self.session(session_id).and_then(|session| {
-                session
-                    .visible_windows(filters, sort_mode)
-                    .into_iter()
-                    .find_map(|window| window.visible_panes(filters, sort_mode).into_iter().next())
-            }),
+            SelectionTarget::Session(session_key) => {
+                self.session(session_key).and_then(|session| {
+                    session
+                        .visible_windows(filters, sort_mode)
+                        .into_iter()
+                        .find_map(|window| {
+                            window.visible_panes(filters, sort_mode).into_iter().next()
+                        })
+                })
+            }
         }
     }
 
@@ -634,7 +913,17 @@ impl Inventory {
             .iter()
             .flat_map(|session| session.windows.iter())
             .flat_map(|window| window.panes.iter())
+            .filter(|pane| pane.key().is_local())
             .map(|pane| pane.id.clone())
+            .collect()
+    }
+
+    pub fn pane_keys(&self) -> Vec<PaneKey> {
+        self.sessions
+            .iter()
+            .flat_map(|session| session.windows.iter())
+            .flat_map(|window| window.panes.iter())
+            .map(Pane::key)
             .collect()
     }
 
@@ -657,7 +946,7 @@ impl Inventory {
     pub fn visible_targets(
         &self,
         filters: &Filters,
-        collapsed_sessions: &BTreeSet<SessionId>,
+        collapsed_sessions: &BTreeSet<SessionKey>,
         sort_mode: SortMode,
     ) -> Vec<SelectionTarget> {
         let mut targets = Vec::new();
@@ -667,20 +956,20 @@ impl Inventory {
                 continue;
             }
 
-            targets.push(SelectionTarget::Session(session.id.clone()));
+            targets.push(SelectionTarget::Session(session.key()));
 
-            if collapsed_sessions.contains(&session.id) {
+            if collapsed_sessions.contains(&session.key()) {
                 continue;
             }
 
             for window in session.visible_windows(filters, sort_mode) {
                 let visible_panes = window.visible_panes(filters, sort_mode);
                 if !should_elide_singleton_window(filters, visible_panes.len()) {
-                    targets.push(SelectionTarget::Window(window.id.clone()));
+                    targets.push(SelectionTarget::Window(window.key()));
                 }
 
                 for pane in visible_panes {
-                    targets.push(SelectionTarget::Pane(pane.id.clone()));
+                    targets.push(SelectionTarget::Pane(pane.key()));
                 }
             }
         }
@@ -692,7 +981,7 @@ impl Inventory {
         &self,
         current: Option<&SelectionTarget>,
         filters: &Filters,
-        collapsed_sessions: &BTreeSet<SessionId>,
+        collapsed_sessions: &BTreeSet<SessionKey>,
         sort_mode: SortMode,
     ) -> Option<SelectionTarget> {
         let visible_targets = self.visible_targets(filters, collapsed_sessions, sort_mode);
@@ -727,26 +1016,27 @@ impl Inventory {
                     .contains(&session_target)
                     .then_some(session_target)
             }
-            SelectionTarget::Window(window_id) => {
-                self.parent_for_window(window_id).and_then(|session| {
-                    let session_target = SelectionTarget::Session(session.id.clone());
+            SelectionTarget::Window(window_key) => {
+                self.parent_for_window(window_key).and_then(|session| {
+                    let session_target = SelectionTarget::Session(session.key());
                     visible_targets
                         .contains(&session_target)
                         .then_some(session_target)
                 })
             }
-            SelectionTarget::Pane(pane_id) => {
-                self.parent_for_pane(pane_id).and_then(|(session, window)| {
-                    let window_target = SelectionTarget::Window(window.id.clone());
-                    if visible_targets.contains(&window_target) {
-                        return Some(window_target);
-                    }
+            SelectionTarget::Pane(pane_key) => {
+                self.parent_for_pane(pane_key)
+                    .and_then(|(session, window)| {
+                        let window_target = SelectionTarget::Window(window.key());
+                        if visible_targets.contains(&window_target) {
+                            return Some(window_target);
+                        }
 
-                    let session_target = SelectionTarget::Session(session.id.clone());
-                    visible_targets
-                        .contains(&session_target)
-                        .then_some(session_target)
-                })
+                        let session_target = SelectionTarget::Session(session.key());
+                        visible_targets
+                            .contains(&session_target)
+                            .then_some(session_target)
+                    })
             }
         }
     }
@@ -757,16 +1047,22 @@ impl Inventory {
         sessions
     }
 
-    fn parent_for_window(&self, window_id: &WindowId) -> Option<&Session> {
-        self.sessions
-            .iter()
-            .find(|session| session.windows.iter().any(|window| &window.id == window_id))
+    fn parent_for_window<K: WindowLookupKey + ?Sized>(&self, window_key: &K) -> Option<&Session> {
+        self.sessions.iter().find(|session| {
+            session
+                .windows
+                .iter()
+                .any(|window| window_key.matches_window(window))
+        })
     }
 
-    fn parent_for_pane(&self, pane_id: &PaneId) -> Option<(&Session, &Window)> {
+    fn parent_for_pane<K: PaneLookupKey + ?Sized>(
+        &self,
+        pane_key: &K,
+    ) -> Option<(&Session, &Window)> {
         for session in &self.sessions {
             for window in &session.windows {
-                if window.panes.iter().any(|pane| &pane.id == pane_id) {
+                if window.panes.iter().any(|pane| pane_key.matches_pane(pane)) {
                     return Some((session, window));
                 }
             }
@@ -778,9 +1074,9 @@ impl Inventory {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SelectionTarget {
-    Session(SessionId),
-    Window(WindowId),
-    Pane(PaneId),
+    Session(SessionKey),
+    Window(WindowKey),
+    Pane(PaneKey),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -807,6 +1103,9 @@ pub enum SidebarRowKind {
     },
     Pane {
         navigation_title: String,
+        source_label: String,
+        source_kind: String,
+        show_source_label: bool,
         status: Option<AgentStatus>,
         harness: Option<HarnessKind>,
         is_agent: bool,
@@ -816,7 +1115,7 @@ pub enum SidebarRowKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VisibleTargetEntry {
     pub target: SelectionTarget,
-    pub actionable_pane_id: Option<PaneId>,
+    pub actionable_pane_key: Option<PaneKey>,
     pub actionable_workspace_path: Option<PathBuf>,
     pub aggregate_workspace_path: Option<PathBuf>,
     pub sidebar: SidebarRowKind,
@@ -957,7 +1256,7 @@ pub struct FlashTarget {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NotificationCooldownKey {
-    pub pane_id: PaneId,
+    pub pane_key: PaneKey,
     pub kind: NotificationKind,
 }
 
@@ -1114,11 +1413,11 @@ pub struct AppState {
     pub popup_mode: bool,
     pub sort_mode: SortMode,
     pub filters: Filters,
-    pub collapsed_sessions: BTreeSet<SessionId>,
+    pub collapsed_sessions: BTreeSet<SessionKey>,
     pub search: Option<SearchState>,
     pub flash: Option<FlashState>,
     pub linked_repositories: BTreeMap<PaneId, PathBuf>,
-    pub linked_repository_pane_working_dirs: BTreeMap<PaneId, Option<PathBuf>>,
+    pub linked_repository_pane_working_dirs: BTreeMap<PaneKey, Option<PathBuf>>,
     pub pull_request_cache: BTreeMap<PathBuf, PullRequestLookup>,
     pub pull_request_detail_workspace: Option<PathBuf>,
     pub pull_request_detail_manual: bool,
@@ -1136,6 +1435,7 @@ pub struct AppState {
     pub startup_cache_path: Option<PathBuf>,
     pub startup_error: Option<String>,
     pub runtime_diagnostics: Vec<DoctorFinding>,
+    pub source_diagnostics: Vec<crate::sources::SourceDiagnostic>,
     pub visible_state: VisibleStateCache,
 }
 
@@ -1189,6 +1489,7 @@ impl Default for AppState {
             startup_cache_path: None,
             startup_error: None,
             runtime_diagnostics: Vec::new(),
+            source_diagnostics: Vec::new(),
             visible_state: VisibleStateCache::default(),
         };
         state.rebuild_visible_state();
@@ -1351,20 +1652,20 @@ impl AppState {
 
     pub fn target_label(&self, target: &SelectionTarget) -> String {
         match target {
-            SelectionTarget::Session(session_id) => self
+            SelectionTarget::Session(session_key) => self
                 .inventory
-                .session(session_id)
+                .session(session_key)
                 .map(|session| format!("session {}", session.name))
-                .unwrap_or_else(|| format!("session {}", session_id.as_str())),
-            SelectionTarget::Window(window_id) => self
+                .unwrap_or_else(|| format!("session {}", session_key.session_id.as_str())),
+            SelectionTarget::Window(window_key) => self
                 .inventory
-                .window(window_id)
+                .window(window_key)
                 .map(|window| format!("window {}", window.name))
-                .unwrap_or_else(|| format!("window {}", window_id.as_str())),
-            SelectionTarget::Pane(pane_id) => self
+                .unwrap_or_else(|| format!("window {}", window_key.window_id.as_str())),
+            SelectionTarget::Pane(pane_key) => self
                 .inventory
-                .parent_for_pane(pane_id)
-                .zip(self.inventory.pane(pane_id))
+                .parent_for_pane(pane_key)
+                .zip(self.inventory.pane(pane_key))
                 .map(|((_, window), pane)| {
                     let harness = pane
                         .agent
@@ -1385,7 +1686,7 @@ impl AppState {
                         status
                     )
                 })
-                .unwrap_or_else(|| format!("pane {}", pane_id.as_str())),
+                .unwrap_or_else(|| format!("pane {}", pane_key.pane_id.as_str())),
         }
     }
 
@@ -1420,20 +1721,24 @@ impl AppState {
             .collect()
     }
 
-    pub fn selected_pane_id(&self) -> Option<PaneId> {
+    pub fn selected_pane_key(&self) -> Option<PaneKey> {
         match self.selection.as_ref()? {
-            SelectionTarget::Pane(pane_id) => Some(pane_id.clone()),
+            SelectionTarget::Pane(pane_key) => Some(pane_key.clone()),
             SelectionTarget::Session(_) | SelectionTarget::Window(_) => None,
         }
+    }
+
+    pub fn selected_pane_id(&self) -> Option<PaneId> {
+        self.selected_pane_key().map(|key| key.pane_id)
     }
 
     pub fn selected_actionable_pane(&self) -> Option<&Pane> {
         let target = self.selection.as_ref()?;
         if let Some(entry) = self.selected_visible_entry() {
             return entry
-                .actionable_pane_id
+                .actionable_pane_key
                 .as_ref()
-                .and_then(|pane_id| self.inventory.pane(pane_id));
+                .and_then(|pane_key| self.inventory.pane(pane_key));
         }
 
         self.inventory
@@ -1476,16 +1781,21 @@ impl AppState {
         self.sidebar_scroll = self.sidebar_scroll.min(max_scroll);
     }
 
+    pub fn selected_actionable_pane_key(&self) -> Option<PaneKey> {
+        self.selected_actionable_pane().map(Pane::key)
+    }
+
     pub fn selected_actionable_pane_id(&self) -> Option<PaneId> {
         self.selected_actionable_pane().map(|pane| pane.id.clone())
     }
 
     pub fn linked_repository_for_pane(&self, pane: &Pane) -> Option<&PathBuf> {
-        let expected_working_dir = self.linked_repository_pane_working_dirs.get(&pane.id)?;
+        let pane_key = pane.key();
+        let expected_working_dir = self.linked_repository_pane_working_dirs.get(&pane_key)?;
         if expected_working_dir != &pane.working_dir {
             return None;
         }
-        self.linked_repositories.get(&pane.id)
+        self.linked_repositories.get(&pane_key.pane_id)
     }
 
     pub fn workspace_target_for_pane(&self, pane: &Pane) -> Option<PathBuf> {
@@ -1501,9 +1811,9 @@ impl AppState {
         }
 
         match target {
-            SelectionTarget::Pane(pane_id) => self
+            SelectionTarget::Pane(pane_key) => self
                 .inventory
-                .pane(pane_id)
+                .pane(pane_key)
                 .and_then(|pane| self.workspace_target_for_pane(pane)),
             SelectionTarget::Session(_) | SelectionTarget::Window(_) => self
                 .inventory
@@ -1512,7 +1822,7 @@ impl AppState {
         }
     }
 
-    pub fn viewport_actionable_pane_ids(&self) -> BTreeSet<PaneId> {
+    pub fn viewport_actionable_pane_keys(&self) -> BTreeSet<PaneKey> {
         let total_rows = self.visible_state.entries.len();
         if total_rows == 0 {
             return BTreeSet::new();
@@ -1522,13 +1832,13 @@ impl AppState {
         let end = (start + self.sidebar_viewport_rows.max(1)).min(total_rows);
         self.visible_state.entries[start..end]
             .iter()
-            .filter_map(|entry| entry.actionable_pane_id.clone())
+            .filter_map(|entry| entry.actionable_pane_key.clone())
             .collect()
     }
 
-    pub fn refresh_priority_pane_ids(&self) -> BTreeSet<PaneId> {
-        let mut pane_ids = self.viewport_actionable_pane_ids();
-        if let Some(pane_id) = self.selected_actionable_pane_id() {
+    pub fn refresh_priority_pane_keys(&self) -> BTreeSet<PaneKey> {
+        let mut pane_ids = self.viewport_actionable_pane_keys();
+        if let Some(pane_id) = self.selected_actionable_pane_key() {
             pane_ids.insert(pane_id);
         }
 
@@ -1543,7 +1853,7 @@ impl AppState {
                 pane.agent.as_ref().map(|agent| agent.status),
                 Some(AgentStatus::NeedsAttention | AgentStatus::Error)
             ) {
-                pane_ids.insert(pane.id.clone());
+                pane_ids.insert(pane.key());
             }
         }
 
@@ -1576,36 +1886,44 @@ impl AppState {
         Some(finding.summary.clone())
     }
 
-    pub fn selected_window_id(&self) -> Option<WindowId> {
+    pub fn selected_window_key(&self) -> Option<WindowKey> {
         match self.selection.as_ref()? {
-            SelectionTarget::Window(window_id) => Some(window_id.clone()),
-            SelectionTarget::Pane(pane_id) => self
+            SelectionTarget::Window(window_key) => Some(window_key.clone()),
+            SelectionTarget::Pane(pane_key) => self
                 .inventory
-                .parent_for_pane(pane_id)
-                .map(|(_, window)| window.id.clone()),
+                .parent_for_pane(pane_key)
+                .map(|(_, window)| window.key()),
             SelectionTarget::Session(_) => None,
         }
     }
 
+    pub fn selected_window_id(&self) -> Option<WindowId> {
+        self.selected_window_key().map(|key| key.window_id)
+    }
+
     pub fn selected_window_name(&self) -> Option<String> {
-        let window_id = self.selected_window_id()?;
+        let window_key = self.selected_window_key()?;
         self.inventory
-            .window(&window_id)
+            .window(&window_key)
             .map(|window| window.name.clone())
     }
 
-    pub fn selected_session_id(&self) -> Option<SessionId> {
+    pub fn selected_session_key(&self) -> Option<SessionKey> {
         match self.selection.as_ref()? {
-            SelectionTarget::Session(session_id) => Some(session_id.clone()),
-            SelectionTarget::Window(window_id) => self
+            SelectionTarget::Session(session_key) => Some(session_key.clone()),
+            SelectionTarget::Window(window_key) => self
                 .inventory
-                .parent_for_window(window_id)
-                .map(|session| session.id.clone()),
-            SelectionTarget::Pane(pane_id) => self
+                .parent_for_window(window_key)
+                .map(|session| session.key()),
+            SelectionTarget::Pane(pane_key) => self
                 .inventory
-                .parent_for_pane(pane_id)
-                .map(|(session, _)| session.id.clone()),
+                .parent_for_pane(pane_key)
+                .map(|(session, _)| session.key()),
         }
+    }
+
+    pub fn selected_session_id(&self) -> Option<SessionId> {
+        self.selected_session_key().map(|key| key.session_id)
     }
 
     pub fn selected_workspace_path(&self) -> Option<PathBuf> {
@@ -1713,21 +2031,21 @@ impl AppState {
 
     pub fn selection_breadcrumb(&self) -> Option<String> {
         match self.selection.as_ref()? {
-            SelectionTarget::Session(session_id) => self
+            SelectionTarget::Session(session_key) => self
                 .inventory
-                .session(session_id)
+                .session(session_key)
                 .map(|session| session.name.clone()),
-            SelectionTarget::Window(window_id) => self
+            SelectionTarget::Window(window_key) => self
                 .inventory
-                .parent_for_window(window_id)
-                .zip(self.inventory.window(window_id))
+                .parent_for_window(window_key)
+                .zip(self.inventory.window(window_key))
                 .map(|(session, window)| {
                     format!("{} / {}", session.name, window.navigation_title())
                 }),
-            SelectionTarget::Pane(pane_id) => self
+            SelectionTarget::Pane(pane_key) => self
                 .inventory
-                .parent_for_pane(pane_id)
-                .zip(self.inventory.pane(pane_id))
+                .parent_for_pane(pane_key)
+                .zip(self.inventory.pane(pane_key))
                 .map(|((session, window), pane)| {
                     format!(
                         "{} / {} / {}",
@@ -1819,8 +2137,8 @@ impl AppState {
                 .collect::<Vec<_>>();
 
             entries.push(VisibleTargetEntry {
-                target: SelectionTarget::Session(session.id.clone()),
-                actionable_pane_id: session_visible_panes.first().map(|pane| pane.id.clone()),
+                target: SelectionTarget::Session(session.key()),
+                actionable_pane_key: session_visible_panes.first().map(|pane| pane.key()),
                 actionable_workspace_path: session_visible_panes
                     .first()
                     .and_then(|pane| self.workspace_target_for_pane(pane)),
@@ -1832,8 +2150,8 @@ impl AppState {
                         .filter_map(|pane| pane.working_dir.clone()),
                 ),
                 sidebar: SidebarRowKind::Session {
-                    name: session.name.clone(),
-                    collapsed: self.collapsed_sessions.contains(&session.id),
+                    name: session_sidebar_name(session),
+                    collapsed: self.collapsed_sessions.contains(&session.key()),
                     rank: session.attention_rank(),
                     visible_windows: visible_windows.len(),
                     visible_panes: session_visible_panes.len(),
@@ -1841,7 +2159,7 @@ impl AppState {
                 },
             });
 
-            if self.collapsed_sessions.contains(&session.id) {
+            if self.collapsed_sessions.contains(&session.key()) {
                 continue;
             }
 
@@ -1852,8 +2170,8 @@ impl AppState {
                 let window_navigation_title = window.navigation_title();
                 if !elide_window {
                     entries.push(VisibleTargetEntry {
-                        target: SelectionTarget::Window(window.id.clone()),
-                        actionable_pane_id: visible_panes.first().map(|pane| pane.id.clone()),
+                        target: SelectionTarget::Window(window.key()),
+                        actionable_pane_key: visible_panes.first().map(|pane| pane.key()),
                         actionable_workspace_path: visible_panes
                             .first()
                             .and_then(|pane| self.workspace_target_for_pane(pane)),
@@ -1874,8 +2192,8 @@ impl AppState {
 
                 for pane in visible_panes {
                     entries.push(VisibleTargetEntry {
-                        target: SelectionTarget::Pane(pane.id.clone()),
-                        actionable_pane_id: Some(pane.id.clone()),
+                        target: SelectionTarget::Pane(pane.key()),
+                        actionable_pane_key: Some(pane.key()),
                         actionable_workspace_path: self.workspace_target_for_pane(pane),
                         aggregate_workspace_path: pane.working_dir.clone(),
                         sidebar: SidebarRowKind::Pane {
@@ -1888,6 +2206,9 @@ impl AppState {
                             } else {
                                 pane.navigation_title()
                             },
+                            source_label: pane.source.label.clone(),
+                            source_kind: pane.source.kind.clone(),
+                            show_source_label: pane.source.show_label,
                             status: pane.agent.as_ref().map(|agent| agent.status),
                             harness: pane.harness_kind(),
                             is_agent: pane.is_agent(),
@@ -1899,6 +2220,54 @@ impl AppState {
 
         entries
     }
+}
+
+fn session_sidebar_name(session: &Session) -> String {
+    let title = session_navigation_title(session);
+    if session.source.show_label {
+        format!("[{}] {title}", session.source.label)
+    } else {
+        title
+    }
+}
+
+fn session_navigation_title(session: &Session) -> String {
+    if !is_generic_session_name(&session.name) {
+        return session.name.clone();
+    }
+
+    let workspace_names = session
+        .windows
+        .iter()
+        .flat_map(|window| window.panes.iter())
+        .filter_map(Pane::workspace_name)
+        .collect::<BTreeSet<_>>();
+    if workspace_names.len() == 1 {
+        return workspace_names
+            .into_iter()
+            .next()
+            .expect("single workspace should exist");
+    }
+
+    let window_names = session
+        .windows
+        .iter()
+        .map(Window::navigation_title)
+        .filter(|name| !name.trim().is_empty())
+        .collect::<BTreeSet<_>>();
+    if window_names.len() == 1 {
+        return window_names
+            .into_iter()
+            .next()
+            .expect("single window title should exist");
+    }
+
+    session.name.clone()
+}
+
+fn is_generic_session_name(name: &str) -> bool {
+    let trimmed = name.trim();
+    trimmed.is_empty() || trimmed.chars().all(|ch| ch.is_ascii_digit())
 }
 
 fn session_cmp(left: &Session, right: &Session, sort_mode: SortMode) -> Ordering {
@@ -2031,7 +2400,8 @@ fn flash_label_for_index(mut index: usize, width: usize) -> String {
 mod tests {
     use super::{AppState, SearchState, SelectionTarget, SidebarRowKind, SortMode};
     use crate::app::{
-        inventory, AgentStatus, HarnessKind, PaneBuilder, PaneId, SessionBuilder, WindowBuilder,
+        inventory, AgentStatus, HarnessKind, PaneBuilder, PaneId, PaneKey, SessionBuilder,
+        WindowBuilder,
     };
     use std::path::PathBuf;
 
@@ -2044,7 +2414,7 @@ mod tests {
         )]);
 
         let window = inventory
-            .window(&"alpha:0".into())
+            .window(&crate::app::WindowKey::from("alpha:0"))
             .expect("window should exist");
         assert_eq!(window.navigation_title(), "alpha");
     }
@@ -2088,7 +2458,7 @@ mod tests {
         )]);
 
         let window = inventory
-            .window(&"alpha:0".into())
+            .window(&crate::app::WindowKey::from("alpha:0"))
             .expect("window should exist");
         let panes = window.visible_panes(&Default::default(), SortMode::Stable);
 
@@ -2116,7 +2486,7 @@ mod tests {
         )]);
 
         let window = inventory
-            .window(&"alpha:0".into())
+            .window(&crate::app::WindowKey::from("alpha:0"))
             .expect("window should exist");
         let panes = window.visible_panes(&Default::default(), SortMode::AttentionFirst);
 
@@ -2209,6 +2579,36 @@ mod tests {
     }
 
     #[test]
+    fn remote_generic_session_sidebar_uses_workspace_title_and_source_label() {
+        let inventory = inventory([SessionBuilder::new("$remote")
+            .name("0")
+            .source("coder", "Coder", "ssh")
+            .window(
+                WindowBuilder::new("@remote")
+                    .name("zsh")
+                    .source("coder", "Coder", "ssh")
+                    .pane(
+                        PaneBuilder::agent("%42", HarnessKind::Pi)
+                            .source("coder", "Coder", "ssh")
+                            .title("remote shell")
+                            .working_dir("/home/discord/dots"),
+                    ),
+            )]);
+
+        let state = AppState::with_inventory(inventory);
+        let session_entry = state
+            .visible_target_entries()
+            .iter()
+            .find(|entry| matches!(entry.target, SelectionTarget::Session(_)))
+            .expect("session row should be visible");
+
+        assert!(matches!(
+            &session_entry.sidebar,
+            SidebarRowKind::Session { name, .. } if name == "[Coder] dots"
+        ));
+    }
+
+    #[test]
     fn agent_first_sidebar_keeps_windows_with_multiple_visible_panes() {
         let inventory = inventory([SessionBuilder::new("alpha").window(
             WindowBuilder::new("alpha:0")
@@ -2279,7 +2679,7 @@ mod tests {
         state.selection = Some(SelectionTarget::Session("alpha".into()));
         assert_eq!(
             state
-                .selected_actionable_pane_id()
+                .selected_actionable_pane_key()
                 .as_ref()
                 .map(|pane| pane.as_str()),
             Some("alpha:error")
@@ -2288,7 +2688,7 @@ mod tests {
         state.selection = Some(SelectionTarget::Window("alpha:0".into()));
         assert_eq!(
             state
-                .selected_actionable_pane_id()
+                .selected_actionable_pane_key()
                 .as_ref()
                 .map(|pane| pane.as_str()),
             Some("alpha:error")
@@ -2357,11 +2757,13 @@ mod tests {
             PathBuf::from("/tmp/actual-code-repo"),
         );
         state.linked_repository_pane_working_dirs.insert(
-            PaneId::new("notes:pane"),
+            PaneKey::local(PaneId::new("notes:pane")),
             Some(PathBuf::from("/tmp/obsidian")),
         );
         state.rebuild_visible_state();
-        state.selection = Some(SelectionTarget::Pane(PaneId::new("notes:pane")));
+        state.selection = Some(SelectionTarget::Pane(PaneKey::local(PaneId::new(
+            "notes:pane",
+        ))));
 
         assert_eq!(
             state.selected_workspace_path(),
@@ -2377,7 +2779,7 @@ mod tests {
     }
 
     #[test]
-    fn refresh_priority_pane_ids_include_viewport_selected_and_attention_rows() {
+    fn refresh_priority_pane_keys_include_viewport_selected_and_attention_rows() {
         let inventory = inventory([
             SessionBuilder::new("alpha").window(
                 WindowBuilder::new("alpha:0")
@@ -2409,7 +2811,7 @@ mod tests {
         state.selection = Some(SelectionTarget::Pane("beta:idle".into()));
         state.reconcile_sidebar_scroll();
 
-        let priority = state.refresh_priority_pane_ids();
+        let priority = state.refresh_priority_pane_keys();
 
         assert!(priority.contains(&"beta:idle".into()));
         assert!(priority.contains(&"alpha:error".into()));

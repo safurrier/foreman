@@ -45,6 +45,7 @@ fn shell_backed_notification_dispatcher_falls_back_and_logs_selection() {
     ]);
     let request = NotificationRequest {
         pane_id: "alpha:claude".into(),
+        pane_key: foreman::app::PaneKey::local("alpha:claude".into()),
         pane_title: "claude-main".to_string(),
         kind: NotificationKind::Completion,
         title: "Agent ready: claude-main".to_string(),
@@ -64,6 +65,7 @@ fn shell_backed_notification_dispatcher_falls_back_and_logs_selection() {
     logger
         .log_notification_decision(&NotificationDecision {
             pane_id: request.pane_id.clone(),
+            pane_key: foreman::app::PaneKey::local(request.pane_id.clone()),
             kind: request.kind,
             reason: NotificationDecisionReason::WorkingBecameReady,
             request: Some(request.clone()),
@@ -105,6 +107,7 @@ fn inaudible_notification_dispatches_without_sound() {
         ))]);
     let request = NotificationRequest {
         pane_id: "alpha:claude".into(),
+        pane_key: foreman::app::PaneKey::local("alpha:claude".into()),
         pane_title: "claude-main".to_string(),
         kind: NotificationKind::Completion,
         title: "Agent ready: claude-main".to_string(),

@@ -3,7 +3,7 @@ use crate::adapters::tmux::{
 };
 use crate::app::{
     action_for_command, map_key_event, reduce, Action, AppState, DraftEdit, Effect, OperatorAlert,
-    OperatorAlertLevel, OperatorAlertSource,
+    OperatorAlertLevel, OperatorAlertSource, PaneId, PaneKey,
 };
 use crate::cli::PreparedBootstrap;
 use crate::doctor::{
@@ -13,6 +13,7 @@ use crate::integrations::{
     apply_configured_claude_signals, apply_configured_codex_signals, apply_configured_pi_signals,
     ClaudeNativeOverlaySummary, CodexNativeOverlaySummary, PiNativeOverlaySummary,
 };
+use crate::services::control_api::{AgentEntry, AgentsResponse};
 use crate::services::extensions::{collect_workspace_extensions, ControlExtensionCard};
 use crate::services::logging::RunLogger;
 use crate::services::notifications::{
@@ -24,6 +25,9 @@ use crate::services::pull_requests::{
 use crate::services::startup_cache::{current_time_ms, write_startup_cache};
 use crate::services::system_stats::{SysinfoSystemStatsBackend, SystemStatsService};
 use crate::services::ui_preferences::{save_ui_preferences, PersistedUiPreferences};
+use crate::sources::{
+    ForemanSource, SourceConfig, SourceDescriptor, SourceDiagnostic, SourceScope, SshSource,
+};
 use crate::ui::render::{render, sidebar_viewport_rows_for_area_with_popup};
 use crossterm::cursor::{Hide, Show};
 use crossterm::event::{self, Event};
@@ -36,8 +40,10 @@ use ratatui::layout::Rect;
 use ratatui::Terminal;
 use std::collections::BTreeMap;
 use std::fmt;
+use std::fs;
 use std::io::{self, Stdout};
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -54,6 +60,10 @@ const STARTUP_CACHE_WRITE_INTERVAL_MS: u64 = 5_000;
 const PULL_REQUEST_LOOKUP_RESULT_POLL_MS: u64 = 50;
 const EXTENSION_LOOKUP_RESULT_POLL_MS: u64 = 50;
 const UI_PREFERENCES_WRITE_DEBOUNCE_MS: u64 = 300;
+const POPUP_INPUT_POLL_MAX_MS: u64 = 5;
+const POPUP_SOURCE_REFRESH_MIN_INTERVAL_MS: u64 = 60_000;
+const POPUP_BACKGROUND_MERGE_IDLE_MS: u64 = 150;
+const POPUP_READY_INPUT_DRAIN_LIMIT: usize = 32;
 
 pub(crate) fn run(prepared: PreparedBootstrap) -> Result<(), RuntimeError> {
     let _terminal_guard = TerminalGuard::enter()?;
@@ -109,6 +119,8 @@ struct DashboardRuntime {
     pending_selection_restore: Option<crate::app::SelectionTarget>,
     ui_preferences_dirty_since: Option<Instant>,
     persistent_runtime_diagnostics: Vec<crate::doctor::DoctorFinding>,
+    last_input_at: Option<Instant>,
+    deferred_inventory_refresh: Option<InventoryRefreshResult>,
 }
 
 #[derive(Debug, Clone)]
@@ -164,6 +176,8 @@ enum ExtensionLookupCommand {
 struct ExtensionLookupRequest {
     generation: u64,
     workspace_path: PathBuf,
+    pane_key: Option<PaneKey>,
+    config_file: PathBuf,
     trigger: &'static str,
 }
 
@@ -204,6 +218,7 @@ struct InventoryRefreshResult {
     generation: u64,
     elapsed_ms: u128,
     notification_policy_epoch: u64,
+    complete: bool,
     result: Result<InventoryRefreshPayload, String>,
 }
 
@@ -214,6 +229,7 @@ type InventoryRefreshPayload = (
     ClaudeNativeOverlaySummary,
     CodexNativeOverlaySummary,
     PiNativeOverlaySummary,
+    Vec<SourceDiagnostic>,
 );
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -226,7 +242,9 @@ struct NativeOverlayTiming {
 
 impl DashboardRuntime {
     fn new(prepared: PreparedBootstrap) -> Self {
-        let tmux = TmuxAdapter::new(SystemTmuxBackend::new(prepared.runtime.tmux_socket.clone()));
+        let tmux = TmuxAdapter::new(SystemTmuxBackend::with_target(
+            prepared.runtime.tmux_target(),
+        ));
         let inventory_refresh = spawn_inventory_refresh_worker(prepared.runtime.clone());
         let pull_request_lookup = spawn_pull_request_lookup_worker();
         let extension_lookup = spawn_extension_lookup_worker();
@@ -259,6 +277,8 @@ impl DashboardRuntime {
             pending_selection_restore: prepared.pending_selection_restore,
             ui_preferences_dirty_since: None,
             persistent_runtime_diagnostics: prepared.persistent_runtime_diagnostics,
+            last_input_at: None,
+            deferred_inventory_refresh: None,
             runtime: prepared.runtime,
             logger: prepared.logger,
             state: prepared.state,
@@ -269,7 +289,14 @@ impl DashboardRuntime {
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     ) -> Result<(), RuntimeError> {
-        let poll_interval = Duration::from_millis(self.runtime.poll_interval_ms.max(1));
+        let mut poll_interval = Duration::from_millis(self.runtime.poll_interval_ms.max(1));
+        if self.state.popup_mode
+            && (self.runtime.source.is_some()
+                || self.runtime.sources.default_scope == SourceScope::All)
+        {
+            poll_interval =
+                poll_interval.max(Duration::from_millis(POPUP_SOURCE_REFRESH_MIN_INTERVAL_MS));
+        }
         let mut last_inventory_refresh = Instant::now();
         let mut initial_inventory_requested = false;
         let initial_size = terminal.size()?;
@@ -289,11 +316,21 @@ impl DashboardRuntime {
         ))?;
 
         loop {
-            if initial_inventory_requested {
-                self.drain_inventory_refresh_results()?;
+            let (input_processed, should_quit) =
+                self.drain_ready_input_events(POPUP_READY_INPUT_DRAIN_LIMIT)?;
+            if should_quit {
+                self.maybe_flush_ui_preferences(true, "shutdown")?;
+                break;
             }
-            self.drain_pull_request_lookup_results()?;
-            self.drain_extension_lookup_results()?;
+
+            if !input_processed {
+                self.apply_deferred_inventory_refresh_if_idle()?;
+                if initial_inventory_requested {
+                    self.drain_inventory_refresh_results()?;
+                }
+                self.drain_pull_request_lookup_results()?;
+                self.drain_extension_lookup_results()?;
+            }
             self.maybe_flush_ui_preferences(false, "debounce")?;
             let current_size = terminal.size()?;
             let sidebar_rows = sidebar_viewport_rows_for_area_with_popup(
@@ -352,45 +389,17 @@ impl DashboardRuntime {
 
             let timeout = self
                 .next_wait_timeout(poll_interval.saturating_sub(last_inventory_refresh.elapsed()));
-            if event::poll(timeout)? {
-                match event::read()? {
-                    Event::Key(key) => {
-                        if let Some(command) = map_key_event(key, self.state.focus, self.state.mode)
-                        {
-                            let previous_workspace = self.state.selected_workspace_path();
-                            let action = action_for_command(&self.state, command);
-                            if self.apply_action(action)? {
-                                self.maybe_flush_ui_preferences(true, "shutdown")?;
-                                break;
-                            }
-                            self.schedule_selected_pull_request_refresh(previous_workspace.clone());
-                            self.schedule_selected_extension_refresh(previous_workspace);
-                        }
-                    }
-                    Event::Paste(text) => {
-                        self.apply_paste(text)?;
-                    }
-                    Event::Resize(width, height) => {
-                        self.apply_runtime_action(Action::SetSidebarViewportRows(
-                            sidebar_viewport_rows_for_area_with_popup(
-                                Rect {
-                                    x: 0,
-                                    y: 0,
-                                    width,
-                                    height,
-                                },
-                                self.state.popup_mode,
-                            ),
-                        ))?;
-                    }
-                    Event::Mouse(_) | Event::FocusGained | Event::FocusLost => {}
-                }
+            if event::poll(timeout)? && self.handle_terminal_event(event::read()?)? {
+                self.maybe_flush_ui_preferences(true, "shutdown")?;
+                break;
             }
 
-            self.run_pending_pull_request_refresh()?;
-            self.run_pending_extension_refresh()?;
-            self.drain_pull_request_lookup_results()?;
-            self.drain_extension_lookup_results()?;
+            if !input_processed {
+                self.run_pending_pull_request_refresh()?;
+                self.run_pending_extension_refresh()?;
+                self.drain_pull_request_lookup_results()?;
+                self.drain_extension_lookup_results()?;
+            }
 
             if last_inventory_refresh.elapsed() >= poll_interval {
                 self.request_inventory_refresh()?;
@@ -402,6 +411,56 @@ impl DashboardRuntime {
         self.maybe_flush_ui_preferences(true, "shutdown")?;
         self.logger.info("dashboard_stopped")?;
         Ok(())
+    }
+
+    fn drain_ready_input_events(&mut self, limit: usize) -> Result<(bool, bool), RuntimeError> {
+        let mut processed = false;
+        for _ in 0..limit {
+            if !event::poll(Duration::ZERO)? {
+                break;
+            }
+            processed = true;
+            if self.handle_terminal_event(event::read()?)? {
+                return Ok((processed, true));
+            }
+        }
+        Ok((processed, false))
+    }
+
+    fn handle_terminal_event(&mut self, event: Event) -> Result<bool, RuntimeError> {
+        match event {
+            Event::Key(key) => {
+                self.last_input_at = Some(Instant::now());
+                if let Some(command) = map_key_event(key, self.state.focus, self.state.mode) {
+                    let previous_workspace = self.state.selected_workspace_path();
+                    let action = action_for_command(&self.state, command);
+                    if self.apply_action(action)? {
+                        return Ok(true);
+                    }
+                    self.schedule_selected_pull_request_refresh(previous_workspace.clone());
+                    self.schedule_selected_extension_refresh(previous_workspace);
+                }
+            }
+            Event::Paste(text) => {
+                self.last_input_at = Some(Instant::now());
+                self.apply_paste(text)?;
+            }
+            Event::Resize(width, height) => {
+                self.apply_runtime_action(Action::SetSidebarViewportRows(
+                    sidebar_viewport_rows_for_area_with_popup(
+                        Rect {
+                            x: 0,
+                            y: 0,
+                            width,
+                            height,
+                        },
+                        self.state.popup_mode,
+                    ),
+                ))?;
+            }
+            Event::Mouse(_) | Event::FocusGained | Event::FocusLost => {}
+        }
+        Ok(false)
     }
 
     fn apply_paste(&mut self, text: String) -> Result<(), RuntimeError> {
@@ -462,21 +521,139 @@ impl DashboardRuntime {
         Ok(())
     }
 
+    fn focus_pane_key(&self, pane_key: &PaneKey) -> Result<(), String> {
+        if pane_key.is_local() {
+            return self
+                .tmux
+                .focus_pane(&pane_key.pane_id)
+                .map_err(|error| error.to_string());
+        }
+        self.run_source_action_command("focus", pane_key, None)
+    }
+
+    fn send_input_to_pane_key(&self, pane_key: &PaneKey, text: &str) -> Result<(), String> {
+        if pane_key.is_local() {
+            return self
+                .tmux
+                .send_input(&pane_key.pane_id, text)
+                .map(|_| ())
+                .map_err(|error| error.to_string());
+        }
+        self.run_source_action_command("send", pane_key, Some(text))
+    }
+
+    fn activate_source_display(&self, pane_key: &PaneKey) -> Result<(), String> {
+        if pane_key.is_local() {
+            return Ok(());
+        }
+        let source_id = crate::sources::SourceId::new(pane_key.source_id.as_str());
+        let Some(source_config) = self.runtime.sources.get(&source_id) else {
+            return Ok(());
+        };
+        let Some(jump) = source_config.jump() else {
+            return Ok(());
+        };
+        let Some(command_template) = jump.activation_command.as_deref() else {
+            return Ok(());
+        };
+        if command_template.trim().is_empty() {
+            return Ok(());
+        }
+
+        let command = expand_activation_command(command_template, pane_key);
+        let output = Command::new("sh")
+            .arg("-lc")
+            .arg(&command)
+            .env("FOREMAN_SOURCE_ID", pane_key.source_id.as_str())
+            .env("FOREMAN_PANE_ID", pane_key.pane_id.as_str())
+            .output()
+            .map_err(|error| format!("failed to run activation command: {error}"))?;
+        if output.status.success() {
+            return Ok(());
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let detail = if !stderr.is_empty() { stderr } else { stdout };
+        if detail.is_empty() {
+            Err(format!(
+                "activation command exited with status {}",
+                output.status
+            ))
+        } else {
+            Err(detail)
+        }
+    }
+
+    fn run_source_action_command(
+        &self,
+        command_name: &str,
+        pane_key: &PaneKey,
+        stdin_text: Option<&str>,
+    ) -> Result<(), String> {
+        let exe = std::env::current_exe().map_err(|error| error.to_string())?;
+        let mut command = Command::new(exe);
+        command
+            .arg("--config-file")
+            .arg(&self.runtime.config_file)
+            .arg("--source")
+            .arg(pane_key.source_id.as_str())
+            .arg(command_name)
+            .arg("--pane")
+            .arg(pane_key.pane_id.as_str())
+            .arg("--json");
+        if stdin_text.is_some() {
+            command.arg("--stdin").stdin(std::process::Stdio::piped());
+        }
+        command.stdout(std::process::Stdio::piped());
+        command.stderr(std::process::Stdio::piped());
+        let mut child = command.spawn().map_err(|error| error.to_string())?;
+        if let Some(text) = stdin_text {
+            if let Some(mut stdin) = child.stdin.take() {
+                use std::io::Write;
+                stdin
+                    .write_all(text.as_bytes())
+                    .map_err(|error| error.to_string())?;
+            }
+        }
+        let output = child
+            .wait_with_output()
+            .map_err(|error| error.to_string())?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            Err(if stderr.is_empty() {
+                format!("{command_name} failed for {}", pane_key.stable_id())
+            } else {
+                stderr
+            })
+        }
+    }
+
     fn execute_effects(&mut self, effects: Vec<Effect>) -> Result<bool, RuntimeError> {
         let mut should_quit = false;
 
         for effect in effects {
             match effect {
                 Effect::FocusPane {
-                    pane_id,
+                    pane_key,
                     close_after,
-                } => match self.tmux.focus_pane(&pane_id) {
-                    Ok(()) => {
-                        self.clear_alert_source(OperatorAlertSource::Tmux)?;
-                        if close_after {
-                            should_quit = true;
+                } => match self.focus_pane_key(&pane_key) {
+                    Ok(()) => match self.activate_source_display(&pane_key) {
+                        Ok(()) => {
+                            self.clear_alert_source(OperatorAlertSource::Tmux)?;
+                            if close_after {
+                                should_quit = true;
+                            }
                         }
-                    }
+                        Err(error) => {
+                            self.record_alert(
+                                OperatorAlertSource::Tmux,
+                                OperatorAlertLevel::Warn,
+                                format!("Focused pane, but terminal activation failed: {error}"),
+                            )?;
+                        }
+                    },
                     Err(error) => {
                         self.record_alert(
                             OperatorAlertSource::Tmux,
@@ -485,14 +662,14 @@ impl DashboardRuntime {
                         )?;
                     }
                 },
-                Effect::SendInput { pane_id, text } => {
-                    match self.tmux.send_input(&pane_id, &text) {
+                Effect::SendInput { pane_key, text } => {
+                    match self.send_input_to_pane_key(&pane_key, &text) {
                         Ok(_) => {
                             self.clear_alert_source(OperatorAlertSource::Tmux)?;
                         }
                         Err(error) => {
                             self.apply_runtime_action(Action::RestoreFailedInput {
-                                pane_id,
+                                pane_id: pane_key.pane_id,
                                 text,
                             })?;
                             self.record_alert(
@@ -606,15 +783,33 @@ impl DashboardRuntime {
         &mut self,
         payload: InventoryRefreshPayload,
         elapsed_ms: u128,
+        complete: bool,
     ) -> Result<(), RuntimeError> {
-        let (inventory, tmux_metrics, native_timing, claude_native, codex_native, pi_native) =
-            payload;
+        let (
+            inventory,
+            tmux_metrics,
+            native_timing,
+            claude_native,
+            codex_native,
+            pi_native,
+            source_diagnostics,
+        ) = payload;
         let outcome = "loaded";
         let was_startup_loading = self.state.startup_loading;
         let should_prime_priority_previews = was_startup_loading && !inventory.sessions.is_empty();
         self.apply_runtime_action(Action::SetStartupLoading(false))?;
         self.apply_runtime_action(Action::SetStartupCacheAge(None))?;
         self.apply_runtime_action(Action::SetStartupError(None))?;
+        self.apply_runtime_action(Action::SetSourceDiagnostics(source_diagnostics.clone()))?;
+        if source_diagnostics.is_empty() {
+            self.clear_alert_source(OperatorAlertSource::Diagnostics)?;
+        } else {
+            self.record_alert(
+                OperatorAlertSource::Diagnostics,
+                OperatorAlertLevel::Warn,
+                format!("{} source diagnostic(s)", source_diagnostics.len()),
+            )?;
+        }
         self.clear_alert_source(OperatorAlertSource::Tmux)?;
         self.apply_runtime_action(Action::ReplaceInventory(inventory))?;
         self.restore_pending_selection()?;
@@ -669,7 +864,7 @@ impl DashboardRuntime {
         for warning in &pi_native.warnings {
             self.logger.log_pi_native_warning(warning)?;
         }
-        self.maybe_write_startup_cache()?;
+        self.maybe_write_startup_cache(complete)?;
         self.refresh_runtime_diagnostics(&claude_native, &codex_native, &pi_native)?;
 
         self.maybe_refresh_selected_pull_request(false, "inventory-refresh")?;
@@ -761,7 +956,13 @@ impl DashboardRuntime {
     }
 
     fn inventory_capture_policy(&mut self) -> InventoryLoadPolicy {
-        let priority_panes = self.state.refresh_priority_pane_ids();
+        let priority_panes: std::collections::BTreeSet<PaneId> = self
+            .state
+            .refresh_priority_pane_keys()
+            .into_iter()
+            .filter(|pane_key| pane_key.is_local())
+            .map(|pane_key| pane_key.pane_id)
+            .collect();
         let all_panes = self.state.inventory.pane_ids();
         let offscreen_panes = all_panes
             .into_iter()
@@ -812,7 +1013,9 @@ impl DashboardRuntime {
                 }
             };
 
-            if self.inventory_refresh.in_flight_generation == Some(result.generation) {
+            if result.complete
+                && self.inventory_refresh.in_flight_generation == Some(result.generation)
+            {
                 self.inventory_refresh.in_flight_generation = None;
             }
 
@@ -822,18 +1025,64 @@ impl DashboardRuntime {
                 continue;
             }
 
-            match result.result {
-                Ok(payload) => self.apply_inventory_refresh_result(payload, result.elapsed_ms)?,
-                Err(error_message) => {
-                    self.handle_inventory_refresh_error(error_message, result.elapsed_ms)?
-                }
+            if self.should_defer_inventory_refresh_result(&result) {
+                self.logger.debug(&format!(
+                    "inventory_refresh_deferred generation={} elapsed_ms={} complete={}",
+                    result.generation, result.elapsed_ms, result.complete
+                ))?;
+                self.deferred_inventory_refresh = Some(result);
+                continue;
             }
+
+            self.apply_inventory_refresh_result_message(result)?;
 
             if self.inventory_refresh.rerun_requested
                 && self.inventory_refresh.in_flight_generation.is_none()
             {
                 self.inventory_refresh.rerun_requested = false;
                 self.request_inventory_refresh()?;
+            }
+        }
+    }
+
+    fn should_defer_inventory_refresh_result(&self, result: &InventoryRefreshResult) -> bool {
+        self.state.popup_mode
+            && (self.runtime.source.is_some()
+                || self.runtime.sources.default_scope == SourceScope::All)
+            && result.complete
+            && result.result.is_ok()
+            && self.last_input_at.is_some_and(|input_at| {
+                input_at.elapsed() < Duration::from_millis(POPUP_BACKGROUND_MERGE_IDLE_MS)
+            })
+    }
+
+    fn apply_deferred_inventory_refresh_if_idle(&mut self) -> Result<(), RuntimeError> {
+        let should_apply = self.deferred_inventory_refresh.is_some()
+            && self.last_input_at.is_none_or(|input_at| {
+                input_at.elapsed() >= Duration::from_millis(POPUP_BACKGROUND_MERGE_IDLE_MS)
+            });
+        if should_apply {
+            if let Some(result) = self.deferred_inventory_refresh.take() {
+                self.logger.debug(&format!(
+                    "inventory_refresh_deferred_apply generation={} elapsed_ms={} complete={}",
+                    result.generation, result.elapsed_ms, result.complete
+                ))?;
+                self.apply_inventory_refresh_result_message(result)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn apply_inventory_refresh_result_message(
+        &mut self,
+        result: InventoryRefreshResult,
+    ) -> Result<(), RuntimeError> {
+        match result.result {
+            Ok(payload) => {
+                self.apply_inventory_refresh_result(payload, result.elapsed_ms, result.complete)
+            }
+            Err(error_message) => {
+                self.handle_inventory_refresh_error(error_message, result.elapsed_ms)
             }
         }
     }
@@ -850,6 +1099,10 @@ impl DashboardRuntime {
         force: bool,
         trigger: &'static str,
     ) -> Result<(), RuntimeError> {
+        if self.state.popup_mode && trigger != "manual" {
+            self.clear_pending_pull_request_lookup()?;
+            return Ok(());
+        }
         if !self.runtime.pull_request_monitoring_enabled {
             self.clear_pending_pull_request_lookup()?;
             return Ok(());
@@ -929,6 +1182,10 @@ impl DashboardRuntime {
         force: bool,
         trigger: &'static str,
     ) -> Result<(), RuntimeError> {
+        if self.state.popup_mode && trigger != "manual" {
+            self.clear_pending_extension_lookup()?;
+            return Ok(());
+        }
         let Some(workspace_path) = self.state.selected_workspace_path() else {
             self.clear_pending_extension_lookup()?;
             return Ok(());
@@ -938,12 +1195,14 @@ impl DashboardRuntime {
             return Ok(());
         }
 
-        self.request_extension_lookup(workspace_path, trigger)
+        let pane_key = self.state.selected_actionable_pane_key();
+        self.request_extension_lookup(workspace_path, pane_key, trigger)
     }
 
     fn request_extension_lookup(
         &mut self,
         workspace_path: PathBuf,
+        pane_key: Option<PaneKey>,
         trigger: &'static str,
     ) -> Result<(), RuntimeError> {
         if self.extension_lookup.in_flight_generation.is_some() {
@@ -972,6 +1231,8 @@ impl DashboardRuntime {
             .send(ExtensionLookupCommand::Lookup(ExtensionLookupRequest {
                 generation,
                 workspace_path: workspace_path.clone(),
+                pane_key,
+                config_file: self.runtime.config_file.clone(),
                 trigger,
             }));
         if let Err(error) = send_result {
@@ -1260,15 +1521,24 @@ impl DashboardRuntime {
         } else {
             inventory_timeout
         };
-        inventory_timeout
+        let timeout = inventory_timeout
             .min(pending_pull_request_timeout)
             .min(pending_extension_timeout)
             .min(pull_request_result_timeout)
             .min(extension_result_timeout)
-            .min(self.ui_preferences_flush_timeout(inventory_timeout))
+            .min(self.ui_preferences_flush_timeout(inventory_timeout));
+        if self.state.popup_mode {
+            timeout.min(Duration::from_millis(POPUP_INPUT_POLL_MAX_MS))
+        } else {
+            timeout
+        }
     }
 
     fn schedule_selected_pull_request_refresh(&mut self, previous_workspace: Option<PathBuf>) {
+        if self.state.popup_mode {
+            self.pending_pull_request_lookup = None;
+            return;
+        }
         let current_workspace = self.state.selected_workspace_path();
         if current_workspace == previous_workspace {
             return;
@@ -1321,6 +1591,10 @@ impl DashboardRuntime {
     }
 
     fn schedule_selected_extension_refresh(&mut self, previous_workspace: Option<PathBuf>) {
+        if self.state.popup_mode {
+            self.pending_extension_lookup = None;
+            return;
+        }
         let current_workspace = self.state.selected_workspace_path();
         if current_workspace == previous_workspace {
             return;
@@ -1492,11 +1766,22 @@ impl DashboardRuntime {
         }
     }
 
-    fn maybe_write_startup_cache(&mut self) -> Result<(), RuntimeError> {
+    fn maybe_write_startup_cache(
+        &mut self,
+        inventory_refresh_complete: bool,
+    ) -> Result<(), RuntimeError> {
         if self.state.inventory.sessions.is_empty() {
             return Ok(());
         }
         if self.state.visible_target_count() == 0 {
+            return Ok(());
+        }
+        if self.runtime.source.is_some() {
+            return Ok(());
+        }
+        if matches!(self.runtime.sources.default_scope, SourceScope::All)
+            && !inventory_refresh_complete
+        {
             return Ok(());
         }
 
@@ -1566,6 +1851,25 @@ impl Drop for ExtensionLookupWorker {
     }
 }
 
+fn expand_activation_command(template: &str, pane_key: &PaneKey) -> String {
+    template
+        .replace("{source_id}", &shell_quote(pane_key.source_id.as_str()))
+        .replace("{pane_id}", &shell_quote(pane_key.pane_id.as_str()))
+}
+
+fn shell_quote(value: &str) -> String {
+    if value.is_empty() {
+        return "''".to_string();
+    }
+    if value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '_' | '-' | ':' | '='))
+    {
+        return value.to_string();
+    }
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
 fn rotating_capture_batch(
     pane_ids: &[crate::app::PaneId],
     cursor: &mut usize,
@@ -1591,23 +1895,62 @@ fn spawn_inventory_refresh_worker(runtime: crate::config::RuntimeConfig) -> Inve
     thread::Builder::new()
         .name("foreman-inventory-refresh".to_string())
         .spawn(move || {
-            let tmux = TmuxAdapter::new(SystemTmuxBackend::new(runtime.tmux_socket.clone()));
+            let tmux = TmuxAdapter::new(SystemTmuxBackend::with_target(runtime.tmux_target()));
             while let Ok(command) = request_rx.recv() {
                 match command {
                     InventoryRefreshCommand::Refresh(request) => {
                         let refresh_started = Instant::now();
-                        let result = load_inventory_refresh_payload(
-                            &tmux,
-                            &runtime,
-                            &request.previous_inventory,
-                            &request.policy,
-                        );
-                        let _ = result_tx.send(InventoryRefreshResult {
-                            generation: request.generation,
-                            elapsed_ms: refresh_started.elapsed().as_millis(),
-                            notification_policy_epoch: request.notification_policy_epoch,
-                            result,
-                        });
+                        if runtime.source.is_some()
+                            || runtime.sources.default_scope == SourceScope::All
+                        {
+                            if runtime
+                                .source
+                                .as_deref()
+                                .is_none_or(|source| source == crate::sources::LOCAL_SOURCE_ID)
+                            {
+                                let local_stage_started = Instant::now();
+                                let local_stage = load_source_local_inventory_refresh_payload(
+                                    &tmux,
+                                    &runtime,
+                                    &request.previous_inventory,
+                                    &request.policy,
+                                );
+                                let _ = result_tx.send(InventoryRefreshResult {
+                                    generation: request.generation,
+                                    elapsed_ms: local_stage_started.elapsed().as_millis(),
+                                    notification_policy_epoch: request.notification_policy_epoch,
+                                    complete: false,
+                                    result: local_stage,
+                                });
+                            }
+                            let result = load_source_aggregate_inventory_refresh_payload(
+                                &tmux,
+                                &runtime,
+                                &request.previous_inventory,
+                                &request.policy,
+                            );
+                            let _ = result_tx.send(InventoryRefreshResult {
+                                generation: request.generation,
+                                elapsed_ms: refresh_started.elapsed().as_millis(),
+                                notification_policy_epoch: request.notification_policy_epoch,
+                                complete: true,
+                                result,
+                            });
+                        } else {
+                            let result = load_inventory_refresh_payload(
+                                &tmux,
+                                &runtime,
+                                &request.previous_inventory,
+                                &request.policy,
+                            );
+                            let _ = result_tx.send(InventoryRefreshResult {
+                                generation: request.generation,
+                                elapsed_ms: refresh_started.elapsed().as_millis(),
+                                notification_policy_epoch: request.notification_policy_epoch,
+                                complete: true,
+                                result,
+                            });
+                        }
                     }
                     InventoryRefreshCommand::Shutdown => break,
                 }
@@ -1664,6 +2007,36 @@ fn spawn_pull_request_lookup_worker() -> PullRequestLookupWorker {
     }
 }
 
+fn remote_extension_cards(
+    config_file: &std::path::Path,
+    pane_key: &PaneKey,
+) -> Result<Vec<ControlExtensionCard>, String> {
+    let exe = std::env::current_exe().map_err(|error| error.to_string())?;
+    let output = Command::new(exe)
+        .arg("--config-file")
+        .arg(config_file)
+        .arg("--source")
+        .arg(pane_key.source_id.as_str())
+        .arg("extensions")
+        .arg("--pane")
+        .arg(pane_key.pane_id.as_str())
+        .arg("--json")
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    let value: serde_json::Value =
+        serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())?;
+    serde_json::from_value(
+        value
+            .get("extensionCards")
+            .cloned()
+            .unwrap_or_else(|| serde_json::Value::Array(Vec::new())),
+    )
+    .map_err(|error| error.to_string())
+}
+
 fn spawn_extension_lookup_worker() -> ExtensionLookupWorker {
     let (request_tx, request_rx) = mpsc::channel::<ExtensionLookupCommand>();
     let (result_tx, result_rx) = mpsc::channel::<ExtensionLookupResult>();
@@ -1675,11 +2048,17 @@ fn spawn_extension_lookup_worker() -> ExtensionLookupWorker {
                 match command {
                     ExtensionLookupCommand::Lookup(request) => {
                         let lookup_started = Instant::now();
-                        let cards = collect_workspace_extensions(std::slice::from_ref(
-                            &request.workspace_path,
-                        ))
-                        .remove(&request.workspace_path)
-                        .unwrap_or_default();
+                        let cards = match request.pane_key.as_ref() {
+                            Some(pane_key) if !pane_key.is_local() => {
+                                remote_extension_cards(&request.config_file, pane_key)
+                                    .unwrap_or_default()
+                            }
+                            _ => collect_workspace_extensions(std::slice::from_ref(
+                                &request.workspace_path,
+                            ))
+                            .remove(&request.workspace_path)
+                            .unwrap_or_default(),
+                        };
                         let _ = result_tx.send(ExtensionLookupResult {
                             generation: request.generation,
                             workspace_path: request.workspace_path,
@@ -1699,6 +2078,343 @@ fn spawn_extension_lookup_worker() -> ExtensionLookupWorker {
         result_rx,
         next_generation: 0,
         in_flight_generation: None,
+    }
+}
+
+fn source_cache_file(runtime: &crate::config::RuntimeConfig, source_id: &str) -> PathBuf {
+    runtime.startup_cache_dir.join("sources").join(format!(
+        "{}.agents.json",
+        sanitize_source_cache_key(source_id)
+    ))
+}
+
+fn sanitize_source_cache_key(source_id: &str) -> String {
+    source_id
+        .chars()
+        .map(|ch| match ch {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' => ch,
+            _ => '_',
+        })
+        .collect()
+}
+
+fn load_cached_source_inventory(
+    runtime: &crate::config::RuntimeConfig,
+    descriptor: &SourceDescriptor,
+) -> Option<crate::app::Inventory> {
+    let path = source_cache_file(runtime, &descriptor.id);
+    let bytes = fs::read(path).ok()?;
+    let response: AgentsResponse = serde_json::from_slice(&bytes).ok()?;
+    if response.schema_version != crate::services::control_api::CONTROL_API_SCHEMA_VERSION {
+        return None;
+    }
+    Some(inventory_from_agents_response(descriptor, response))
+}
+
+fn write_cached_source_response(
+    runtime: &crate::config::RuntimeConfig,
+    descriptor: &SourceDescriptor,
+    response: &AgentsResponse,
+) {
+    let path = source_cache_file(runtime, &descriptor.id);
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(bytes) = serde_json::to_vec_pretty(response) {
+        let _ = fs::write(path, bytes);
+    }
+}
+
+fn load_source_local_inventory_refresh_payload(
+    tmux: &TmuxAdapter<SystemTmuxBackend>,
+    runtime: &crate::config::RuntimeConfig,
+    previous_inventory: &crate::app::Inventory,
+    policy: &InventoryLoadPolicy,
+) -> Result<InventoryRefreshPayload, String> {
+    let local_payload = load_inventory_refresh_payload(tmux, runtime, previous_inventory, policy)?;
+    let (
+        mut local_inventory,
+        local_metrics,
+        native_timing,
+        claude_native,
+        codex_native,
+        pi_native,
+        _source_diagnostics,
+    ) = local_payload;
+    let local_source = runtime
+        .sources
+        .get(&crate::sources::SourceId::local())
+        .unwrap_or_else(SourceConfig::local);
+    let local_descriptor = SourceDescriptor::new(&crate::sources::SourceId::local(), &local_source);
+    apply_source_metadata_to_inventory(&mut local_inventory, &local_descriptor);
+
+    if runtime.sources.default_scope == SourceScope::All && runtime.source.is_none() {
+        for (source_id, source_config) in runtime.sources.enabled_sources() {
+            if source_id.as_str() == crate::sources::LOCAL_SOURCE_ID {
+                continue;
+            }
+            let descriptor = SourceDescriptor::new(&source_id, &source_config);
+            if let Some(mut cached_inventory) = load_cached_source_inventory(runtime, &descriptor) {
+                local_inventory
+                    .sessions
+                    .append(&mut cached_inventory.sessions);
+            }
+        }
+    }
+
+    Ok((
+        local_inventory,
+        local_metrics,
+        native_timing,
+        claude_native,
+        codex_native,
+        pi_native,
+        Vec::new(),
+    ))
+}
+
+fn load_source_aggregate_inventory_refresh_payload(
+    tmux: &TmuxAdapter<SystemTmuxBackend>,
+    runtime: &crate::config::RuntimeConfig,
+    previous_inventory: &crate::app::Inventory,
+    policy: &InventoryLoadPolicy,
+) -> Result<InventoryRefreshPayload, String> {
+    let local_started = Instant::now();
+    let local_payload = load_inventory_refresh_payload(tmux, runtime, previous_inventory, policy)?;
+    let (
+        mut local_inventory,
+        local_metrics,
+        native_timing,
+        claude_native,
+        codex_native,
+        pi_native,
+        _source_diagnostics,
+    ) = local_payload;
+    let selected_source = runtime.source.as_deref();
+    let local_source = runtime
+        .sources
+        .get(&crate::sources::SourceId::local())
+        .unwrap_or_else(SourceConfig::local);
+    let local_descriptor = SourceDescriptor::new(&crate::sources::SourceId::local(), &local_source);
+    apply_source_metadata_to_inventory(&mut local_inventory, &local_descriptor);
+
+    let mut aggregate_inventory =
+        if selected_source.is_none_or(|source| source == crate::sources::LOCAL_SOURCE_ID) {
+            local_inventory
+        } else {
+            crate::app::Inventory::default()
+        };
+    let mut diagnostics: Vec<SourceDiagnostic> = Vec::new();
+    let remote_handles = runtime
+        .sources
+        .enabled_sources()
+        .into_iter()
+        .filter(|(source_id, _)| source_id.as_str() != crate::sources::LOCAL_SOURCE_ID)
+        .filter(|(source_id, _)| {
+            selected_source.is_none_or(|selected| selected == source_id.as_str())
+        })
+        .filter_map(|(source_id, source_config)| match source_config.clone() {
+            SourceConfig::Ssh { .. } => {
+                let descriptor = SourceDescriptor::new(&source_id, &source_config);
+                let timeout_ms = runtime.sources.query_timeout_ms;
+                let cache_runtime = runtime.clone();
+                Some(thread::spawn(move || {
+                    let source = SshSource::new(source_id, source_config, timeout_ms);
+                    let started = Instant::now();
+                    match source.agents() {
+                        Ok(response) => {
+                            write_cached_source_response(&cache_runtime, &descriptor, &response);
+                            Ok(inventory_from_agents_response(&descriptor, response))
+                        }
+                        Err(error) => {
+                            let diagnostic = SourceDiagnostic::warning(
+                                &descriptor,
+                                error.code,
+                                error.message,
+                                error.retryable,
+                                Some(started.elapsed().as_millis() as u64),
+                            );
+                            Err((descriptor, diagnostic))
+                        }
+                    }
+                }))
+            }
+            SourceConfig::Local { .. } => None,
+        })
+        .collect::<Vec<_>>();
+    for handle in remote_handles {
+        match handle.join() {
+            Ok(Ok(mut inventory)) => aggregate_inventory.sessions.append(&mut inventory.sessions),
+            Ok(Err((descriptor, diagnostic))) => {
+                if let Some(mut cached_inventory) =
+                    load_cached_source_inventory(runtime, &descriptor)
+                {
+                    aggregate_inventory
+                        .sessions
+                        .append(&mut cached_inventory.sessions);
+                }
+                diagnostics.push(diagnostic);
+            }
+            Err(_) => diagnostics.push(SourceDiagnostic {
+                level: "warning".to_string(),
+                code: "source.thread.panicked".to_string(),
+                source_id: "unknown".to_string(),
+                source_label: "unknown".to_string(),
+                source_kind: "ssh".to_string(),
+                message: "source refresh worker panicked".to_string(),
+                retryable: true,
+                duration_ms: None,
+                last_success_unix_ms: None,
+            }),
+        }
+    }
+
+    let _ = local_started;
+
+    Ok((
+        aggregate_inventory,
+        local_metrics,
+        native_timing,
+        claude_native,
+        codex_native,
+        pi_native,
+        diagnostics,
+    ))
+}
+
+fn apply_source_metadata_to_inventory(
+    inventory: &mut crate::app::Inventory,
+    descriptor: &SourceDescriptor,
+) {
+    let source = crate::app::SourceMetadata::with_display(
+        descriptor.id.clone(),
+        descriptor.display_label.clone(),
+        descriptor.kind.clone(),
+        descriptor.show_label,
+    );
+    for session in &mut inventory.sessions {
+        session.source = source.clone();
+        for window in &mut session.windows {
+            window.source = source.clone();
+            for pane in &mut window.panes {
+                pane.source = source.clone();
+            }
+        }
+    }
+}
+
+fn inventory_from_agents_response(
+    descriptor: &SourceDescriptor,
+    response: AgentsResponse,
+) -> crate::app::Inventory {
+    let source = crate::app::SourceMetadata::with_display(
+        descriptor.id.clone(),
+        descriptor.display_label.clone(),
+        descriptor.kind.clone(),
+        descriptor.show_label,
+    );
+    let mut sessions: Vec<crate::app::Session> = Vec::new();
+    for entry in response.entries {
+        let pane = pane_from_agent_entry(&source, &entry);
+        let session_id = crate::app::SessionId::new(entry.session_id.clone());
+        let window_id = crate::app::WindowId::new(entry.window_id.clone());
+        if let Some(session) = sessions
+            .iter_mut()
+            .find(|session| session.id == session_id && session.source.id == source.id)
+        {
+            if let Some(window) = session
+                .windows
+                .iter_mut()
+                .find(|window| window.id == window_id && window.source.id == source.id)
+            {
+                window.panes.push(pane);
+            } else {
+                session.windows.push(crate::app::Window {
+                    id: window_id,
+                    source: source.clone(),
+                    name: entry.window_name,
+                    panes: vec![pane],
+                });
+            }
+        } else {
+            sessions.push(crate::app::Session {
+                id: session_id,
+                source: source.clone(),
+                name: entry.session_name,
+                windows: vec![crate::app::Window {
+                    id: window_id,
+                    source: source.clone(),
+                    name: entry.window_name,
+                    panes: vec![pane],
+                }],
+            });
+        }
+    }
+    crate::app::Inventory::new(sessions)
+}
+
+fn pane_from_agent_entry(
+    source: &crate::app::SourceMetadata,
+    entry: &AgentEntry,
+) -> crate::app::Pane {
+    let agent = parse_harness(entry.harness.as_deref()).map(|harness| crate::app::AgentSnapshot {
+        harness,
+        status: parse_status(&entry.status),
+        observed_status: parse_status(&entry.status),
+        integration_mode: parse_integration_mode(entry.integration_mode.as_deref()),
+        activity_score: entry.activity_score,
+        debounce_ticks: 0,
+        active_run_count: entry.active_run_count,
+        last_status_change_unix_millis: entry.last_status_change_unix_ms,
+    });
+    crate::app::Pane {
+        id: crate::app::PaneId::new(entry.pane_id.clone()),
+        source: source.clone(),
+        title: entry.title.clone(),
+        current_command: entry.current_command.clone(),
+        runtime_command: entry.runtime_command.clone(),
+        working_dir: entry.working_dir.as_ref().map(PathBuf::from),
+        activity_unix_millis: entry.last_activity_unix_ms,
+        preview: entry.preview.clone(),
+        preview_provenance: parse_preview_provenance(&entry.preview_provenance),
+        agent,
+    }
+}
+
+fn parse_harness(value: Option<&str>) -> Option<crate::app::HarnessKind> {
+    match value? {
+        "claude-code" => Some(crate::app::HarnessKind::ClaudeCode),
+        "codex-cli" => Some(crate::app::HarnessKind::CodexCli),
+        "pi" => Some(crate::app::HarnessKind::Pi),
+        "gemini-cli" => Some(crate::app::HarnessKind::GeminiCli),
+        "opencode" => Some(crate::app::HarnessKind::OpenCode),
+        _ => None,
+    }
+}
+
+fn parse_status(value: &str) -> crate::app::AgentStatus {
+    match value {
+        "working" => crate::app::AgentStatus::Working,
+        "needs-attention" => crate::app::AgentStatus::NeedsAttention,
+        "idle" => crate::app::AgentStatus::Idle,
+        "error" => crate::app::AgentStatus::Error,
+        _ => crate::app::AgentStatus::Unknown,
+    }
+}
+
+fn parse_integration_mode(value: Option<&str>) -> crate::app::IntegrationMode {
+    match value {
+        Some("native") => crate::app::IntegrationMode::Native,
+        _ => crate::app::IntegrationMode::Compatibility,
+    }
+}
+
+fn parse_preview_provenance(value: &str) -> crate::app::PreviewProvenance {
+    match value {
+        "pending-capture" => crate::app::PreviewProvenance::PendingCapture,
+        "reused-cached" => crate::app::PreviewProvenance::ReusedCached,
+        "capture-failed" => crate::app::PreviewProvenance::CaptureFailed,
+        _ => crate::app::PreviewProvenance::Captured,
     }
 }
 
@@ -1751,6 +2467,7 @@ fn load_inventory_refresh_payload(
         claude_native,
         codex_native,
         pi_native,
+        Vec::new(),
     ))
 }
 
@@ -1901,6 +2618,73 @@ mod tests {
                 .as_ref()
                 .map(|pending| pending.workspace_path.clone()),
             Some(beta_workspace)
+        );
+    }
+
+    #[test]
+    fn remote_agent_response_becomes_source_scoped_inventory() {
+        let descriptor = SourceDescriptor {
+            id: "coder".to_string(),
+            label: "Coder".to_string(),
+            kind: "ssh".to_string(),
+            enabled: true,
+            display_label: "Coder".to_string(),
+            show_label: true,
+        };
+        let mut entry = AgentEntry::test_entry("%42");
+        entry.source_id = "coder".to_string();
+        entry.source_label = "Coder".to_string();
+        entry.source_kind = "ssh".to_string();
+        entry.session_id = "$1".to_string();
+        entry.session_name = "dots".to_string();
+        entry.window_id = "@1".to_string();
+        entry.window_name = "agents".to_string();
+        entry.harness = Some("pi".to_string());
+        entry.status = "working".to_string();
+        entry.preview = "remote output".to_string();
+        let response = AgentsResponse {
+            schema_version: crate::services::control_api::CONTROL_API_SCHEMA_VERSION,
+            generated_at_unix_ms: 1,
+            inventory: crate::services::control_api::ControlInventorySummary {
+                total_sessions: 1,
+                total_windows: 1,
+                total_panes: 1,
+                visible_sessions: 1,
+                visible_windows: 1,
+                visible_panes: 1,
+            },
+            entries: vec![entry],
+            diagnostics: Vec::new(),
+            sources: Vec::new(),
+            source_diagnostics: Vec::new(),
+            partial_failure_count: 0,
+        };
+
+        let inventory = inventory_from_agents_response(&descriptor, response);
+        let pane_key = crate::app::PaneKey::new(crate::app::SourceId::new("coder"), "%42".into());
+        let pane = inventory.pane(&pane_key).expect("remote pane");
+
+        assert_eq!(pane.source.label, "Coder");
+        assert_eq!(pane.id.as_str(), "%42");
+        assert_eq!(pane.preview, "remote output");
+        assert_eq!(pane.agent.as_ref().unwrap().harness, HarnessKind::Pi);
+        assert_eq!(
+            pane.agent.as_ref().unwrap().status,
+            crate::app::AgentStatus::Working
+        );
+        assert_eq!(
+            inventory.visible_targets(
+                &crate::app::Filters::default(),
+                &Default::default(),
+                Default::default()
+            ),
+            vec![
+                SelectionTarget::Session(crate::app::SessionKey::new(
+                    crate::app::SourceId::new("coder"),
+                    "$1".into()
+                )),
+                SelectionTarget::Pane(pane_key),
+            ]
         );
     }
 }
