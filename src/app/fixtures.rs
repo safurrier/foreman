@@ -1,6 +1,6 @@
 use crate::app::state::{
     AgentSnapshot, AgentStatus, HarnessKind, IntegrationMode, Inventory, Pane, PaneId,
-    PreviewProvenance, Session, SessionId, Window, WindowId,
+    PreviewProvenance, Session, SessionId, SourceMetadata, Window, WindowId,
 };
 use std::path::PathBuf;
 
@@ -73,6 +73,7 @@ pub struct PaneBuilder {
     current_command: Option<String>,
     runtime_command: Option<String>,
     working_dir: Option<PathBuf>,
+    source: SourceMetadata,
     preview: String,
     preview_provenance: PreviewProvenance,
     agent: Option<AgentSnapshot>,
@@ -87,6 +88,7 @@ impl PaneBuilder {
             current_command: None,
             runtime_command: None,
             working_dir: None,
+            source: SourceMetadata::local(),
             preview: String::new(),
             preview_provenance: PreviewProvenance::Captured,
             agent: None,
@@ -119,6 +121,16 @@ impl PaneBuilder {
 
     pub fn working_dir(mut self, working_dir: impl Into<PathBuf>) -> Self {
         self.working_dir = Some(working_dir.into());
+        self
+    }
+
+    pub fn source(
+        mut self,
+        id: impl Into<String>,
+        label: impl Into<String>,
+        kind: impl Into<String>,
+    ) -> Self {
+        self.source = SourceMetadata::new(id, label, kind);
         self
     }
 
@@ -161,6 +173,7 @@ impl PaneBuilder {
     pub fn build(self) -> Pane {
         Pane {
             id: self.id,
+            source: self.source,
             title: self.title,
             current_command: self.current_command,
             runtime_command: self.runtime_command,
@@ -182,6 +195,7 @@ impl PaneBuilder {
 #[derive(Debug, Clone)]
 pub struct WindowBuilder {
     id: WindowId,
+    source: SourceMetadata,
     name: String,
     panes: Vec<PaneBuilder>,
 }
@@ -192,6 +206,7 @@ impl WindowBuilder {
         Self {
             name: id.clone(),
             id: WindowId::new(id),
+            source: SourceMetadata::local(),
             panes: Vec::new(),
         }
     }
@@ -206,9 +221,20 @@ impl WindowBuilder {
         self
     }
 
+    pub fn source(
+        mut self,
+        id: impl Into<String>,
+        label: impl Into<String>,
+        kind: impl Into<String>,
+    ) -> Self {
+        self.source = SourceMetadata::new(id, label, kind);
+        self
+    }
+
     pub fn build(self) -> Window {
         Window {
             id: self.id,
+            source: self.source,
             name: self.name,
             panes: self.panes.into_iter().map(PaneBuilder::build).collect(),
         }
@@ -218,6 +244,7 @@ impl WindowBuilder {
 #[derive(Debug, Clone)]
 pub struct SessionBuilder {
     id: SessionId,
+    source: SourceMetadata,
     name: String,
     windows: Vec<WindowBuilder>,
 }
@@ -228,6 +255,7 @@ impl SessionBuilder {
         Self {
             name: id.clone(),
             id: SessionId::new(id),
+            source: SourceMetadata::local(),
             windows: Vec::new(),
         }
     }
@@ -242,9 +270,20 @@ impl SessionBuilder {
         self
     }
 
+    pub fn source(
+        mut self,
+        id: impl Into<String>,
+        label: impl Into<String>,
+        kind: impl Into<String>,
+    ) -> Self {
+        self.source = SourceMetadata::new(id, label, kind);
+        self
+    }
+
     pub fn build(self) -> Session {
         Session {
             id: self.id,
+            source: self.source,
             name: self.name,
             windows: self.windows.into_iter().map(WindowBuilder::build).collect(),
         }

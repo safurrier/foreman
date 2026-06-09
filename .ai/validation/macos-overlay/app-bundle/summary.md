@@ -6,4 +6,4 @@
 - Bundled Foreman: apps/macos-overlay/dist/Foreman.app/Contents/Resources/foreman
 - Icon: apps/macos-overlay/dist/Foreman.app/Contents/Resources/ForemanIcon.icns
 - Ready file: .ai/validation/macos-overlay/app-bundle/ready.txt
-- Verified: 2026-05-16T03:43:05Z
+- Verified: 2026-06-05T18:36:54Z

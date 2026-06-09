@@ -1,6 +1,6 @@
 # macOS Overlay Headless Snapshots
 
-- Started: 2026-05-16T03:42:44Z
+- Started: 2026-06-05T18:36:36Z
 - Output: .ai/validation/macos-overlay/headless-snapshots
 
 ## Files
@@ -12,6 +12,7 @@
 - long-preview: .ai/validation/macos-overlay/headless-snapshots/long-preview.png
 - many: .ai/validation/macos-overlay/headless-snapshots/many.png
 - mixed-status: .ai/validation/macos-overlay/headless-snapshots/mixed-status.png
+- sources: .ai/validation/macos-overlay/headless-snapshots/sources.png
 - pr-active: .ai/validation/macos-overlay/headless-snapshots/pr-active.png
 - duplicate-workspace: .ai/validation/macos-overlay/headless-snapshots/duplicate-workspace.png
 - compose: .ai/validation/macos-overlay/headless-snapshots/compose.png
@@ -21,4 +22,4 @@
 - theme-indigo: .ai/validation/macos-overlay/headless-snapshots/theme-indigo.png
 - theme-terminal: .ai/validation/macos-overlay/headless-snapshots/theme-terminal.png
 - settings-general: .ai/validation/macos-overlay/headless-snapshots/settings-general.png
-- Finished: 2026-05-16T03:42:50Z
+- Finished: 2026-06-05T18:36:42Z

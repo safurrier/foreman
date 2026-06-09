@@ -6,4 +6,5 @@ pub mod doctor;
 pub mod integrations;
 pub mod runtime;
 pub mod services;
+pub mod sources;
 pub mod ui;

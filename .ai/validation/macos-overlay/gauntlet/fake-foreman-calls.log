@@ -4,7 +4,6 @@ extensions --pane %102 --json
 focus --pane %101 --json
 agents --json --pull-requests
 extensions --pane %101 --json
-focus --pane %101 --json
 agents --json --pull-requests
 extensions --pane %101 --json
 send --pane %101 --stdin --json

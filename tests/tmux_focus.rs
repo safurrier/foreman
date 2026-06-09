@@ -40,7 +40,7 @@ fn popup_focus_effect_requests_close_after_success() {
     assert_eq!(
         effects,
         vec![Effect::FocusPane {
-            pane_id: "%42".into(),
+            pane_key: "%42".into(),
             close_after: true,
         }]
     );

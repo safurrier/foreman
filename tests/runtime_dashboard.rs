@@ -650,7 +650,7 @@ fn interactive_binary_spawn_modal_submits_with_enter() {
     for _ in 0..20 {
         let inventory = adapter.load_inventory(20).expect("inventory should load");
         let session = inventory
-            .session(&"alpha".into())
+            .local_session(&"alpha".into())
             .or_else(|| {
                 inventory
                     .sessions

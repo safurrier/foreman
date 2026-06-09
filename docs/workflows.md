@@ -221,8 +221,22 @@ For local lag triage, `foreman --debug` now emits timing lines for:
 - `render_frame`
 - `inventory_tmux`
 - `inventory_native`
+- `inventory_refresh`
 - `startup_cache_load`
 - `startup_cache_write`
+
+`runtime_profiling` includes a source-mode smoke that compares all-source popup
+startup against a local-only baseline while a fake SSH source is deliberately
+slow. The expected behavior is local rows render first, key handling remains in
+the local runtime path, and remote rows merge later when SSH returns.
+
+`mise run verify-ux` also runs `scripts/smoke-popup-key-latency.sh`. That smoke
+opens isolated popup scenarios for local-only, all-source idle, and all-source
+refresh-overlap navigation bursts. It fails when any `move-selection` action is
+slow, render time exceeds budget, all-source idle is materially slower than
+local-only, or the overlap case fails to defer and later apply the remote merge.
+Use this script directly when iterating on event-loop scheduling, popup source
+refresh, PR/extension lookup cadence, or tmux inventory work.
 
 When `inventory_tmux` looks expensive, check whether the line shows high
 `captures=` counts or whether cached preview reuse has dropped unexpectedly.

@@ -582,7 +582,7 @@ fn sidebar_line(state: &AppState, theme: &Theme, entry: &VisibleTargetEntry) -> 
             ));
             if *visible_windows != 1 || *visible_panes != 1 {
                 spans.push(Span::styled(
-                    format!("  {}w/{}p", visible_windows, visible_panes),
+                    format!("  {visible_windows}w/{visible_panes}p"),
                     if selected {
                         theme.selected
                     } else {
@@ -619,7 +619,7 @@ fn sidebar_line(state: &AppState, theme: &Theme, entry: &VisibleTargetEntry) -> 
             ));
             if *visible_panes != 1 {
                 spans.push(Span::styled(
-                    format!(" {}p", visible_panes),
+                    format!(" {visible_panes}p"),
                     if selected {
                         theme.selected
                     } else {
@@ -640,6 +640,9 @@ fn sidebar_line(state: &AppState, theme: &Theme, entry: &VisibleTargetEntry) -> 
         }
         SidebarRowKind::Pane {
             navigation_title,
+            source_label,
+            source_kind: _,
+            show_source_label,
             status,
             harness,
             is_agent,
@@ -654,6 +657,9 @@ fn sidebar_line(state: &AppState, theme: &Theme, entry: &VisibleTargetEntry) -> 
                 format!("{} ", harness_badge(theme, *harness)),
                 if *is_agent { pane_style } else { theme.muted },
             ));
+            if *show_source_label {
+                spans.push(Span::styled(format!("[{}] ", source_label), theme.emphasis));
+            }
             spans.push(Span::styled(navigation_title.clone(), pane_style));
         }
     }
@@ -730,6 +736,11 @@ fn preview_text(state: &AppState, theme: &Theme, layout_mode: LayoutMode) -> Tex
     let diagnostic_lines = diagnostic_lines(state, theme);
     if !diagnostic_lines.is_empty() {
         sections.push(diagnostic_lines);
+    }
+
+    let source_diagnostic_lines = source_diagnostic_lines(state, theme);
+    if !source_diagnostic_lines.is_empty() {
+        sections.push(source_diagnostic_lines);
     }
 
     let overview_lines = overview_lines(state, theme);
@@ -1470,6 +1481,26 @@ fn activity_event_section_lines(state: &AppState, theme: &Theme) -> Vec<Line<'st
             theme,
         ),
     ]
+}
+
+fn source_diagnostic_lines(state: &AppState, theme: &Theme) -> Vec<Line<'static>> {
+    if state.source_diagnostics.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = vec![detail_section_line("Sources", theme)];
+    for diagnostic in state.source_diagnostics.iter().take(3) {
+        let style = match diagnostic.level.as_str() {
+            "error" => theme.error,
+            "warning" | "warn" => theme.attention,
+            _ => theme.muted,
+        };
+        lines.push(detail_value_line(
+            diagnostic.source_label.clone(),
+            vec![Span::styled(diagnostic.message.clone(), style)],
+            theme,
+        ));
+    }
+    lines
 }
 
 fn diagnostic_lines(state: &AppState, theme: &Theme) -> Vec<Line<'static>> {
@@ -2429,6 +2460,53 @@ mod tests {
         assert!(output.contains("✦ alpha"));
         assert!(output.contains("◎ review"));
         assert!(!output.contains("Pane     "));
+    }
+
+    #[test]
+    fn render_surfaces_source_diagnostics() {
+        let mut state = sample_state();
+        state
+            .source_diagnostics
+            .push(crate::sources::SourceDiagnostic {
+                level: "warning".to_string(),
+                code: "source.ssh.timeout".to_string(),
+                source_id: "coder".to_string(),
+                source_label: "Coder".to_string(),
+                source_kind: "ssh".to_string(),
+                message: "remote source timed out".to_string(),
+                retryable: true,
+                duration_ms: Some(1500),
+                last_success_unix_ms: None,
+            });
+
+        let output = render_to_string(&state);
+
+        assert!(output.contains("Sources"));
+        assert!(output.contains("Coder"));
+        assert!(output.contains("remote source timed out"));
+    }
+
+    #[test]
+    fn render_sidebar_shows_remote_source_badge() {
+        let inventory = inventory([SessionBuilder::new("remote").window(
+            WindowBuilder::new("remote:agents").name("agents").pane(
+                PaneBuilder::agent("%42", HarnessKind::Pi)
+                    .source("coder", "Coder", "ssh")
+                    .title("remote-agent")
+                    .working_dir("/tmp/remote")
+                    .status(AgentStatus::Working),
+            ),
+        )]);
+        let mut state = AppState::with_inventory(inventory);
+        state.selection = Some(SelectionTarget::Pane(crate::app::PaneKey::new(
+            crate::app::SourceId::new("coder"),
+            "%42".into(),
+        )));
+
+        let output = render_to_string(&state);
+
+        assert!(output.contains("[Coder]"));
+        assert!(output.contains("remote"));
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use crate::support::tmux::TmuxFixture;
 use foreman::adapters::tmux::{SystemTmuxBackend, TmuxAdapter};
-use foreman::app::{AppState, SelectionTarget};
+use foreman::app::{AppState, PaneKey, SelectionTarget};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -333,7 +333,10 @@ impl ReleaseHarness {
                 .adapter()
                 .load_inventory(20)
                 .expect("inventory should load");
-            if inventory.pane(&pane_id.into()).is_none() {
+            if inventory
+                .pane(&PaneKey::from(pane_id.to_string()))
+                .is_none()
+            {
                 return;
             }
             thread::sleep(Duration::from_millis(50));

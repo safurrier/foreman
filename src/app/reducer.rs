@@ -1,7 +1,8 @@
 use crate::app::action::{Action, DraftEdit, SelectionDirection};
 use crate::app::state::{
     AppState, FlashNavigateKind, Focus, ModalState, Mode, OperatorAlert, OperatorAlertLevel,
-    OperatorAlertSource, PaneId, SearchState, SelectionTarget, SessionId, WindowId,
+    OperatorAlertSource, PaneId, PaneKey, SearchState, SelectionTarget, SessionId, SessionKey,
+    WindowId,
 };
 use crate::app::NotificationKind;
 use crate::integrations::stabilize_inventory;
@@ -14,11 +15,11 @@ use crate::services::pull_requests::PullRequestLookup;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
     FocusPane {
-        pane_id: PaneId,
+        pane_key: PaneKey,
         close_after: bool,
     },
     SendInput {
-        pane_id: PaneId,
+        pane_key: PaneKey,
         text: String,
     },
     RenameWindow {
@@ -66,7 +67,7 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             }
         }
         Action::BeginInput => {
-            if state.selected_actionable_pane_id().is_some() {
+            if state.selected_actionable_pane_key().is_some() {
                 state.mode = Mode::Input;
                 state.focus = Focus::Input;
             }
@@ -122,6 +123,9 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
         Action::SetRuntimeDiagnostics(diagnostics) => {
             state.runtime_diagnostics = diagnostics;
         }
+        Action::SetSourceDiagnostics(diagnostics) => {
+            state.source_diagnostics = diagnostics;
+        }
         Action::SetSystemStats(snapshot) => {
             state.system_stats = snapshot;
         }
@@ -141,8 +145,8 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             state.operator_alert = alert;
         }
         Action::RestoreFailedInput { pane_id, text } => {
-            if state.inventory.pane(&pane_id).is_some() {
-                state.selection = Some(SelectionTarget::Pane(pane_id));
+            if state.inventory.local_pane(&pane_id).is_some() {
+                state.selection = Some(SelectionTarget::Pane(PaneKey::local(pane_id)));
             }
             state.mode = Mode::Input;
             state.focus = Focus::Input;
@@ -151,7 +155,7 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             reconcile_pull_request_detail(state);
         }
         Action::RestoreFailedRename { window_id, name } => {
-            if state.inventory.window(&window_id).is_some() {
+            if state.inventory.local_window(&window_id).is_some() {
                 state.mode = Mode::Rename;
                 state.modal = Some(ModalState::rename_window(window_id, name));
             }
@@ -160,7 +164,7 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             session_id,
             command,
         } => {
-            if state.inventory.contains_session(&session_id) {
+            if state.inventory.local_session(&session_id).is_some() {
                 state.mode = Mode::Spawn;
                 state.modal = Some(ModalState::spawn_window_with_command(session_id, command));
             }
@@ -384,9 +388,9 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             return notification_effects_for_refresh(state, &previous_inventory);
         }
         Action::FocusSelectedPane => {
-            if let Some(pane_id) = state.selected_actionable_pane_id() {
+            if let Some(pane_key) = state.selected_actionable_pane_key() {
                 return vec![Effect::FocusPane {
-                    pane_id,
+                    pane_key,
                     close_after: state.popup_mode,
                 }];
             }
@@ -409,22 +413,22 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             state.rebuild_visible_state();
 
             match selected {
-                Some(SelectionTarget::Session(session_id)) => {
-                    state.collapsed_sessions.remove(&session_id);
+                Some(SelectionTarget::Session(session_key)) => {
+                    state.collapsed_sessions.remove(&session_key);
                     state.rebuild_visible_state();
                     reconcile_visible_selection(state);
                     reconcile_pull_request_detail(state);
                 }
-                Some(SelectionTarget::Pane(pane_id)) => {
+                Some(SelectionTarget::Pane(pane_key)) => {
                     return vec![Effect::FocusPane {
-                        pane_id,
+                        pane_key,
                         close_after: state.popup_mode,
                     }];
                 }
                 Some(SelectionTarget::Window(_)) => {
-                    if let Some(pane_id) = state.selected_actionable_pane_id() {
+                    if let Some(pane_key) = state.selected_actionable_pane_key() {
                         return vec![Effect::FocusPane {
-                            pane_id,
+                            pane_key,
                             close_after: state.popup_mode,
                         }];
                     }
@@ -436,21 +440,21 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             window_id,
             current_name,
         } => {
-            if state.inventory.window(&window_id).is_some() {
+            if state.inventory.local_window(&window_id).is_some() {
                 state.mode = Mode::Rename;
                 state.focus = Focus::Input;
                 state.modal = Some(ModalState::rename_window(window_id, current_name));
             }
         }
         Action::OpenSpawnModal { session_id } => {
-            if state.inventory.contains_session(&session_id) {
+            if state.inventory.local_session(&session_id).is_some() {
                 state.mode = Mode::Spawn;
                 state.focus = Focus::Input;
                 state.modal = Some(ModalState::spawn_window(session_id));
             }
         }
         Action::OpenKillConfirmation { pane_id } => {
-            if state.inventory.pane(&pane_id).is_some() {
+            if state.inventory.local_pane(&pane_id).is_some() {
                 state.mode = Mode::ConfirmKill;
                 state.modal = Some(ModalState::confirm_kill(pane_id));
             }
@@ -477,14 +481,14 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
         }
         Action::SubmitActiveDraft => match state.mode {
             Mode::Input => {
-                if let Some(pane_id) = state.selected_actionable_pane_id() {
+                if let Some(pane_key) = state.selected_actionable_pane_key() {
                     if state.input_draft.is_blank() {
                         return Vec::new();
                     }
 
                     let text = state.input_draft.take();
                     state.mode = Mode::Normal;
-                    return vec![Effect::SendInput { pane_id, text }];
+                    return vec![Effect::SendInput { pane_key, text }];
                 }
             }
             Mode::Rename => {
@@ -551,12 +555,13 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             reconcile_pull_request_detail(state);
         }
         Action::ToggleSessionCollapsed(session_id) => {
-            if !state.inventory.contains_session(&session_id) {
+            let session_key = SessionKey::local(session_id);
+            if !state.inventory.contains_session(&session_key) {
                 return Vec::new();
             }
 
-            if !state.collapsed_sessions.insert(session_id.clone()) {
-                state.collapsed_sessions.remove(&session_id);
+            if !state.collapsed_sessions.insert(session_key.clone()) {
+                state.collapsed_sessions.remove(&session_key);
             }
 
             state.rebuild_visible_state();
@@ -642,9 +647,9 @@ fn finish_flash_selection(state: &mut AppState, target: SelectionTarget) -> Vec<
     state.selection = Some(target.clone());
 
     if kind == FlashNavigateKind::JumpAndFocus {
-        if let Some(pane_id) = state.selected_actionable_pane_id() {
+        if let Some(pane_key) = state.selected_actionable_pane_key() {
             return vec![Effect::FocusPane {
-                pane_id,
+                pane_key,
                 close_after: state.popup_mode,
             }];
         }
@@ -709,7 +714,7 @@ fn reconcile_flash_selection(state: &mut AppState) {
 }
 
 fn reconcile_interaction_state(state: &mut AppState) {
-    if state.mode == Mode::Input && state.selected_actionable_pane_id().is_none() {
+    if state.mode == Mode::Input && state.selected_actionable_pane_key().is_none() {
         state.mode = Mode::Normal;
         state.focus = Focus::Sidebar;
         state.input_draft.clear();
@@ -725,12 +730,12 @@ fn reconcile_interaction_state(state: &mut AppState) {
 
     let modal_is_valid = match state.modal.as_ref() {
         Some(ModalState::RenameWindow { window_id, .. }) => {
-            state.inventory.window(window_id).is_some()
+            state.inventory.local_window(window_id).is_some()
         }
         Some(ModalState::SpawnWindow { session_id, .. }) => {
-            state.inventory.contains_session(session_id)
+            state.inventory.local_session(session_id).is_some()
         }
-        Some(ModalState::ConfirmKill { pane_id }) => state.inventory.pane(pane_id).is_some(),
+        Some(ModalState::ConfirmKill { pane_id }) => state.inventory.local_pane(pane_id).is_some(),
         None => true,
     };
 
@@ -809,19 +814,19 @@ fn notification_effects_for_refresh(
     state
         .notifications
         .cooldowns
-        .retain(|key, _| state.inventory.pane(&key.pane_id).is_some());
-    let selected_pane_id = state.selected_actionable_pane_id();
+        .retain(|key, _| state.inventory.pane(&key.pane_key).is_some());
+    let selected_pane_key = state.selected_actionable_pane_key();
     let notification_selected_pane_id = if state.popup_mode {
         None
     } else {
-        selected_pane_id.as_ref()
+        selected_pane_key.as_ref()
     };
 
     let decisions = evaluate_inventory_notifications(
         previous_inventory,
         &state.inventory,
         NotificationPolicyContext {
-            selected_pane_id: notification_selected_pane_id,
+            selected_pane_key: notification_selected_pane_id,
             muted: state.notifications.muted,
             profile: state.notifications.profile,
             refresh_tick: state.notifications.refresh_tick,
@@ -836,7 +841,7 @@ fn notification_effects_for_refresh(
         if let Some(request) = decision.request.clone() {
             state.notifications.cooldowns.insert(
                 crate::app::NotificationCooldownKey {
-                    pane_id: request.pane_id.clone(),
+                    pane_key: request.pane_key.clone(),
                     kind: request.kind,
                 },
                 state.notifications.refresh_tick,
@@ -1224,7 +1229,7 @@ mod tests {
         assert_eq!(
             effects,
             vec![super::Effect::FocusPane {
-                pane_id: "alpha:claude".into(),
+                pane_key: "alpha:claude".into(),
                 close_after: true,
             }]
         );
@@ -1255,7 +1260,7 @@ mod tests {
 
         let pane = state
             .inventory
-            .pane(&"alpha:claude".into())
+            .pane(&crate::app::PaneKey::from("alpha:claude"))
             .expect("pane should exist")
             .agent
             .as_ref()
@@ -1284,7 +1289,7 @@ mod tests {
         assert_eq!(
             effects,
             vec![super::Effect::SendInput {
-                pane_id: "alpha:claude".into(),
+                pane_key: "alpha:claude".into(),
                 text: "hi\n\u{00E9}".to_string(),
             }]
         );
@@ -1592,7 +1597,7 @@ mod tests {
         assert_eq!(
             effects,
             vec![super::Effect::FocusPane {
-                pane_id: "beta:codex".into(),
+                pane_key: "beta:codex".into(),
                 close_after: false,
             }]
         );
@@ -1671,7 +1676,7 @@ mod tests {
         assert_eq!(
             effects,
             vec![super::Effect::FocusPane {
-                pane_id: "alpha:claude".into(),
+                pane_key: "alpha:claude".into(),
                 close_after: false,
             }]
         );
@@ -1701,7 +1706,7 @@ mod tests {
         assert_eq!(
             effects,
             vec![super::Effect::FocusPane {
-                pane_id: "beta:codex".into(),
+                pane_key: "beta:codex".into(),
                 close_after: false,
             }]
         );
@@ -2041,7 +2046,7 @@ mod tests {
             .notifications
             .cooldowns
             .contains_key(&crate::app::NotificationCooldownKey {
-                pane_id: "alpha:claude".into(),
+                pane_key: crate::app::PaneKey::from("alpha:claude"),
                 kind: crate::app::NotificationKind::Completion,
             }));
     }
@@ -2125,7 +2130,7 @@ mod tests {
         for pane_id in ["alpha:claude", "alpha:codex"] {
             assert!(state.notifications.cooldowns.contains_key(
                 &crate::app::NotificationCooldownKey {
-                    pane_id: pane_id.into(),
+                    pane_key: crate::app::PaneKey::from(pane_id),
                     kind: crate::app::NotificationKind::Completion,
                 }
             ));

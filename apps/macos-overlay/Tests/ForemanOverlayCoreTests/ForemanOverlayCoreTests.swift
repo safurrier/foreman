@@ -96,6 +96,54 @@ final class ForemanOverlayCoreTests: XCTestCase {
         XCTAssertEqual(response.entries.first?.paneId, "%101")
     }
 
+    func testDecodesSourceAwareFieldsAndDiagnostics() throws {
+        let response = try JSONDecoder().decode(AgentsResponse.self, from: Data(Self.sourceAwareFixture.utf8))
+
+        XCTAssertEqual(response.schemaVersion, 2)
+        XCTAssertEqual(response.entries.count, 2)
+        XCTAssertEqual(response.entries[0].sourcePaneId, "source:local:pane:%42")
+        XCTAssertEqual(response.entries[0].id, "source:local:pane:%42")
+        XCTAssertEqual(response.entries[1].sourceId, "coder-dev-gpu-1")
+        XCTAssertEqual(response.entries[1].sourceLabel, "Coder dev-gpu-1")
+        XCTAssertEqual(response.entries[1].sourceDisplayLabel, "Coder")
+        XCTAssertEqual(response.entries[1].sourceShowLabel, true)
+        XCTAssertEqual(response.entries[1].sourceKind, "ssh")
+        XCTAssertEqual(response.entries[1].paneId, "%42")
+        XCTAssertEqual(response.sourceDiagnostics.first?.code, "source.ssh.timeout")
+        XCTAssertEqual(response.sourceDiagnostics.first?.sourceId, "coder-dev-gpu-1")
+        XCTAssertEqual(response.sourceDiagnostics.first?.retryable, true)
+        XCTAssertEqual(response.allDiagnostics.count, 1)
+    }
+
+    func testLegacyFixtureDefaultsToLocalSourcePaneIdentity() throws {
+        let response = try loadFixture()
+
+        XCTAssertEqual(response.entries.first?.sourceId, "local")
+        XCTAssertEqual(response.entries.first?.sourceLabel, "Local")
+        XCTAssertEqual(response.entries.first?.sourceDisplayLabel, "Local")
+        XCTAssertEqual(response.entries.first?.sourceShowLabel, false)
+        XCTAssertEqual(response.entries.first?.sourceKind, "local")
+        XCTAssertEqual(response.entries.first?.sourcePaneId, "source:local:pane:%101")
+        XCTAssertEqual(response.entries.first?.id, "source:local:pane:%101")
+    }
+
+    func testExtensionCardMergeUsesSourcePaneIdentity() throws {
+        let response = try JSONDecoder().decode(AgentsResponse.self, from: Data(Self.sourceAwareFixture.utf8))
+        let card = ControlExtensionCard(id: "remote-card", title: "Remote", status: "ready", statusLabel: "READY", summary: "Remote ready", rows: [], actions: [])
+
+        let merged = response.mergingExtensionCards([card], forSourcePaneId: "source:coder-dev-gpu-1:pane:%42")
+
+        XCTAssertEqual(merged.entries[0].extensionCards.count, 0)
+        XCTAssertEqual(merged.entries[1].extensionCards.first?.id, "remote-card")
+    }
+
+    func testSourceFixtureLoadsForSnapshotParity() throws {
+        let response = try loadFixture(named: "agents-sources")
+
+        XCTAssertEqual(response.entries.map(\.sourcePaneId), ["source:local:pane:%42", "source:coder-dev-gpu-1:pane:%42"])
+        XCTAssertEqual(response.sourceDiagnostics.first?.sourceLabel, "Coder dev-gpu-1")
+    }
+
     func testTerminalActivationPreferenceParsing() {
         XCTAssertEqual(OverlayTerminalActivationPreference(raw: "auto"), .auto)
         XCTAssertEqual(OverlayTerminalActivationPreference(raw: "none"), .none)
@@ -567,6 +615,43 @@ final class ForemanOverlayCoreTests: XCTestCase {
         _ = try await client.agents()
     }
 
+    func testForemanClientPassesSourceForRemoteActions() async throws {
+        let response = try JSONDecoder().decode(AgentsResponse.self, from: Data(Self.sourceAwareFixture.utf8))
+        let remoteEntry = try XCTUnwrap(response.entries.first { $0.sourceId == "coder-dev-gpu-1" })
+        let extensionResult = ProcessResult(stdout: extensionCardsJSON(paneId: "%42", sourceId: "coder-dev-gpu-1", sourcePaneId: remoteEntry.sourcePaneId, cardId: "remote"), stderr: "", status: 0)
+        let extensionRunner = FakeRunner(
+            result: extensionResult,
+            expectedArguments: ["extensions", "--source", "coder-dev-gpu-1", "--pane", "%42", "--json"]
+        )
+        let extensionClient = ForemanClient(foremanPath: "/fake/foreman", runner: extensionRunner)
+
+        _ = try await extensionClient.extensionCards(for: remoteEntry)
+
+        let focusRunner = FakeRunner(
+            result: ProcessResult(stdout: "{}", stderr: "", status: 0),
+            expectedArguments: ["focus", "--source", "coder-dev-gpu-1", "--pane", "%42", "--json"]
+        )
+        try await ForemanClient(foremanPath: "/fake/foreman", runner: focusRunner).focus(remoteEntry)
+
+        let sendRunner = FakeRunner(
+            result: ProcessResult(stdout: "{}", stderr: "", status: 0),
+            expectedStdin: "hello",
+            expectedArguments: ["send", "--source", "coder-dev-gpu-1", "--pane", "%42", "--stdin", "--json"]
+        )
+        try await ForemanClient(foremanPath: "/fake/foreman", runner: sendRunner).send(remoteEntry, text: "hello")
+    }
+
+    func testForemanClientOmitsSourceForLegacyLocalActions() async throws {
+        let response = try loadFixture()
+        let localEntry = try XCTUnwrap(response.entries.first)
+        let focusRunner = FakeRunner(
+            result: ProcessResult(stdout: "{}", stderr: "", status: 0),
+            expectedArguments: ["focus", "--pane", "%101", "--json"]
+        )
+
+        try await ForemanClient(foremanPath: "/fake/foreman", runner: focusRunner).focus(localEntry)
+    }
+
     func testForemanClientKeepsPullRequestsWhenExtensionLookupTimesOut() async throws {
         let fixture = try fixtureData()
         let sequence = SequencedProcessResults([
@@ -679,6 +764,31 @@ final class ForemanOverlayCoreTests: XCTestCase {
         XCTAssertEqual(result.stdout.count, 300000)
     }
 
+    private static let sourceAwareFixture = #"""
+    {
+      "schemaVersion": 2,
+      "inventory": {"totalSessions": 2, "totalWindows": 2, "totalPanes": 2, "visibleSessions": 2, "visibleWindows": 2, "visiblePanes": 2},
+      "diagnostics": [],
+      "sourceDiagnostics": [
+        {
+          "level": "warning",
+          "code": "source.ssh.timeout",
+          "sourceId": "coder-dev-gpu-1",
+          "sourceLabel": "Coder dev-gpu-1",
+          "sourceKind": "ssh",
+          "message": "Coder dev-gpu-1 unreachable: ssh timed out after 2500ms",
+          "retryable": true,
+          "durationMs": 2500,
+          "lastSuccessUnixMs": 1780000000000
+        }
+      ],
+      "entries": [
+        {"id":"source:local:pane:%42","sourcePaneId":"source:local:pane:%42","sourceId":"local","sourceLabel":"Local Mac","sourceDisplayLabel":"Local Mac","sourceShowLabel":false,"sourceKind":"local","paneId":"%42","sessionName":"local","windowName":"foreman","title":"local","navigationTitle":"foreman","harness":"pi","harnessLabel":"Pi","status":"working","statusLabel":"WORKING","statusSource":"native hook","integrationMode":"native","isAgent":true,"currentCommand":"pi","runtimeCommand":"pi","workingDir":"/workspace/foreman","workspaceName":"foreman","preview":"local","previewProvenance":"captured","activityScore":300,"statusRank":2,"lastActivityUnixMs":300,"lastStatusChangeUnixMs":100,"activeRunCount":1,"pullRequest":null,"extensionCards":[]},
+        {"id":"source:coder-dev-gpu-1:pane:%42","sourcePaneId":"source:coder-dev-gpu-1:pane:%42","sourceId":"coder-dev-gpu-1","sourceLabel":"Coder dev-gpu-1","sourceDisplayLabel":"Coder","sourceShowLabel":true,"sourceKind":"ssh","paneId":"%42","sessionName":"dots","windowName":"discord","title":"remote","navigationTitle":"discord","harness":"codex-cli","harnessLabel":"Codex CLI","status":"idle","statusLabel":"IDLE","statusSource":"compatibility heuristic","integrationMode":"compatibility","isAgent":true,"currentCommand":"codex","runtimeCommand":"codex","workingDir":"/home/discord/discord","workspaceName":"discord","preview":"remote","previewProvenance":"captured","activityScore":200,"statusRank":3,"lastActivityUnixMs":200,"lastStatusChangeUnixMs":100,"activeRunCount":null,"pullRequest":null,"extensionCards":[]}
+      ]
+    }
+    """#
+
     @MainActor
     private func testPreferences() -> OverlayPreferences {
         let suite = "foreman-overlay-tests-\(UUID().uuidString)"
@@ -715,13 +825,16 @@ final class ForemanOverlayCoreTests: XCTestCase {
         return fixture.replacingOccurrences(of: "      \"activityScore\": 300", with: pullRequest + "      \"activityScore\": 300")
     }
 
-    private func extensionCardsJSON(paneId: String, cardId: String) -> String {
-        """
+    private func extensionCardsJSON(paneId: String, sourceId: String = AgentEntry.defaultSourceId, sourcePaneId: String? = nil, cardId: String) -> String {
+        let resolvedSourcePaneId = sourcePaneId ?? AgentEntry.defaultSourcePaneId(sourceId: sourceId, paneId: paneId)
+        return """
         {
           "schemaVersion": 1,
           "ok": true,
           "action": "extensions",
           "paneId": "\(paneId)",
+          "sourceId": "\(sourceId)",
+          "sourcePaneId": "\(resolvedSourcePaneId)",
           "workspace": "/workspace/foreman",
           "linkedRepository": null,
           "targetPath": "/workspace/foreman",

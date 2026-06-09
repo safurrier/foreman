@@ -189,6 +189,9 @@ if not capture_only:
 log_step("Running navigation/performance smoke")
 run(["cargo", "test", "--test", "runtime_profiling", "--", "--ignored"])
 
+log_step("Running popup key-latency smoke")
+run([str(PROJECT_ROOT / "scripts" / "smoke-popup-key-latency.sh")])
+
 if shutil.which("vhs") is None:
     if require_capture:
         log_error("VHS capture is required but `vhs` is not installed")

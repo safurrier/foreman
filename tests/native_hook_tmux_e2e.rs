@@ -1,7 +1,7 @@
 mod support;
 
 use clap::Parser;
-use foreman::app::{AgentStatus, HarnessKind, IntegrationMode, Pane, PaneId};
+use foreman::app::{AgentStatus, HarnessKind, IntegrationMode, Pane, PaneId, PaneKey};
 use foreman::cli::{run, Cli, RunOutcome};
 use support::tmux::TmuxFixture;
 use tempfile::tempdir;
@@ -191,7 +191,7 @@ fn bootstrap_with_native_dirs(
 
 fn pane_by_id<'a>(inventory: &'a foreman::app::Inventory, pane_id: &str) -> &'a Pane {
     inventory
-        .pane(&PaneId::new(pane_id))
+        .pane(&PaneKey::local(PaneId::new(pane_id)))
         .expect("pane should exist in inventory")
 }
 

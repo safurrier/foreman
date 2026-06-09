@@ -107,11 +107,13 @@ pub fn stabilize_inventory(previous: &Inventory, next: &mut Inventory) {
     for session in &mut next.sessions {
         for window in &mut session.windows {
             for pane in &mut window.panes {
+                let pane_key = pane.key();
                 let Some(current) = pane.agent.as_mut() else {
                     continue;
                 };
-                let Some(previous_agent) =
-                    previous.pane(&pane.id).and_then(|pane| pane.agent.as_ref())
+                let Some(previous_agent) = previous
+                    .pane(&pane_key)
+                    .and_then(|pane| pane.agent.as_ref())
                 else {
                     continue;
                 };
@@ -717,7 +719,7 @@ mod tests {
         stabilize_inventory(&previous, &mut next);
 
         let pane = next
-            .pane(&"alpha:claude".into())
+            .pane(&crate::app::PaneKey::from("alpha:claude"))
             .expect("pane should exist")
             .agent
             .as_ref()
@@ -747,7 +749,7 @@ mod tests {
         stabilize_inventory(&previous, &mut next);
 
         let pane = next
-            .pane(&"alpha:claude".into())
+            .pane(&crate::app::PaneKey::from("alpha:claude"))
             .expect("pane should exist")
             .agent
             .as_ref()
@@ -776,7 +778,7 @@ mod tests {
         stabilize_inventory(&previous, &mut next);
 
         let pane = next
-            .pane(&"alpha:claude".into())
+            .pane(&crate::app::PaneKey::from("alpha:claude"))
             .expect("pane should exist")
             .agent
             .as_ref()
@@ -807,7 +809,7 @@ mod tests {
         stabilize_inventory(&previous, &mut next);
 
         let pane = next
-            .pane(&"alpha:claude".into())
+            .pane(&crate::app::PaneKey::from("alpha:claude"))
             .expect("pane should exist")
             .agent
             .as_ref()

@@ -5,11 +5,11 @@
 - Fake Foreman stdin: .ai/validation/macos-overlay/gauntlet/fake-foreman-stdin.log
 - Overlay log: .ai/validation/macos-overlay/gauntlet/overlay.log
 - agents calls: 5
-- focus calls: 2
+- focus calls: 1
 - send stdin: passed
 - flash jump via Cmd+J + label: passed
 - help via ?: passed
 - help scroll via j: passed
 - arrow-key navigation: passed
 - missing terminal activation skip: passed
-- Verified: 2026-05-16T03:42:29Z
+- Verified: 2026-06-05T18:36:27Z

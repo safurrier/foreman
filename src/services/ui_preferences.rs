@@ -1,4 +1,4 @@
-use crate::app::{AppState, Filters, HarnessKind, SelectionTarget, SessionId, SortMode};
+use crate::app::{AppState, Filters, HarnessKind, SelectionTarget, SessionKey, SortMode};
 use crate::ui::theme::ThemeName;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -13,7 +13,7 @@ pub struct PersistedUiPreferences {
     pub sort_mode: Option<SortMode>,
     pub theme: Option<ThemeName>,
     pub filters: Option<PersistedFilters>,
-    pub collapsed_sessions: Vec<SessionId>,
+    pub collapsed_sessions: Vec<SessionKey>,
     pub selection: Option<SelectionTarget>,
 }
 
@@ -72,7 +72,7 @@ impl PersistedUiPreferences {
         state.collapsed_sessions = self
             .collapsed_sessions
             .iter()
-            .filter(|session_id| state.inventory.contains_session(session_id))
+            .filter(|session_id| state.inventory.contains_session(*session_id))
             .cloned()
             .collect::<BTreeSet<_>>();
         if let Some(selection) = &self.selection {

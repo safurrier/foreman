@@ -41,7 +41,7 @@ fn flash_jump_and_focus_uses_live_tmux_target() {
     assert_eq!(
         effects,
         vec![Effect::FocusPane {
-            pane_id: helper.clone().into(),
+            pane_key: helper.clone().into(),
             close_after: false,
         }]
     );

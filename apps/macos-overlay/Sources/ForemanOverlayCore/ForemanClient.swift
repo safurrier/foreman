@@ -55,26 +55,59 @@ public struct ForemanClient: Sendable {
         return try JSONDecoder().decode(AgentsResponse.self, from: Data(result.stdout.utf8))
     }
 
-    public func extensionCards(forPane paneId: String) async throws -> ExtensionCardsResponse {
-        let result = try await runner.run(foremanPath, ["extensions", "--pane", paneId, "--json"], stdin: nil)
+    public func extensionCards(for entry: AgentEntry) async throws -> ExtensionCardsResponse {
+        var arguments = ["extensions"]
+        appendSourceArgument(entry.sourceId, to: &arguments)
+        arguments.append(contentsOf: ["--pane", entry.paneId, "--json"])
+        let result = try await runner.run(foremanPath, arguments, stdin: nil)
         guard result.status == 0 else {
             throw OverlayError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
         }
         return try JSONDecoder().decode(ExtensionCardsResponse.self, from: Data(result.stdout.utf8))
     }
 
-    public func focus(paneId: String) async throws {
-        let result = try await runner.run(foremanPath, ["focus", "--pane", paneId, "--json"], stdin: nil)
+    public func extensionCards(forPane paneId: String, sourceId: String = AgentEntry.defaultSourceId) async throws -> ExtensionCardsResponse {
+        var arguments = ["extensions"]
+        appendSourceArgument(sourceId, to: &arguments)
+        arguments.append(contentsOf: ["--pane", paneId, "--json"])
+        let result = try await runner.run(foremanPath, arguments, stdin: nil)
+        guard result.status == 0 else {
+            throw OverlayError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
+        }
+        return try JSONDecoder().decode(ExtensionCardsResponse.self, from: Data(result.stdout.utf8))
+    }
+
+    public func focus(_ entry: AgentEntry) async throws {
+        try await focus(paneId: entry.paneId, sourceId: entry.sourceId)
+    }
+
+    public func focus(paneId: String, sourceId: String = AgentEntry.defaultSourceId) async throws {
+        var arguments = ["focus"]
+        appendSourceArgument(sourceId, to: &arguments)
+        arguments.append(contentsOf: ["--pane", paneId, "--json"])
+        let result = try await runner.run(foremanPath, arguments, stdin: nil)
         guard result.status == 0 else {
             throw OverlayError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
         }
     }
 
-    public func send(paneId: String, text: String) async throws {
-        let result = try await runner.run(foremanPath, ["send", "--pane", paneId, "--stdin", "--json"], stdin: text)
+    public func send(_ entry: AgentEntry, text: String) async throws {
+        try await send(paneId: entry.paneId, sourceId: entry.sourceId, text: text)
+    }
+
+    public func send(paneId: String, sourceId: String = AgentEntry.defaultSourceId, text: String) async throws {
+        var arguments = ["send"]
+        appendSourceArgument(sourceId, to: &arguments)
+        arguments.append(contentsOf: ["--pane", paneId, "--stdin", "--json"])
+        let result = try await runner.run(foremanPath, arguments, stdin: text)
         guard result.status == 0 else {
             throw OverlayError.commandFailed(result.stderr.isEmpty ? result.stdout : result.stderr)
         }
+    }
+
+    private func appendSourceArgument(_ sourceId: String, to arguments: inout [String]) {
+        guard sourceId != AgentEntry.defaultSourceId else { return }
+        arguments.append(contentsOf: ["--source", sourceId])
     }
 }
 

@@ -80,6 +80,8 @@ public final class OverlayStore: ObservableObject {
                     entry.windowName,
                     entry.harnessLabel ?? "",
                     entry.status,
+                    entry.sourceLabel,
+                    entry.sourceId,
                     entry.workingDir ?? "",
                     entry.preview,
                 ].joined(separator: " ").lowercased().contains(trimmed)
@@ -121,11 +123,11 @@ public final class OverlayStore: ObservableObject {
 
     public var selectedEntryIsLoadingExtensions: Bool {
         guard let selectedEntry else { return false }
-        return isLoadingExtensions && extensionLoadingPaneId == selectedEntry.paneId
+        return isLoadingExtensions && extensionLoadingPaneId == selectedEntry.sourcePaneId
     }
 
     public var selectedEntryExtensionError: String? {
-        guard let selectedEntry, extensionErrorPaneId == selectedEntry.paneId else { return nil }
+        guard let selectedEntry, extensionErrorPaneId == selectedEntry.sourcePaneId else { return nil }
         return extensionErrorMessage
     }
 
@@ -231,24 +233,26 @@ public final class OverlayStore: ObservableObject {
         extensionErrorMessage = nil
         extensionErrorPaneId = nil
         guard entry.extensionCards.isEmpty else { return }
-        guard !extensionLoadedPaneIds.contains(entry.paneId) else { return }
+        guard !extensionLoadedPaneIds.contains(entry.sourcePaneId) else { return }
         extensionLookupGeneration += 1
         let lookupGeneration = extensionLookupGeneration
         let reloadGeneration = reloadGeneration
         let paneId = entry.paneId
+        let sourcePaneId = entry.sourcePaneId
+        let sourceId = entry.sourceId
         extensionLookupTask?.cancel()
         isLoadingExtensions = true
-        extensionLoadingPaneId = paneId
+        extensionLoadingPaneId = sourcePaneId
         extensionErrorMessage = nil
         let loadClient = client
         extensionLookupTask = Task { [weak self] in
             do {
                 try await Task.sleep(for: .milliseconds(120))
-                let loaded = try await loadClient.extensionCards(forPane: paneId)
+                let loaded = try await loadClient.extensionCards(forPane: paneId, sourceId: sourceId)
                 guard let self, !Task.isCancelled, reloadGeneration == self.reloadGeneration, lookupGeneration == self.extensionLookupGeneration else { return }
-                guard self.selectedEntry?.paneId == paneId else { return }
-                response = response?.mergingExtensionCards(loaded.extensionCards, forPaneId: paneId)
-                extensionLoadedPaneIds.insert(paneId)
+                guard self.selectedEntry?.sourcePaneId == sourcePaneId else { return }
+                response = response?.mergingExtensionCards(loaded.extensionCards, forSourcePaneId: sourcePaneId)
+                extensionLoadedPaneIds.insert(sourcePaneId)
                 isLoadingExtensions = false
                 extensionLoadingPaneId = nil
             } catch is CancellationError {
@@ -258,8 +262,8 @@ public final class OverlayStore: ObservableObject {
             } catch {
                 guard let self, !Task.isCancelled, reloadGeneration == self.reloadGeneration, lookupGeneration == self.extensionLookupGeneration else { return }
                 extensionErrorMessage = error.localizedDescription
-                extensionErrorPaneId = paneId
-                NSLog("Foreman overlay extension lookup failed for \(paneId): \(error.localizedDescription)")
+                extensionErrorPaneId = sourcePaneId
+                NSLog("Foreman overlay extension lookup failed for \(sourcePaneId): \(error.localizedDescription)")
                 isLoadingExtensions = false
                 extensionLoadingPaneId = nil
             }
@@ -504,7 +508,7 @@ public final class OverlayStore: ObservableObject {
         guard let selectedEntry else { return }
         Task {
             do {
-                try await client.focus(paneId: selectedEntry.paneId)
+                try await client.focus(selectedEntry)
                 appRouter?.overlayDidFocusPane()
             } catch {
                 errorMessage = error.localizedDescription
@@ -530,7 +534,7 @@ public final class OverlayStore: ObservableObject {
         let text = composeText
         Task {
             do {
-                try await client.send(paneId: selectedEntry.paneId, text: text)
+                try await client.send(selectedEntry, text: text)
                 composeText = ""
                 isComposing = false
                 activeRegion = .list

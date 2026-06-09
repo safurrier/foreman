@@ -10,12 +10,13 @@ ATTENTION
 WORKING
 IDLE
 foreman
-foreman / foreman
-/ %101
-Harness
+Local / foreman / foreman / %101
 Source
+Harness
+Status src
 Command
 Workspace
+Local
 Pi
 native hook
 pi
@@ -25,9 +26,9 @@ Pull Request #123
 OPEN
 Polish native Foreman overlay controls
 foreman • spec/macos-overlay → main • @example-user
-Extension cards loading...
-Recent Output
 Open PR
+Extension cards loading..
+Recent Output
 Need input: choose whether the Swift overlay
 validation lane should capture full-screen screenshots
 first or window-scoped captures.
@@ -40,5 +41,5 @@ Refresh
 Compose
 Settings
 List • type search • / move • Enter focus • Cmd+J jump • ?
-help • Cmdt, settings • Cmd+T theme
 Theme: System
+help • Cmdt, settings • Cmd+T theme

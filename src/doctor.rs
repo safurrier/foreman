@@ -268,7 +268,7 @@ impl DoctorReport {
                 ));
                 if let Some(preview) = &fix.preview {
                     for line in preview.lines() {
-                        output.push_str(&format!("          {}\n", line));
+                        output.push_str(&format!("          {line}\n"));
                     }
                 }
             }
@@ -293,7 +293,7 @@ impl DoctorReport {
                     finding.summary
                 ));
                 if let Some(next_step) = &finding.next_step {
-                    output.push_str(&format!("          next: {}\n", next_step));
+                    output.push_str(&format!("          next: {next_step}\n"));
                 }
             }
         }
@@ -343,13 +343,13 @@ impl DoctorReport {
                     finding.summary
                 ));
                 if let Some(detail) = &finding.detail {
-                    output.push_str(&format!("          {}\n", detail));
+                    output.push_str(&format!("          {detail}\n"));
                 }
                 for evidence in &finding.evidence {
-                    output.push_str(&format!("          {}\n", evidence));
+                    output.push_str(&format!("          {evidence}\n"));
                 }
                 if let Some(next_step) = &finding.next_step {
-                    output.push_str(&format!("          next: {}\n", next_step));
+                    output.push_str(&format!("          next: {next_step}\n"));
                 }
             }
             output.push('\n');
@@ -366,7 +366,7 @@ impl DoctorReport {
                 ));
                 if let Some(preview) = &fix.preview {
                     for line in preview.lines() {
-                        output.push_str(&format!("          {}\n", line));
+                        output.push_str(&format!("          {line}\n"));
                     }
                 }
             }
@@ -1130,7 +1130,7 @@ fn live_runtime_context(runtime: &RuntimeConfig) -> Result<Option<LiveRuntimeSna
         return Ok(None);
     }
 
-    let tmux = TmuxAdapter::new(SystemTmuxBackend::new(runtime.tmux_socket.clone()));
+    let tmux = TmuxAdapter::new(SystemTmuxBackend::with_target(runtime.tmux_target()));
     let mut inventory = tmux
         .load_inventory(runtime.capture_lines)
         .map_err(|error| error.to_string())?;
@@ -1398,8 +1398,7 @@ fn claude_repo_findings(repo_path: &Path) -> Vec<DoctorFinding> {
         }
         for path in wired_paths {
             finding.push_evidence(format!(
-                "{} also references foreman-claude-hook but invalid Claude settings remain",
-                path
+                "{path} also references foreman-claude-hook but invalid Claude settings remain"
             ));
         }
         for path in non_hook_paths {
@@ -1416,7 +1415,7 @@ fn claude_repo_findings(repo_path: &Path) -> Vec<DoctorFinding> {
             "claude-hook-wired",
             DoctorSeverity::Ok,
             DoctorArea::Repo,
-            format!("Claude hook wiring is present in {}.", path),
+            format!("Claude hook wiring is present in {path}."),
         )
         .with_provider(HarnessKind::ClaudeCode)
         .with_repo_path(repo_path)];
@@ -1498,14 +1497,12 @@ fn codex_repo_findings(repo_path: &Path) -> Vec<DoctorFinding> {
     }
     for path in &wired_paths {
         finding.push_evidence(format!(
-            "{} also references foreman-codex-hook but invalid Codex config remains",
-            path
+            "{path} also references foreman-codex-hook but invalid Codex config remains"
         ));
     }
     for path in &non_hook_paths {
         finding.push_evidence(format!(
-            "{} exists but does not reference foreman-codex-hook",
-            path
+            "{path} exists but does not reference foreman-codex-hook"
         ));
     }
     for parse_error in &parse_errors {
@@ -1518,7 +1515,7 @@ fn codex_repo_findings(repo_path: &Path) -> Vec<DoctorFinding> {
                 "codex-hook-wired",
                 DoctorSeverity::Ok,
                 DoctorArea::Repo,
-                format!("Codex hook wiring is present in {}.", path),
+                format!("Codex hook wiring is present in {path}."),
             )
             .with_provider(HarnessKind::CodexCli)
             .with_repo_path(repo_path)];
@@ -1558,7 +1555,7 @@ fn pi_repo_findings(repo_path: &Path) -> Vec<DoctorFinding> {
                 "pi-extension-wired",
                 DoctorSeverity::Ok,
                 DoctorArea::Repo,
-                format!("Pi Foreman extension is present in {}.", path),
+                format!("Pi Foreman extension is present in {path}."),
             )
             .with_provider(HarnessKind::Pi)
             .with_repo_path(repo_path)];
@@ -1591,14 +1588,12 @@ fn pi_repo_findings(repo_path: &Path) -> Vec<DoctorFinding> {
     }
     for path in wired_paths {
         finding.push_evidence(format!(
-            "{} also references foreman-pi-hook but unreadable Pi config remains",
-            path
+            "{path} also references foreman-pi-hook but unreadable Pi config remains"
         ));
     }
     for path in non_hook_paths {
         finding.push_evidence(format!(
-            "{} exists but does not reference foreman-pi-hook",
-            path
+            "{path} exists but does not reference foreman-pi-hook"
         ));
     }
     for read_error in read_errors {

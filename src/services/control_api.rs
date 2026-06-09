@@ -1,14 +1,43 @@
 use crate::app::{AgentStatus, AppState, HarnessKind, IntegrationMode, Pane, PreviewProvenance};
 use crate::services::extensions::ControlExtensionCard;
 use crate::services::pull_requests::{PullRequestData, PullRequestStatus};
-use serde::Serialize;
+use crate::sources::{SourceDescriptor, SourceDiagnostic, SourceId, SourcePaneId, SourceSummary};
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub const CONTROL_API_SCHEMA_VERSION: u16 = 1;
+pub const CONTROL_API_SCHEMA_VERSION: u16 = 2;
 const MAX_PREVIEW_CHARS: usize = 1200;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+fn is_zero(value: &usize) -> bool {
+    *value == 0
+}
+
+fn default_source_id() -> String {
+    crate::sources::LOCAL_SOURCE_ID.to_string()
+}
+
+fn default_source_label() -> String {
+    crate::sources::LOCAL_SOURCE_LABEL.to_string()
+}
+
+fn default_source_kind() -> String {
+    "local".to_string()
+}
+
+fn default_source_display_label() -> String {
+    default_source_label()
+}
+
+fn default_source_show_label() -> bool {
+    false
+}
+
+fn default_source_pane_id() -> String {
+    String::new()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentsResponse {
     pub schema_version: u16,
@@ -16,9 +45,15 @@ pub struct AgentsResponse {
     pub inventory: ControlInventorySummary,
     pub entries: Vec<AgentEntry>,
     pub diagnostics: Vec<ControlDiagnostic>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<SourceSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_diagnostics: Vec<SourceDiagnostic>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub partial_failure_count: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ControlInventorySummary {
     pub total_sessions: usize,
@@ -29,10 +64,73 @@ pub struct ControlInventorySummary {
     pub visible_panes: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+impl AgentsResponse {
+    pub fn empty() -> Self {
+        Self {
+            schema_version: CONTROL_API_SCHEMA_VERSION,
+            generated_at_unix_ms: generated_at_unix_ms(),
+            inventory: ControlInventorySummary {
+                total_sessions: 0,
+                total_windows: 0,
+                total_panes: 0,
+                visible_sessions: 0,
+                visible_windows: 0,
+                visible_panes: 0,
+            },
+            entries: Vec::new(),
+            diagnostics: Vec::new(),
+            sources: Vec::new(),
+            source_diagnostics: Vec::new(),
+            partial_failure_count: 0,
+        }
+    }
+
+    pub fn wrap_source(&mut self, descriptor: &SourceDescriptor) {
+        for entry in &mut self.entries {
+            entry.source_id = descriptor.id.clone();
+            entry.source_label = descriptor.label.clone();
+            entry.source_display_label = descriptor.display_label.clone();
+            entry.source_show_label = descriptor.show_label;
+            entry.source_kind = descriptor.kind.clone();
+            let source_pane_id =
+                SourcePaneId::new(SourceId::new(descriptor.id.clone()), entry.pane_id.clone());
+            entry.source_pane_id = source_pane_id.stable_id();
+            entry.id = entry.source_pane_id.clone();
+        }
+    }
+
+    pub fn merge(&mut self, mut other: AgentsResponse) {
+        self.inventory.total_sessions += other.inventory.total_sessions;
+        self.inventory.total_windows += other.inventory.total_windows;
+        self.inventory.total_panes += other.inventory.total_panes;
+        self.inventory.visible_sessions += other.inventory.visible_sessions;
+        self.inventory.visible_windows += other.inventory.visible_windows;
+        self.inventory.visible_panes += other.inventory.visible_panes;
+        self.entries.append(&mut other.entries);
+        self.diagnostics.append(&mut other.diagnostics);
+        self.sources.append(&mut other.sources);
+        self.source_diagnostics
+            .append(&mut other.source_diagnostics);
+        self.partial_failure_count += other.partial_failure_count;
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentEntry {
     pub id: String,
+    #[serde(default = "default_source_pane_id")]
+    pub source_pane_id: String,
+    #[serde(default = "default_source_id")]
+    pub source_id: String,
+    #[serde(default = "default_source_label")]
+    pub source_label: String,
+    #[serde(default = "default_source_display_label")]
+    pub source_display_label: String,
+    #[serde(default = "default_source_show_label")]
+    pub source_show_label: bool,
+    #[serde(default = "default_source_kind")]
+    pub source_kind: String,
     pub pane_id: String,
     pub session_id: String,
     pub session_name: String,
@@ -64,7 +162,51 @@ pub struct AgentEntry {
     pub extension_cards: Vec<ControlExtensionCard>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+impl AgentEntry {
+    #[cfg(test)]
+    pub fn test_entry(pane_id: &str) -> Self {
+        let source_pane_id = SourcePaneId::new(SourceId::local(), pane_id).stable_id();
+        Self {
+            id: source_pane_id.clone(),
+            source_pane_id,
+            source_id: crate::sources::LOCAL_SOURCE_ID.to_string(),
+            source_label: crate::sources::LOCAL_SOURCE_LABEL.to_string(),
+            source_display_label: crate::sources::LOCAL_SOURCE_LABEL.to_string(),
+            source_show_label: false,
+            source_kind: "local".to_string(),
+            pane_id: pane_id.to_string(),
+            session_id: "$0".to_string(),
+            session_name: "test".to_string(),
+            window_id: "@0".to_string(),
+            window_name: "test".to_string(),
+            title: "test".to_string(),
+            navigation_title: "test".to_string(),
+            harness: None,
+            harness_label: None,
+            status: "unknown".to_string(),
+            status_label: "UNKNOWN".to_string(),
+            status_source: None,
+            integration_mode: None,
+            is_agent: false,
+            current_command: None,
+            runtime_command: None,
+            working_dir: None,
+            linked_repository: None,
+            workspace_name: None,
+            preview: String::new(),
+            preview_provenance: "captured".to_string(),
+            activity_score: 0,
+            status_rank: 4,
+            last_activity_unix_ms: None,
+            last_status_change_unix_ms: None,
+            active_run_count: None,
+            pull_request: None,
+            extension_cards: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ControlPullRequest {
     pub number: u64,
@@ -94,21 +236,38 @@ impl From<&PullRequestData> for ControlPullRequest {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ControlDiagnostic {
     pub level: String,
     pub message: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActionResponse {
     pub schema_version: u16,
     pub ok: bool,
-    pub action: &'static str,
+    pub action: String,
+    #[serde(default = "default_source_id")]
+    pub source_id: String,
     pub pane_id: String,
+    #[serde(default = "default_source_pane_id")]
+    pub source_pane_id: String,
     pub bytes_sent: Option<usize>,
+}
+
+impl ActionResponse {
+    pub fn new_focus(pane_id: &str) -> Self {
+        focus_response(pane_id)
+    }
+
+    pub fn wrap_source(&mut self, descriptor: &SourceDescriptor) {
+        self.source_id = descriptor.id.clone();
+        self.source_pane_id =
+            SourcePaneId::new(SourceId::new(descriptor.id.clone()), self.pane_id.clone())
+                .stable_id();
+    }
 }
 
 pub fn agents_response(state: &AppState, include_non_agents: bool) -> AgentsResponse {
@@ -170,25 +329,34 @@ pub fn agents_response(state: &AppState, include_non_agents: bool) -> AgentsResp
         },
         entries,
         diagnostics,
+        sources: Vec::new(),
+        source_diagnostics: Vec::new(),
+        partial_failure_count: 0,
     }
 }
 
 pub fn focus_response(pane_id: &str) -> ActionResponse {
+    let source_pane_id = SourcePaneId::new(SourceId::local(), pane_id).stable_id();
     ActionResponse {
         schema_version: CONTROL_API_SCHEMA_VERSION,
         ok: true,
-        action: "focus",
+        action: "focus".to_string(),
+        source_id: crate::sources::LOCAL_SOURCE_ID.to_string(),
         pane_id: pane_id.to_string(),
+        source_pane_id,
         bytes_sent: None,
     }
 }
 
 pub fn send_response(pane_id: &str, bytes_sent: usize) -> ActionResponse {
+    let source_pane_id = SourcePaneId::new(SourceId::local(), pane_id).stable_id();
     ActionResponse {
         schema_version: CONTROL_API_SCHEMA_VERSION,
         ok: true,
-        action: "send",
+        action: "send".to_string(),
+        source_id: crate::sources::LOCAL_SOURCE_ID.to_string(),
         pane_id: pane_id.to_string(),
+        source_pane_id,
         bytes_sent: Some(bytes_sent),
     }
 }
@@ -214,9 +382,18 @@ fn agent_entry(
         .linked_repository_for_pane(pane)
         .map(|path| path_string(path));
 
+    let pane_id = pane.id.as_str().to_string();
+    let source_id = SourceId::new(pane.source.id.as_str().to_string());
+    let source_pane_id = SourcePaneId::new(source_id, pane_id.clone()).stable_id();
     AgentEntry {
-        id: format!("pane:{}", pane.id.as_str()),
-        pane_id: pane.id.as_str().to_string(),
+        id: source_pane_id.clone(),
+        source_pane_id,
+        source_id: pane.source.id.as_str().to_string(),
+        source_label: pane.source.label.clone(),
+        source_display_label: pane.source.label.clone(),
+        source_show_label: pane.source.show_label,
+        source_kind: pane.source.kind.clone(),
+        pane_id,
         session_id: session_id.to_string(),
         session_name: session_name.to_string(),
         window_id: window_id.to_string(),
@@ -388,7 +565,7 @@ mod tests {
             .linked_repositories
             .insert(crate::app::PaneId::new("%82"), PathBuf::from("/tmp/code"));
         state.linked_repository_pane_working_dirs.insert(
-            crate::app::PaneId::new("%82"),
+            crate::app::PaneKey::local(crate::app::PaneId::new("%82")),
             Some(PathBuf::from("/tmp/notes")),
         );
 

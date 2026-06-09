@@ -16,7 +16,8 @@ trap cleanup EXIT
 
 cargo build --quiet --manifest-path "$ROOT/Cargo.toml" --bin foreman
 
-tmux -S "$SOCK" new-session -d -s "$SESSION" -n agent sh
+ln -s "$(command -v sleep)" "$TMP_DIR/claude"
+tmux -S "$SOCK" new-session -d -s "$SESSION" -n agent "env PATH=$TMP_DIR:\$PATH sh -lc 'claude 30'"
 PANE="$(tmux -S "$SOCK" list-panes -a -F '#{pane_id}' | head -n1)"
 tmux -S "$SOCK" select-pane -t "$PANE" -T claude
 sleep 0.2
@@ -27,7 +28,7 @@ python3 - "$AGENTS_JSON" "$PANE" <<'PY'
 import json, sys
 path, pane = sys.argv[1], sys.argv[2]
 payload = json.load(open(path))
-assert payload["schemaVersion"] == 1, payload
+assert payload["schemaVersion"] == 2, payload
 entries = payload["entries"]
 assert any(entry["paneId"] == pane for entry in entries), payload
 entry = next(entry for entry in entries if entry["paneId"] == pane)

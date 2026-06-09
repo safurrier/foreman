@@ -88,6 +88,8 @@ fn system_tmux_backend_kills_target_pane() {
         .expect("kill should succeed");
 
     let refreshed_inventory = adapter.load_inventory(20).expect("inventory should reload");
-    assert!(refreshed_inventory.pane(&pane_id.clone().into()).is_none());
-    assert!(refreshed_inventory.pane(&keep_alive.into()).is_some());
+    assert!(refreshed_inventory
+        .local_pane(&pane_id.clone().into())
+        .is_none());
+    assert!(refreshed_inventory.local_pane(&keep_alive.into()).is_some());
 }

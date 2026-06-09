@@ -1,6 +1,6 @@
 use crate::app::{
     AgentStatus, Inventory, NotificationCooldownKey, NotificationKind, NotificationProfile, Pane,
-    PaneId,
+    PaneId, PaneKey,
 };
 use crate::config::{NotificationBackendName, NotificationSoundCycle, NotificationSoundProfile};
 use std::collections::BTreeMap;
@@ -15,6 +15,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotificationRequest {
     pub pane_id: PaneId,
+    pub pane_key: PaneKey,
     pub pane_title: String,
     pub kind: NotificationKind,
     pub title: String,
@@ -51,6 +52,7 @@ impl NotificationDecisionReason {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotificationDecision {
     pub pane_id: PaneId,
+    pub pane_key: PaneKey,
     pub kind: NotificationKind,
     pub reason: NotificationDecisionReason,
     pub request: Option<NotificationRequest>,
@@ -58,7 +60,7 @@ pub struct NotificationDecision {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NotificationPolicyContext<'a> {
-    pub selected_pane_id: Option<&'a PaneId>,
+    pub selected_pane_key: Option<&'a PaneKey>,
     pub muted: bool,
     pub profile: NotificationProfile,
     pub refresh_tick: u64,
@@ -511,8 +513,9 @@ pub fn evaluate_inventory_notifications(
                 let Some(current_agent) = pane.agent.as_ref() else {
                     continue;
                 };
-                let Some(previous_agent) =
-                    previous.pane(&pane.id).and_then(|pane| pane.agent.as_ref())
+                let Some(previous_agent) = previous
+                    .pane(&pane.key())
+                    .and_then(|pane| pane.agent.as_ref())
                 else {
                     continue;
                 };
@@ -523,8 +526,10 @@ pub fn evaluate_inventory_notifications(
                 };
 
                 if context.muted {
+                    let pane_key = pane.key();
                     decisions.push(NotificationDecision {
                         pane_id: pane.id.clone(),
+                        pane_key,
                         kind,
                         reason: NotificationDecisionReason::Muted,
                         request: None,
@@ -533,8 +538,10 @@ pub fn evaluate_inventory_notifications(
                 }
 
                 if !context.profile.allows(kind) {
+                    let pane_key = pane.key();
                     decisions.push(NotificationDecision {
                         pane_id: pane.id.clone(),
+                        pane_key,
                         kind,
                         reason: NotificationDecisionReason::ProfileFiltered,
                         request: None,
@@ -542,9 +549,11 @@ pub fn evaluate_inventory_notifications(
                     continue;
                 }
 
-                if context.selected_pane_id == Some(&pane.id) {
+                let pane_key = pane.key();
+                if context.selected_pane_key == Some(&pane_key) {
                     decisions.push(NotificationDecision {
                         pane_id: pane.id.clone(),
+                        pane_key,
                         kind,
                         reason: NotificationDecisionReason::SelectedPane,
                         request: None,
@@ -553,7 +562,7 @@ pub fn evaluate_inventory_notifications(
                 }
 
                 let cooldown_key = NotificationCooldownKey {
-                    pane_id: pane.id.clone(),
+                    pane_key: pane_key.clone(),
                     kind,
                 };
                 if cooldowns.get(&cooldown_key).is_some_and(|last_tick| {
@@ -561,6 +570,7 @@ pub fn evaluate_inventory_notifications(
                 }) {
                     decisions.push(NotificationDecision {
                         pane_id: pane.id.clone(),
+                        pane_key,
                         kind,
                         reason: NotificationDecisionReason::CooldownActive,
                         request: None,
@@ -570,6 +580,7 @@ pub fn evaluate_inventory_notifications(
 
                 decisions.push(NotificationDecision {
                     pane_id: pane.id.clone(),
+                    pane_key,
                     kind,
                     reason: transition_reason,
                     request: Some(notification_request(
@@ -693,7 +704,7 @@ impl NotificationBackend for AlerterNotificationBackend {
             .arg("--message")
             .arg(&request.body)
             .arg("--group")
-            .arg(format!("foreman:{}", request.pane_id.as_str()))
+            .arg(format!("foreman:{}", request.pane_key.stable_id()))
             .arg("--timeout")
             .arg("10")
             .arg("--actions")
@@ -1325,6 +1336,7 @@ fn notification_request(
 
     NotificationRequest {
         pane_id: pane.id.clone(),
+        pane_key: pane.key(),
         pane_title: pane.title.clone(),
         kind,
         title,
@@ -1367,6 +1379,7 @@ fn grouped_notification_request(
 
     NotificationRequest {
         pane_id: first.pane_id,
+        pane_key: first.pane_key,
         pane_title: first.pane_title,
         kind,
         title,
@@ -1463,7 +1476,7 @@ mod tests {
             &previous,
             &current,
             NotificationPolicyContext {
-                selected_pane_id: None,
+                selected_pane_key: None,
                 muted: false,
                 profile: NotificationProfile::All,
                 refresh_tick: 4,
@@ -1526,7 +1539,7 @@ mod tests {
             &previous,
             &current,
             NotificationPolicyContext {
-                selected_pane_id: None,
+                selected_pane_key: None,
                 muted: false,
                 profile: NotificationProfile::All,
                 refresh_tick: 4,
@@ -1562,7 +1575,7 @@ mod tests {
             &previous,
             &current,
             NotificationPolicyContext {
-                selected_pane_id: Some(&"alpha:claude".into()),
+                selected_pane_key: Some(&"alpha:claude".into()),
                 muted: false,
                 profile: NotificationProfile::All,
                 refresh_tick: 4,
@@ -1580,12 +1593,75 @@ mod tests {
     }
 
     #[test]
+    fn cooldowns_are_source_scoped_for_duplicate_pane_ids() {
+        let previous = inventory([
+            SessionBuilder::new("local").window(WindowBuilder::new("local:w").pane(
+                PaneBuilder::agent("%42", HarnessKind::ClaudeCode).status(AgentStatus::Working),
+            )),
+            SessionBuilder::new("remote").window(
+                WindowBuilder::new("remote:w").pane(
+                    PaneBuilder::agent("%42", HarnessKind::ClaudeCode)
+                        .source("coder", "Coder", "ssh")
+                        .status(AgentStatus::Working),
+                ),
+            ),
+        ]);
+        let current = inventory([
+            SessionBuilder::new("local").window(WindowBuilder::new("local:w").pane(
+                PaneBuilder::agent("%42", HarnessKind::ClaudeCode).status(AgentStatus::Idle),
+            )),
+            SessionBuilder::new("remote").window(
+                WindowBuilder::new("remote:w").pane(
+                    PaneBuilder::agent("%42", HarnessKind::ClaudeCode)
+                        .source("coder", "Coder", "ssh")
+                        .status(AgentStatus::Idle),
+                ),
+            ),
+        ]);
+        let cooldowns = std::collections::BTreeMap::from([(
+            NotificationCooldownKey {
+                pane_key: crate::app::PaneKey::new(
+                    crate::app::SourceId::new("coder"),
+                    "%42".into(),
+                ),
+                kind: NotificationKind::Completion,
+            },
+            3,
+        )]);
+
+        let decisions = evaluate_inventory_notifications(
+            &previous,
+            &current,
+            NotificationPolicyContext {
+                selected_pane_key: None,
+                muted: false,
+                profile: NotificationProfile::All,
+                refresh_tick: 4,
+                cooldown_ticks: 3,
+            },
+            &cooldowns,
+        );
+
+        assert_eq!(decisions.len(), 2);
+        assert_eq!(
+            decisions
+                .iter()
+                .filter(|decision| decision.request.is_some())
+                .count(),
+            1
+        );
+        assert!(decisions
+            .iter()
+            .any(|decision| decision.reason == NotificationDecisionReason::CooldownActive));
+    }
+
+    #[test]
     fn profile_and_cooldown_can_suppress_transitions() {
         let previous = inventory_with_status(AgentStatus::Working);
         let current = inventory_with_status(AgentStatus::Idle);
         let cooldowns = std::collections::BTreeMap::from([(
             NotificationCooldownKey {
-                pane_id: "alpha:claude".into(),
+                pane_key: crate::app::PaneKey::from("alpha:claude"),
                 kind: NotificationKind::Completion,
             },
             3,
@@ -1595,7 +1671,7 @@ mod tests {
             &previous,
             &current,
             NotificationPolicyContext {
-                selected_pane_id: None,
+                selected_pane_key: None,
                 muted: false,
                 profile: NotificationProfile::AttentionOnly,
                 refresh_tick: 5,
@@ -1612,7 +1688,7 @@ mod tests {
             &previous,
             &current,
             NotificationPolicyContext {
-                selected_pane_id: None,
+                selected_pane_key: None,
                 muted: false,
                 profile: NotificationProfile::All,
                 refresh_tick: 5,
@@ -1629,7 +1705,7 @@ mod tests {
             &previous,
             &current,
             NotificationPolicyContext {
-                selected_pane_id: None,
+                selected_pane_key: None,
                 muted: false,
                 profile: NotificationProfile::All,
                 refresh_tick: 5,
@@ -1796,6 +1872,7 @@ mod tests {
         ]);
         let request = super::NotificationRequest {
             pane_id: "alpha:claude".into(),
+            pane_key: crate::app::PaneKey::local("alpha:claude".into()),
             pane_title: "claude-main".to_string(),
             kind: NotificationKind::Completion,
             title: "Agent ready: claude-main".to_string(),
@@ -1830,6 +1907,7 @@ mod tests {
         ))]);
         let request = super::NotificationRequest {
             pane_id: "alpha:claude".into(),
+            pane_key: crate::app::PaneKey::local("alpha:claude".into()),
             pane_title: "claude-main".to_string(),
             kind: NotificationKind::NeedsAttention,
             title: "Needs attention: claude-main".to_string(),
@@ -1914,6 +1992,7 @@ mod tests {
         );
         let request = super::NotificationRequest {
             pane_id: "%7".into(),
+            pane_key: crate::app::PaneKey::local("%7".into()),
             pane_title: "claude-main".to_string(),
             kind: NotificationKind::NeedsAttention,
             title: "Foreman: needs attention".to_string(),
@@ -1975,6 +2054,7 @@ mod tests {
             super::AlerterNotificationBackend::with_programs(&alerter, &tmux, &afplay, None, None);
         let request = super::NotificationRequest {
             pane_id: "%7".into(),
+            pane_key: crate::app::PaneKey::local("%7".into()),
             pane_title: "claude-main".to_string(),
             kind: NotificationKind::Completion,
             title: "Foreman: agent ready".to_string(),
@@ -2029,6 +2109,7 @@ mod tests {
         ]);
         let request = super::NotificationRequest {
             pane_id: "%7".into(),
+            pane_key: crate::app::PaneKey::local("%7".into()),
             pane_title: "claude-main".to_string(),
             kind: NotificationKind::Completion,
             title: "Foreman: agent ready".to_string(),
@@ -2125,6 +2206,7 @@ mod tests {
         );
         let request = super::NotificationRequest {
             pane_id: target_pane.clone().into(),
+            pane_key: crate::app::PaneKey::local(target_pane.clone().into()),
             pane_title: "claude-main".to_string(),
             kind: NotificationKind::NeedsAttention,
             title: "Foreman: needs attention".to_string(),

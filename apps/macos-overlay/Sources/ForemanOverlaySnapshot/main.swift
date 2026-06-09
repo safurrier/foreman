@@ -78,6 +78,7 @@ let states: [SnapshotState] = [
         store.moveSelection(delta: 18)
     }),
     SnapshotState(name: "mixed-status", fixture: "agents-mixed-status.json"),
+    SnapshotState(name: "sources", fixture: "agents-sources.json"),
     SnapshotState(name: "pr-active", fixture: "agents-attention.json", configure: { store in
         store.activateRegion(.pullRequest)
     }),
