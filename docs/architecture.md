@@ -314,6 +314,9 @@ decisions that materially constrain work.
 | ADR | Decision |
 |---|---|
 | [0001-stack-choice](decisions/0001-stack-choice.md) | Stack selection for foreman |
+| [0002-source-aggregation-and-remote-ssh](decisions/0002-source-aggregation-and-remote-ssh.md) | Source-scoped local/remote tmux aggregation and one-shot SSH source transport |
+| [0003-remote-jump-terminal-activation](decisions/0003-remote-jump-terminal-activation.md) | Remote tmux focus plus local terminal/tab activation |
+| [0004-source-companion-relay](decisions/0004-source-companion-relay.md) | Proposed companion/relay direction for bidirectional and prewarmed sources |
 
 ---
 

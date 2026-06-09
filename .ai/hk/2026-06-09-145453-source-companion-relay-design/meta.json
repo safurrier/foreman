@@ -1,0 +1,34 @@
+{
+  "attached_artifacts": [],
+  "branch": "design/source-companion-relay",
+  "diff_hash": "sha256:2b06b379f2f811214cb2329317efbf64915ff66f79ed24d4c4458984d0745fa1",
+  "dirty": true,
+  "event_count": 9,
+  "event_seq": 11,
+  "evidence_count": 3,
+  "evidence_ids": [
+    "ev_20260609_150000_331340",
+    "ev_20260609_150102_767424",
+    "ev_20260609_155300_833294"
+  ],
+  "file_hashes": {
+    "README.md": "sha256:b8d5c5893d7ec871f688690bfe214604ce3eeeb3894a9a6df19e3c06888f921d",
+    "artifacts/README.md": "sha256:c4bad9d4652f296a7e4dcf175fe1dd0c66a99ec0b74941cd45c499e84792436c"
+  },
+  "files": [
+    "README.md",
+    "meta.json",
+    "artifacts/README.md"
+  ],
+  "generated_at": "2026-06-09T22:54:49.353425+00:00",
+  "generated_by": "hk export --format handoff-dir",
+  "git_sha": "f072ebb",
+  "output_path": ".ai/hk/2026-06-09-145453-source-companion-relay-design",
+  "ready": false,
+  "ready_status": "not-ready",
+  "schema_version": 1,
+  "sync_status": "needs-sync",
+  "target_root": ".",
+  "target_scope": ".",
+  "work_id": "2026-06-09-145453-source-companion-relay-design"
+}
