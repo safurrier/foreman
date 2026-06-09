@@ -31,5 +31,6 @@
 | [`decisions/0001-stack-choice.md`](decisions/0001-stack-choice.md) | Stack choice ADR |
 | [`decisions/0002-source-aggregation-and-remote-ssh.md`](decisions/0002-source-aggregation-and-remote-ssh.md) | Source aggregation and remote SSH target architecture |
 | [`decisions/0003-remote-jump-terminal-activation.md`](decisions/0003-remote-jump-terminal-activation.md) | Remote tmux focus plus local terminal activation options |
+| [`decisions/0004-source-companion-relay.md`](decisions/0004-source-companion-relay.md) | Follow-up source companion, relay, reverse tunnel, and prewarmed snapshot architecture |
 
 <!-- generated-by: context-engineering@2.2.0 | last-updated: 2026-04-30 -->
