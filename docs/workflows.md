@@ -238,6 +238,13 @@ local-only, or the overlap case fails to defer and later apply the remote merge.
 Use this script directly when iterating on event-loop scheduling, popup source
 refresh, PR/extension lookup cadence, or tmux inventory work.
 
+For opt-in live Mac/Coder source companion checks, run
+`FOREMAN_CODER_HOST=<host> scripts/smoke-source-snapshot-coder.sh` after
+installing the candidate Foreman binary on the Coder host. The smoke writes a
+Mac source snapshot, copies it to Coder, configures a temporary snapshot source,
+and verifies that Coder Foreman can render both its local rows and Mac snapshot
+rows.
+
 When `inventory_tmux` looks expensive, check whether the line shows high
 `captures=` counts or whether cached preview reuse has dropped unexpectedly.
 When popup startup still feels slow, compare `startup_cache_load` timing with

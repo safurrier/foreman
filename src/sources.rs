@@ -1,4 +1,5 @@
 use crate::services::control_api::{ActionResponse, AgentsResponse};
+use crate::source_snapshots::{SnapshotFreshness, SourceSnapshotStore};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -211,6 +212,14 @@ pub enum SourceConfig {
         #[serde(default)]
         jump: SourceJumpConfig,
     },
+    Snapshot {
+        label: String,
+        path: PathBuf,
+        #[serde(default = "default_enabled")]
+        enabled: bool,
+        #[serde(default)]
+        display: SourceDisplayConfig,
+    },
 }
 
 fn default_local_label() -> String {
@@ -229,7 +238,9 @@ impl SourceConfig {
 
     pub fn label(&self) -> &str {
         match self {
-            Self::Local { label, .. } | Self::Ssh { label, .. } => label,
+            Self::Local { label, .. } | Self::Ssh { label, .. } | Self::Snapshot { label, .. } => {
+                label
+            }
         }
     }
 
@@ -248,13 +259,15 @@ impl SourceConfig {
 
     pub fn display(&self) -> &SourceDisplayConfig {
         match self {
-            Self::Local { display, .. } | Self::Ssh { display, .. } => display,
+            Self::Local { display, .. }
+            | Self::Ssh { display, .. }
+            | Self::Snapshot { display, .. } => display,
         }
     }
 
     pub fn jump(&self) -> Option<&SourceJumpConfig> {
         match self {
-            Self::Local { .. } => None,
+            Self::Local { .. } | Self::Snapshot { .. } => None,
             Self::Ssh { jump, .. } => Some(jump),
         }
     }
@@ -263,12 +276,15 @@ impl SourceConfig {
         match self {
             Self::Local { .. } => SourceKind::Local,
             Self::Ssh { .. } => SourceKind::Ssh,
+            Self::Snapshot { .. } => SourceKind::Snapshot,
         }
     }
 
     pub fn enabled(&self) -> bool {
         match self {
-            Self::Local { enabled, .. } | Self::Ssh { enabled, .. } => *enabled,
+            Self::Local { enabled, .. }
+            | Self::Ssh { enabled, .. }
+            | Self::Snapshot { enabled, .. } => *enabled,
         }
     }
 }
@@ -278,6 +294,7 @@ impl SourceConfig {
 pub enum SourceKind {
     Local,
     Ssh,
+    Snapshot,
 }
 
 impl SourceKind {
@@ -285,6 +302,7 @@ impl SourceKind {
         match self {
             Self::Local => "local",
             Self::Ssh => "ssh",
+            Self::Snapshot => "snapshot",
         }
     }
 }
@@ -768,6 +786,93 @@ impl ForemanSource for SshSource {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct SnapshotSource {
+    id: SourceId,
+    descriptor: SourceDescriptor,
+    path: PathBuf,
+}
+
+impl SnapshotSource {
+    pub fn new(id: SourceId, config: SourceConfig) -> Self {
+        let descriptor = SourceDescriptor::new(&id, &config);
+        let path = match config {
+            SourceConfig::Snapshot { path, .. } => path,
+            _ => PathBuf::new(),
+        };
+        Self {
+            id,
+            descriptor,
+            path,
+        }
+    }
+
+    fn unsupported_action(&self, action: &str) -> SourceError {
+        SourceError::new(
+            "source.snapshot.action-unsupported",
+            format!(
+                "snapshot source {} does not support {action}; use its live source transport",
+                self.id
+            ),
+            false,
+        )
+    }
+}
+
+impl ForemanSource for SnapshotSource {
+    fn descriptor(&self) -> SourceDescriptor {
+        self.descriptor.clone()
+    }
+
+    fn agents(&self) -> SourceResult<AgentsResponse> {
+        let store = SourceSnapshotStore::new(
+            self.path
+                .parent()
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from(".")),
+        );
+        let now_ms = unix_ms_now();
+        let loaded =
+            store.load_snapshot_for_source(&self.id, &self.descriptor, &self.path, now_ms)?;
+        let mut response = loaded.envelope.response;
+        if let Some(diagnostic) = SourceSnapshotStore::stale_diagnostic(
+            &self.descriptor,
+            loaded.freshness,
+            loaded.envelope.captured_at_unix_ms,
+            now_ms,
+        ) {
+            response.source_diagnostics.push(diagnostic);
+            response.partial_failure_count += 1;
+        }
+        if loaded.freshness == SnapshotFreshness::Warm {
+            response.source_diagnostics.push(SourceDiagnostic::warning(
+                &self.descriptor,
+                "source.snapshot.warm",
+                format!(
+                    "{} snapshot is warm: age={}ms",
+                    self.descriptor.label,
+                    now_ms.saturating_sub(loaded.envelope.captured_at_unix_ms)
+                ),
+                true,
+                None,
+            ));
+        }
+        Ok(response)
+    }
+
+    fn focus(&self, _pane_id: &str) -> SourceResult<ActionResponse> {
+        Err(self.unsupported_action("focus"))
+    }
+
+    fn send(&self, _pane_id: &str, _text: &str) -> SourceResult<ActionResponse> {
+        Err(self.unsupported_action("send"))
+    }
+
+    fn extensions(&self, _pane_id: &str) -> SourceResult<Value> {
+        Err(self.unsupported_action("extensions"))
+    }
+}
+
 fn validate_action_schema(
     source_id: &SourceId,
     action: &str,
@@ -866,6 +971,12 @@ impl SourceAggregator {
         for result in results {
             match result {
                 Ok((descriptor, duration_ms, Ok(mut response))) => {
+                    let stale = response.source_diagnostics.iter().any(|diagnostic| {
+                        matches!(
+                            diagnostic.code.as_str(),
+                            "source.snapshot.stale" | "source.snapshot.warm"
+                        )
+                    });
                     response.wrap_source(&descriptor);
                     if let Some(aggregate) = &mut aggregate_response {
                         aggregate.merge(response);
@@ -878,7 +989,7 @@ impl SourceAggregator {
                         kind: descriptor.kind,
                         enabled: descriptor.enabled,
                         ok: true,
-                        stale: false,
+                        stale,
                         duration_ms,
                     });
                 }
@@ -919,14 +1030,18 @@ impl SourceAggregator {
         }
 
         let mut response = aggregate_response.unwrap_or_else(AgentsResponse::empty);
-        response.source_diagnostics = source_diagnostics.clone();
+        response
+            .source_diagnostics
+            .extend(source_diagnostics.clone());
         response.sources = source_summaries.clone();
-        response.partial_failure_count = partial_failure_count;
+        response.partial_failure_count += partial_failure_count;
+        let merged_source_diagnostics = response.source_diagnostics.clone();
+        let merged_partial_failure_count = response.partial_failure_count;
         AggregateSnapshot {
             response,
             sources: source_summaries,
-            source_diagnostics,
-            partial_failure_count,
+            source_diagnostics: merged_source_diagnostics,
+            partial_failure_count: merged_partial_failure_count,
         }
     }
 }

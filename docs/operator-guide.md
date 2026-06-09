@@ -287,6 +287,19 @@ clients must treat `sourcePaneId` as the stable row/action identity and `paneId`
 as source-local display data. If a source is unreachable, Foreman reports a
 source diagnostic and continues rendering healthy sources.
 
+Snapshot sources are read-only cached inventories. They are useful for the first
+source companion/prewarmer slice and for manual Mac → Coder visibility checks:
+
+```bash
+foreman sources snapshot --source-id mac --output /tmp/foreman-mac.agents.json --json
+foreman sources add snapshot mac --path /tmp/foreman-mac.agents.json --label Mac --json
+foreman agents --sources all --json
+```
+
+A snapshot source can show rows from another host before a live network refresh
+runs, but focus/send still require a live source transport such as SSH, a future
+reverse tunnel, or a future companion action endpoint.
+
 For Alex's Coder workflow, `coder_connect` attaches to `tmux -L user`. Foreman
 supports this through `--tmux-server-name user` and the persisted
 `tmux_server_name = "user"` source setting. If noninteractive SSH resolves a

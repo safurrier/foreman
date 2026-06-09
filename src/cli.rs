@@ -31,9 +31,10 @@ use crate::services::system_stats::{SysinfoSystemStatsBackend, SystemStatsServic
 use crate::services::ui_preferences::{
     apply_preferences_to_runtime, load_ui_preferences, reset_ui_preferences, PersistedUiPreferences,
 };
+use crate::source_snapshots::{SourceSnapshotEnvelope, SourceSnapshotStore};
 use crate::sources::{
-    ForemanSource, LocalSource, SourceConfig, SourceDescriptor, SourceError, SourceId, SourceScope,
-    SourcesConfig, SshSource,
+    ForemanSource, LocalSource, SnapshotSource, SourceConfig, SourceDescriptor, SourceError,
+    SourceId, SourceScope, SourcesConfig, SshSource,
 };
 use clap::{Args, Parser, Subcommand};
 use std::fmt;
@@ -408,6 +409,8 @@ pub enum SourcesCommand {
         #[command(subcommand)]
         command: SourcesAddCommand,
     },
+    /// Write a source-local snapshot of the current tmux inventory.
+    Snapshot(SourcesSnapshotArgs),
     /// Remove a configured source.
     Remove {
         source_id: String,
@@ -426,6 +429,8 @@ pub enum SourcesCommand {
 pub enum SourcesAddCommand {
     /// Add an SSH-backed source.
     Ssh(SourcesAddSshArgs),
+    /// Add a read-only snapshot-backed source.
+    Snapshot(SourcesAddSnapshotArgs),
 }
 
 #[derive(Debug, Args, Clone, PartialEq, Eq)]
@@ -443,6 +448,29 @@ pub struct SourcesAddSshArgs {
     pub label: String,
     #[arg(long, default_value = "ssh")]
     pub ssh: String,
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Clone, PartialEq, Eq)]
+pub struct SourcesAddSnapshotArgs {
+    pub source_id: String,
+    #[arg(long)]
+    pub path: PathBuf,
+    #[arg(long)]
+    pub label: String,
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Clone, PartialEq, Eq)]
+pub struct SourcesSnapshotArgs {
+    #[arg(long)]
+    pub source_id: String,
+    #[arg(long)]
+    pub output: PathBuf,
+    #[arg(long)]
+    pub all_panes: bool,
     #[arg(long)]
     pub json: bool,
 }
@@ -904,6 +932,7 @@ fn build_source_provider(
             ))
         }
         SourceConfig::Ssh { .. } => Box::new(SshSource::new(id, config, query_timeout_ms)),
+        SourceConfig::Snapshot { .. } => Box::new(SnapshotSource::new(id, config)),
     }
 }
 
@@ -1090,6 +1119,7 @@ fn source_action_response(
 }
 
 fn handle_sources_command(
+    cli: &Cli,
     paths: &crate::config::AppPaths,
     command: &SourcesCommand,
 ) -> Result<RunOutcome, RunError> {
@@ -1114,37 +1144,88 @@ fn handle_sources_command(
                 }
             })
         }
-        SourcesCommand::Add {
-            command: SourcesAddCommand::Ssh(args),
-        } => {
-            SourceId::validate(&args.source_id).map_err(RunError::Usage)?;
-            let source_config = SourceConfig::Ssh {
-                label: args.label.clone(),
-                host: args.host.clone(),
-                foreman: args.foreman.clone(),
-                tmux_server_name: args.tmux_server_name.clone(),
-                tmux_socket: args.tmux_socket.clone(),
-                ssh: args.ssh.clone(),
-                enabled: true,
-                query_timeout_ms: None,
-                extra_ssh_args: Vec::new(),
-                display: crate::sources::SourceDisplayConfig::default(),
-                jump: crate::sources::SourceJumpConfig::default(),
+        SourcesCommand::Add { command } => {
+            let (source_id, source_config, json) = match command {
+                SourcesAddCommand::Ssh(args) => {
+                    SourceId::validate(&args.source_id).map_err(RunError::Usage)?;
+                    (
+                        args.source_id.clone(),
+                        SourceConfig::Ssh {
+                            label: args.label.clone(),
+                            host: args.host.clone(),
+                            foreman: args.foreman.clone(),
+                            tmux_server_name: args.tmux_server_name.clone(),
+                            tmux_socket: args.tmux_socket.clone(),
+                            ssh: args.ssh.clone(),
+                            enabled: true,
+                            query_timeout_ms: None,
+                            extra_ssh_args: Vec::new(),
+                            display: crate::sources::SourceDisplayConfig::default(),
+                            jump: crate::sources::SourceJumpConfig::default(),
+                        },
+                        args.json,
+                    )
+                }
+                SourcesAddCommand::Snapshot(args) => {
+                    SourceId::validate(&args.source_id).map_err(RunError::Usage)?;
+                    (
+                        args.source_id.clone(),
+                        SourceConfig::Snapshot {
+                            label: args.label.clone(),
+                            path: args.path.clone(),
+                            enabled: true,
+                            display: crate::sources::SourceDisplayConfig::default(),
+                        },
+                        args.json,
+                    )
+                }
             };
             config
                 .sources
                 .entries
-                .insert(args.source_id.clone(), source_config.clone());
+                .insert(source_id.clone(), source_config.clone());
             save_app_config(&paths.config_file, &config)?;
             let value = serde_json::json!({
                 "schemaVersion": crate::services::control_api::CONTROL_API_SCHEMA_VERSION,
                 "ok": true,
                 "action": "sources.add",
-                "source": SourceDescriptor::new(&SourceId::new(args.source_id.clone()), &source_config),
+                "source": SourceDescriptor::new(&SourceId::new(source_id.clone()), &source_config),
                 "path": paths.config_file,
             });
+            source_action_response(value, json, || println!("Added source {source_id}"))
+        }
+        SourcesCommand::Snapshot(args) => {
+            SourceId::validate(&args.source_id).map_err(RunError::Usage)?;
+            let source_id = SourceId::new(args.source_id.clone());
+            let mut response = local_agents_response(cli, paths, args.all_panes)?;
+            response.sources.clear();
+            response.source_diagnostics.clear();
+            response.partial_failure_count = 0;
+            let envelope =
+                SourceSnapshotEnvelope::new(&source_id, response, crate::sources::unix_ms_now());
+            let store = SourceSnapshotStore::new(
+                args.output
+                    .parent()
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from(".")),
+            );
+            store
+                .publish_snapshot_to(&args.output, &envelope)
+                .map_err(|error| {
+                    RunError::Usage(format!("failed to write source snapshot: {error}"))
+                })?;
+            let value = serde_json::json!({
+                "schemaVersion": crate::services::control_api::CONTROL_API_SCHEMA_VERSION,
+                "ok": true,
+                "action": "sources.snapshot",
+                "sourceId": source_id.as_str(),
+                "path": args.output,
+                "capturedAtUnixMs": envelope.captured_at_unix_ms,
+                "expiresAtUnixMs": envelope.expires_at_unix_ms,
+                "entryCount": envelope.response.entries.len(),
+            });
             source_action_response(value, args.json, || {
-                println!("Added source {}", args.source_id)
+                println!("Wrote source snapshot for {}", source_id.as_str())
             })
         }
         SourcesCommand::Remove { source_id, json } => {
@@ -1187,7 +1268,7 @@ fn handle_sources_command(
             let result = provider.agents();
             let duration_ms = started.elapsed().as_millis() as u64;
             let (ok, diagnostics) = match result {
-                Ok(_) => (true, Vec::<crate::sources::SourceDiagnostic>::new()),
+                Ok(response) => (true, response.source_diagnostics),
                 Err(error) => (
                     false,
                     vec![crate::sources::SourceDiagnostic::warning(
@@ -1237,6 +1318,11 @@ fn source_tmux_endpoint_summary(source_config: &SourceConfig) -> serde_json::Val
             "configuredServerName": tmux_server_name,
             "configuredSocket": tmux_socket.as_ref().map(|path| path.display().to_string()),
             "note": "Noninteractive SSH does not inherit the $TMUX value from an attached terminal tab; configure tmux_server_name or tmux_socket when the source should query a specific remote tmux endpoint."
+        }),
+        SourceConfig::Snapshot { path, .. } => serde_json::json!({
+            "kind": "snapshot",
+            "path": path.display().to_string(),
+            "note": "Snapshot sources are read-only cached inventories. Focus/send require a live source transport."
         }),
     }
 }
@@ -1326,7 +1412,7 @@ fn maybe_handle_control_command(
             Some(LinksCommand::List { json }) => Ok(Some(list_repository_links(paths, *json)?)),
             None => Ok(Some(list_repository_links(paths, false)?)),
         },
-        CliCommand::Sources { command } => Ok(Some(handle_sources_command(paths, command)?)),
+        CliCommand::Sources { command } => Ok(Some(handle_sources_command(cli, paths, command)?)),
         CliCommand::SourceProbe {
             local_only,
             command,
@@ -3082,6 +3168,112 @@ default_sort = "stable"
         let config = std::fs::read_to_string(config_file).expect("config should be readable");
         assert!(config.contains("[sources.coder]"));
         assert!(config.contains("tmux_server_name = \"user\""));
+    }
+
+    #[test]
+    fn agents_sources_all_merges_snapshot_response_with_source_identity() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let config_file = temp_dir.path().join("config.toml");
+        let log_dir = temp_dir.path().join("logs");
+        let snapshot_file = temp_dir.path().join("mac-source.agents.json");
+        std::fs::write(
+            &snapshot_file,
+            r#"{
+  "schemaVersion": 1,
+  "sourceId": "mac",
+  "capturedAtUnixMs": 9999999990000,
+  "expiresAtUnixMs": 9999999999999,
+  "agentsResponseSchemaVersion": 2,
+  "response": {
+    "schemaVersion": 2,
+    "generatedAtUnixMs": 9999999990000,
+    "inventory": {"totalSessions":1,"totalWindows":1,"totalPanes":1,"visibleSessions":1,"visibleWindows":1,"visiblePanes":1},
+    "entries": [{"id":"pane:%77","paneId":"%77","sessionId":"$0","sessionName":"mac","windowId":"@0","windowName":"mac","title":"mac","navigationTitle":"mac","harness":null,"harnessLabel":null,"status":"unknown","statusLabel":"UNKNOWN","statusSource":null,"integrationMode":null,"isAgent":false,"currentCommand":null,"runtimeCommand":null,"workingDir":null,"linkedRepository":null,"workspaceName":null,"preview":"","previewProvenance":"captured","activityScore":0,"statusRank":4,"lastActivityUnixMs":null,"lastStatusChangeUnixMs":null,"activeRunCount":null,"pullRequest":null}],
+    "diagnostics": []
+  },
+  "health": {"status":"ok","message":null}
+}
+"#,
+        )
+        .expect("snapshot should be writable");
+        std::fs::write(
+            &config_file,
+            format!(
+                "[sources]\ndefault_scope = \"all\"\n\n[sources.mac]\nkind = \"snapshot\"\nlabel = \"Mac\"\npath = \"{}\"\n",
+                snapshot_file.display()
+            ),
+        )
+        .expect("config should be writable");
+        let cli = Cli::parse_from([
+            "foreman",
+            "--config-file",
+            config_file.to_str().expect("utf-8 path"),
+            "--log-dir",
+            log_dir.to_str().expect("utf-8 path"),
+            "agents",
+            "--json",
+            "--all-panes",
+        ]);
+        let outcome = run(cli).expect("agents should succeed");
+
+        let RunOutcome::ControlJson(value) = outcome else {
+            panic!("expected JSON outcome, got {outcome:?}");
+        };
+        let entries = value["entries"].as_array().expect("entries array");
+        assert!(entries.iter().any(|entry| {
+            entry["sourceId"] == "mac"
+                && entry["sourcePaneId"] == "source:mac:pane:%77"
+                && entry["paneId"] == "%77"
+        }));
+        assert_eq!(value["partialFailureCount"], 0);
+    }
+
+    #[test]
+    fn sources_add_snapshot_persists_and_lists_source() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let config_file = temp_dir.path().join("config.toml");
+        let snapshot_file = temp_dir.path().join("mac-source.agents.json");
+        let log_dir = temp_dir.path().join("logs");
+        let add = Cli::parse_from([
+            "foreman",
+            "--config-file",
+            config_file.to_str().expect("utf-8 path"),
+            "--log-dir",
+            log_dir.to_str().expect("utf-8 path"),
+            "sources",
+            "add",
+            "snapshot",
+            "mac",
+            "--path",
+            snapshot_file.to_str().expect("utf-8 path"),
+            "--label",
+            "Mac",
+            "--json",
+        ]);
+        run(add).expect("add snapshot source should succeed");
+
+        let list = Cli::parse_from([
+            "foreman",
+            "--config-file",
+            config_file.to_str().expect("utf-8 path"),
+            "--log-dir",
+            log_dir.to_str().expect("utf-8 path"),
+            "sources",
+            "list",
+            "--json",
+        ]);
+        let outcome = run(list).expect("list sources should succeed");
+
+        let RunOutcome::ControlJson(value) = outcome else {
+            panic!("expected JSON outcome, got {outcome:?}");
+        };
+        let sources = value["sources"].as_array().expect("sources array");
+        assert!(sources.iter().any(|source| {
+            source["id"] == "mac" && source["kind"] == "snapshot" && source["label"] == "Mac"
+        }));
+        let config = std::fs::read_to_string(config_file).expect("config should be readable");
+        assert!(config.contains("[sources.mac]"));
+        assert!(config.contains("kind = \"snapshot\""));
     }
 
     #[test]

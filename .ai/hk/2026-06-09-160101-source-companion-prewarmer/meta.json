@@ -1,0 +1,37 @@
+{
+  "attached_artifacts": [],
+  "branch": "feature/source-companion-prewarmer",
+  "diff_hash": "sha256:f11c72e150adc61c0daeacdbf0b026a7a90b367bd76ae7e54043dc6f46a1e065",
+  "dirty": true,
+  "event_count": 13,
+  "event_seq": 14,
+  "evidence_count": 6,
+  "evidence_ids": [
+    "ev_20260609_161901_680582",
+    "ev_20260609_161931_087982",
+    "ev_20260609_162059_563241",
+    "ev_20260609_162113_709914",
+    "ev_20260609_163101_598380",
+    "ev_20260609_163426_109893"
+  ],
+  "file_hashes": {
+    "README.md": "sha256:749b085d064d79c183b1589aa1165fbbf123eba633b895cb0d554c6c3453975c",
+    "artifacts/README.md": "sha256:c4bad9d4652f296a7e4dcf175fe1dd0c66a99ec0b74941cd45c499e84792436c"
+  },
+  "files": [
+    "README.md",
+    "meta.json",
+    "artifacts/README.md"
+  ],
+  "generated_at": "2026-06-09T23:38:28.053818+00:00",
+  "generated_by": "hk export --format handoff-dir",
+  "git_sha": "b14a0ab",
+  "output_path": ".ai/hk/2026-06-09-160101-source-companion-prewarmer",
+  "ready": true,
+  "ready_status": "ready",
+  "schema_version": 1,
+  "sync_status": "synced",
+  "target_root": ".",
+  "target_scope": ".",
+  "work_id": "2026-06-09-160101-source-companion-prewarmer"
+}
