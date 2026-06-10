@@ -296,9 +296,63 @@ foreman sources add snapshot mac --path /tmp/foreman-mac.agents.json --label Mac
 foreman agents --sources all --json
 ```
 
-A snapshot source can show rows from another host before a live network refresh
-runs, but focus/send still require a live source transport such as SSH, a future
-reverse tunnel, or a future companion action endpoint.
+For automatic freshness, run a prewarmer loop instead of manually rewriting the
+snapshot:
+
+```bash
+foreman sources prewarm \
+  --source-id mac \
+  --output /tmp/foreman-mac.agents.json \
+  --interval-ms 2000 \
+  --json
+```
+
+A companion registration is a separate heartbeat/metadata file. Keep snapshot
+freshness and registration freshness separate when diagnosing source health:
+
+```bash
+foreman sources register \
+  --source-id mac \
+  --label Mac \
+  --output /tmp/foreman-mac.registration.json \
+  --snapshot-path /tmp/foreman-mac.agents.json \
+  --companion-endpoint 127.0.0.1:4040 \
+  --display-activation-command ~/.config/foreman/focus-coder-ghostty-tab.sh \
+  --json
+```
+
+Companion sources provide a live JSON-line TCP transport for source inventory,
+focus, extensions, and trusted send. The intended Coder → Mac path is a Mac
+companion server exposed to Coder through a reverse tunnel or equivalent
+port-forward:
+
+```bash
+# On the source host, usually Mac:
+foreman companion serve --bind 127.0.0.1:4040 --allow-send --json
+
+# When the SSH path supports remote forwards, expose Mac's companion on Coder:
+ssh -N -o ExitOnForwardFailure=yes \
+  -R 127.0.0.1:4040:127.0.0.1:4040 \
+  coder.alex-furrier-dev-gpu-1
+
+# On the consuming host, usually Coder:
+foreman sources add companion mac-live \
+  --endpoint 127.0.0.1:4040 \
+  --label "Mac Live" \
+  --allow-send \
+  --activation-command ~/.config/foreman/focus-mac-terminal.sh \
+  --json
+```
+
+The current Coder SSH proxy used in local validation accepted the remote-forward
+request but did not expose a reachable forwarded port inside the Coder workspace.
+If that happens, keep using snapshots/SSH fallback and validate the companion
+protocol locally until a working Coder port-forward path is available.
+
+Only set `allow_send = true` when the companion endpoint is inside an explicit
+trusted boundary, such as a local reverse SSH tunnel. Snapshot sources remain
+read-only; if a companion source has `snapshot_path` configured, Foreman may use
+that cached snapshot for visibility when the live companion endpoint is down.
 
 For Alex's Coder workflow, `coder_connect` attaches to `tmux -L user`. Foreman
 supports this through `--tmux-server-name user` and the persisted

@@ -31,14 +31,20 @@ use crate::services::system_stats::{SysinfoSystemStatsBackend, SystemStatsServic
 use crate::services::ui_preferences::{
     apply_preferences_to_runtime, load_ui_preferences, reset_ui_preferences, PersistedUiPreferences,
 };
-use crate::source_snapshots::{SourceSnapshotEnvelope, SourceSnapshotStore};
+use crate::source_companion::{
+    CompanionAction, CompanionRequest, CompanionResponse, SOURCE_COMPANION_PROTOCOL_VERSION,
+};
+use crate::source_snapshots::{
+    SourceRegistrationEnvelope, SourceSnapshotEnvelope, SourceSnapshotStore,
+};
 use crate::sources::{
-    ForemanSource, LocalSource, SnapshotSource, SourceConfig, SourceDescriptor, SourceError,
-    SourceId, SourceScope, SourcesConfig, SshSource,
+    CompanionSource, ForemanSource, LocalSource, SnapshotSource, SourceConfig, SourceDescriptor,
+    SourceError, SourceId, SourceScope, SourcesConfig, SshSource,
 };
 use clap::{Args, Parser, Subcommand};
 use std::fmt;
-use std::io::Read;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -338,6 +344,11 @@ pub enum CliCommand {
         #[command(subcommand)]
         command: SourcesCommand,
     },
+    /// Run a local source companion server for live reverse-tunnel transports.
+    Companion {
+        #[command(subcommand)]
+        command: CompanionCommand,
+    },
     /// Internal non-recursive source probe used by remote source transports.
     #[command(hide = true)]
     SourceProbe {
@@ -411,6 +422,10 @@ pub enum SourcesCommand {
     },
     /// Write a source-local snapshot of the current tmux inventory.
     Snapshot(SourcesSnapshotArgs),
+    /// Continuously refresh a source-local snapshot.
+    Prewarm(SourcesPrewarmArgs),
+    /// Write a source companion registration/heartbeat file.
+    Register(SourcesRegisterArgs),
     /// Remove a configured source.
     Remove {
         source_id: String,
@@ -431,6 +446,14 @@ pub enum SourcesAddCommand {
     Ssh(SourcesAddSshArgs),
     /// Add a read-only snapshot-backed source.
     Snapshot(SourcesAddSnapshotArgs),
+    /// Add a live companion-backed source.
+    Companion(SourcesAddCompanionArgs),
+}
+
+#[derive(Debug, Subcommand, Clone, PartialEq, Eq)]
+pub enum CompanionCommand {
+    /// Serve source inventory/actions on a local TCP endpoint.
+    Serve(CompanionServeArgs),
 }
 
 #[derive(Debug, Args, Clone, PartialEq, Eq)]
@@ -464,6 +487,29 @@ pub struct SourcesAddSnapshotArgs {
 }
 
 #[derive(Debug, Args, Clone, PartialEq, Eq)]
+pub struct SourcesAddCompanionArgs {
+    pub source_id: String,
+    #[arg(long)]
+    pub endpoint: String,
+    #[arg(long)]
+    pub label: String,
+    #[arg(long, default_value_t = 1_000)]
+    pub timeout_ms: u64,
+    #[arg(long)]
+    pub allow_send: bool,
+    #[arg(long)]
+    pub token: Option<String>,
+    #[arg(long)]
+    pub snapshot_path: Option<PathBuf>,
+    #[arg(long)]
+    pub registration_path: Option<PathBuf>,
+    #[arg(long)]
+    pub activation_command: Option<String>,
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Clone, PartialEq, Eq)]
 pub struct SourcesSnapshotArgs {
     #[arg(long)]
     pub source_id: String,
@@ -471,6 +517,58 @@ pub struct SourcesSnapshotArgs {
     pub output: PathBuf,
     #[arg(long)]
     pub all_panes: bool,
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Clone, PartialEq, Eq)]
+pub struct SourcesPrewarmArgs {
+    #[arg(long)]
+    pub source_id: String,
+    #[arg(long)]
+    pub output: PathBuf,
+    #[arg(long, default_value_t = 2_000)]
+    pub interval_ms: u64,
+    #[arg(long)]
+    pub iterations: Option<u64>,
+    #[arg(long)]
+    pub all_panes: bool,
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Clone, PartialEq, Eq)]
+pub struct SourcesRegisterArgs {
+    #[arg(long)]
+    pub source_id: String,
+    #[arg(long)]
+    pub output: PathBuf,
+    #[arg(long)]
+    pub label: String,
+    #[arg(long)]
+    pub snapshot_path: Option<PathBuf>,
+    #[arg(long)]
+    pub companion_endpoint: Option<String>,
+    #[arg(long)]
+    pub display_activation_command: Option<String>,
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Clone, PartialEq, Eq)]
+pub struct CompanionServeArgs {
+    #[arg(long, default_value = "127.0.0.1:0")]
+    pub bind: String,
+    #[arg(long)]
+    pub token: Option<String>,
+    #[arg(long)]
+    pub allow_send: bool,
+    #[arg(long)]
+    pub all_panes: bool,
+    #[arg(long)]
+    pub max_requests: Option<u64>,
+    #[arg(long)]
+    pub ready_file: Option<PathBuf>,
     #[arg(long)]
     pub json: bool,
 }
@@ -933,6 +1031,9 @@ fn build_source_provider(
         }
         SourceConfig::Ssh { .. } => Box::new(SshSource::new(id, config, query_timeout_ms)),
         SourceConfig::Snapshot { .. } => Box::new(SnapshotSource::new(id, config)),
+        SourceConfig::Companion { .. } => {
+            Box::new(CompanionSource::new(id, config, include_non_agents))
+        }
     }
 }
 
@@ -1100,6 +1201,32 @@ fn handle_source_probe(
     }
 }
 
+fn write_source_snapshot(
+    cli: &Cli,
+    paths: &crate::config::AppPaths,
+    source_id: &str,
+    output: &Path,
+    all_panes: bool,
+) -> Result<SourceSnapshotEnvelope, RunError> {
+    SourceId::validate(source_id).map_err(RunError::Usage)?;
+    let source_id = SourceId::new(source_id.to_string());
+    let mut response = local_agents_response(cli, paths, all_panes)?;
+    response.sources.clear();
+    response.source_diagnostics.clear();
+    response.partial_failure_count = 0;
+    let envelope = SourceSnapshotEnvelope::new(&source_id, response, crate::sources::unix_ms_now());
+    let store = SourceSnapshotStore::new(
+        output
+            .parent()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(".")),
+    );
+    store
+        .publish_snapshot_to(output, &envelope)
+        .map_err(|error| RunError::Usage(format!("failed to write source snapshot: {error}")))?;
+    Ok(envelope)
+}
+
 fn source_action_response(
     value: serde_json::Value,
     json: bool,
@@ -1179,6 +1306,27 @@ fn handle_sources_command(
                         args.json,
                     )
                 }
+                SourcesAddCommand::Companion(args) => {
+                    SourceId::validate(&args.source_id).map_err(RunError::Usage)?;
+                    (
+                        args.source_id.clone(),
+                        SourceConfig::Companion {
+                            label: args.label.clone(),
+                            endpoint: args.endpoint.clone(),
+                            timeout_ms: args.timeout_ms,
+                            enabled: true,
+                            allow_send: args.allow_send,
+                            token: args.token.clone(),
+                            snapshot_path: args.snapshot_path.clone(),
+                            registration_path: args.registration_path.clone(),
+                            display: crate::sources::SourceDisplayConfig::default(),
+                            jump: crate::sources::SourceJumpConfig {
+                                activation_command: args.activation_command.clone(),
+                            },
+                        },
+                        args.json,
+                    )
+                }
             };
             config
                 .sources
@@ -1195,14 +1343,77 @@ fn handle_sources_command(
             source_action_response(value, json, || println!("Added source {source_id}"))
         }
         SourcesCommand::Snapshot(args) => {
+            let envelope =
+                write_source_snapshot(cli, paths, &args.source_id, &args.output, args.all_panes)?;
+            let value = serde_json::json!({
+                "schemaVersion": crate::services::control_api::CONTROL_API_SCHEMA_VERSION,
+                "ok": true,
+                "action": "sources.snapshot",
+                "sourceId": args.source_id,
+                "path": args.output,
+                "capturedAtUnixMs": envelope.captured_at_unix_ms,
+                "expiresAtUnixMs": envelope.expires_at_unix_ms,
+                "entryCount": envelope.response.entries.len(),
+            });
+            source_action_response(value, args.json, || {
+                println!("Wrote source snapshot for {}", args.source_id)
+            })
+        }
+        SourcesCommand::Prewarm(args) => {
+            SourceId::validate(&args.source_id).map_err(RunError::Usage)?;
+            let mut iterations = 0_u64;
+            loop {
+                let envelope = write_source_snapshot(
+                    cli,
+                    paths,
+                    &args.source_id,
+                    &args.output,
+                    args.all_panes,
+                )?;
+                iterations += 1;
+                if args.json {
+                    eprintln!(
+                        "{}",
+                        serde_json::json!({
+                            "schemaVersion": crate::services::control_api::CONTROL_API_SCHEMA_VERSION,
+                            "action": "sources.prewarm.tick",
+                            "sourceId": args.source_id,
+                            "path": args.output,
+                            "capturedAtUnixMs": envelope.captured_at_unix_ms,
+                            "entryCount": envelope.response.entries.len(),
+                            "iteration": iterations,
+                        })
+                    );
+                }
+                if args.iterations.is_some_and(|max| iterations >= max) {
+                    let value = serde_json::json!({
+                        "schemaVersion": crate::services::control_api::CONTROL_API_SCHEMA_VERSION,
+                        "ok": true,
+                        "action": "sources.prewarm",
+                        "sourceId": args.source_id,
+                        "path": args.output,
+                        "iterations": iterations,
+                    });
+                    return source_action_response(value, args.json, || {
+                        println!(
+                            "Prewarmed {} snapshot {} time(s)",
+                            args.source_id, iterations
+                        )
+                    });
+                }
+                std::thread::sleep(std::time::Duration::from_millis(args.interval_ms.max(1)));
+            }
+        }
+        SourcesCommand::Register(args) => {
             SourceId::validate(&args.source_id).map_err(RunError::Usage)?;
             let source_id = SourceId::new(args.source_id.clone());
-            let mut response = local_agents_response(cli, paths, args.all_panes)?;
-            response.sources.clear();
-            response.source_diagnostics.clear();
-            response.partial_failure_count = 0;
-            let envelope =
-                SourceSnapshotEnvelope::new(&source_id, response, crate::sources::unix_ms_now());
+            let now_ms = crate::sources::unix_ms_now();
+            let mut registration =
+                SourceRegistrationEnvelope::new(&source_id, args.label.clone(), now_ms);
+            registration.snapshot_path = args.snapshot_path.clone();
+            registration.companion_endpoint = args.companion_endpoint.clone();
+            registration.tmux_server_name = cli.tmux_server_name.clone();
+            registration.display_activation_command = args.display_activation_command.clone();
             let store = SourceSnapshotStore::new(
                 args.output
                     .parent()
@@ -1210,22 +1421,20 @@ fn handle_sources_command(
                     .unwrap_or_else(|| PathBuf::from(".")),
             );
             store
-                .publish_snapshot_to(&args.output, &envelope)
+                .publish_registration_to(&args.output, &registration)
                 .map_err(|error| {
-                    RunError::Usage(format!("failed to write source snapshot: {error}"))
+                    RunError::Usage(format!("failed to write source registration: {error}"))
                 })?;
             let value = serde_json::json!({
                 "schemaVersion": crate::services::control_api::CONTROL_API_SCHEMA_VERSION,
                 "ok": true,
-                "action": "sources.snapshot",
-                "sourceId": source_id.as_str(),
+                "action": "sources.register",
+                "sourceId": args.source_id,
                 "path": args.output,
-                "capturedAtUnixMs": envelope.captured_at_unix_ms,
-                "expiresAtUnixMs": envelope.expires_at_unix_ms,
-                "entryCount": envelope.response.entries.len(),
+                "heartbeatAtUnixMs": registration.heartbeat_at_unix_ms,
             });
             source_action_response(value, args.json, || {
-                println!("Wrote source snapshot for {}", source_id.as_str())
+                println!("Wrote source registration for {}", args.source_id)
             })
         }
         SourcesCommand::Remove { source_id, json } => {
@@ -1255,6 +1464,7 @@ fn handle_sources_command(
                 .get(&source_id)
                 .ok_or_else(|| RunError::Usage(format!("unknown source {}", source_id.as_str())))?;
             let tmux_endpoint = source_tmux_endpoint_summary(&source_config);
+            let source_metadata = source_metadata_summary(&source_id, &source_config);
             let provider = build_source_provider(
                 &Cli::parse_from(["foreman", "agents"]),
                 paths,
@@ -1286,6 +1496,7 @@ fn handle_sources_command(
                 "source": descriptor,
                 "durationMs": duration_ms,
                 "tmuxEndpoint": tmux_endpoint,
+                "metadata": source_metadata,
                 "diagnostics": diagnostics,
             });
             source_action_response(value, *json, || {
@@ -1295,6 +1506,292 @@ fn handle_sources_command(
                     if ok { "ok" } else { "failed" }
                 )
             })
+        }
+    }
+}
+
+fn source_metadata_summary(
+    source_id: &SourceId,
+    source_config: &SourceConfig,
+) -> serde_json::Value {
+    match source_config {
+        SourceConfig::Companion {
+            registration_path,
+            snapshot_path,
+            ..
+        } => {
+            let registration = registration_path.as_ref().map(|path| {
+                let descriptor = SourceDescriptor::new(source_id, source_config);
+                let store = SourceSnapshotStore::new(
+                    path.parent()
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| PathBuf::from(".")),
+                );
+                match store.load_registration_for_source(
+                    source_id,
+                    &descriptor,
+                    path,
+                    crate::sources::unix_ms_now(),
+                    15_000,
+                ) {
+                    Ok(loaded) => serde_json::json!({
+                        "ok": true,
+                        "path": path.display().to_string(),
+                        "stale": loaded.stale,
+                        "label": loaded.envelope.label,
+                        "heartbeatAtUnixMs": loaded.envelope.heartbeat_at_unix_ms,
+                        "snapshotPath": loaded.envelope.snapshot_path.as_ref().map(|path| path.display().to_string()),
+                        "companionEndpoint": loaded.envelope.companion_endpoint,
+                        "displayActivationCommand": loaded.envelope.display_activation_command,
+                    }),
+                    Err(error) => serde_json::json!({
+                        "ok": false,
+                        "path": path.display().to_string(),
+                        "code": error.code,
+                        "message": error.message,
+                    }),
+                }
+            });
+            serde_json::json!({
+                "registration": registration,
+                "snapshotPath": snapshot_path.as_ref().map(|path| path.display().to_string()),
+            })
+        }
+        _ => serde_json::json!({}),
+    }
+}
+
+fn handle_companion_command(
+    cli: &Cli,
+    paths: &crate::config::AppPaths,
+    command: &CompanionCommand,
+) -> Result<RunOutcome, RunError> {
+    match command {
+        CompanionCommand::Serve(args) => serve_companion(cli, paths, args),
+    }
+}
+
+fn serve_companion(
+    cli: &Cli,
+    paths: &crate::config::AppPaths,
+    args: &CompanionServeArgs,
+) -> Result<RunOutcome, RunError> {
+    let listener = TcpListener::bind(&args.bind)
+        .map_err(|error| RunError::Usage(format!("failed to bind companion endpoint: {error}")))?;
+    let bound = listener.local_addr().map_err(|error| {
+        RunError::Usage(format!("failed to inspect companion endpoint: {error}"))
+    })?;
+    if let Some(path) = &args.ready_file {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                RunError::Usage(format!("failed to create ready-file directory: {error}"))
+            })?;
+        }
+        std::fs::write(path, bound.to_string()).map_err(|error| {
+            RunError::Usage(format!("failed to write companion ready file: {error}"))
+        })?;
+    }
+    if args.json {
+        eprintln!(
+            "{}",
+            serde_json::json!({
+                "schemaVersion": crate::services::control_api::CONTROL_API_SCHEMA_VERSION,
+                "ok": true,
+                "action": "companion.serve.ready",
+                "endpoint": bound.to_string(),
+            })
+        );
+    } else {
+        eprintln!("Foreman source companion listening on {bound}");
+    }
+
+    let mut handled = 0_u64;
+    for stream in listener.incoming() {
+        let mut stream = stream.map_err(|error| {
+            RunError::Usage(format!("failed to accept companion request: {error}"))
+        })?;
+        let timeout = std::time::Duration::from_millis(5_000);
+        stream.set_read_timeout(Some(timeout)).map_err(|error| {
+            RunError::Usage(format!("failed to set companion read timeout: {error}"))
+        })?;
+        stream.set_write_timeout(Some(timeout)).map_err(|error| {
+            RunError::Usage(format!("failed to set companion write timeout: {error}"))
+        })?;
+        let response = match read_companion_request(&stream)
+            .and_then(|request| handle_companion_request(cli, paths, args, request))
+        {
+            Ok(response) => response,
+            Err(response) => *response,
+        };
+        serde_json::to_writer(&mut stream, &response).map_err(|error| {
+            RunError::Usage(format!("failed to write companion response: {error}"))
+        })?;
+        stream.write_all(b"\n").map_err(|error| {
+            RunError::Usage(format!("failed to finish companion response: {error}"))
+        })?;
+        handled += 1;
+        if args.max_requests.is_some_and(|max| handled >= max) {
+            break;
+        }
+    }
+    let value = serde_json::json!({
+        "schemaVersion": crate::services::control_api::CONTROL_API_SCHEMA_VERSION,
+        "ok": true,
+        "action": "companion.serve",
+        "endpoint": bound.to_string(),
+        "handledRequests": handled,
+    });
+    source_action_response(value, args.json, || {
+        println!("Companion served {handled} request(s) on {bound}")
+    })
+}
+
+fn read_companion_request(
+    stream: &std::net::TcpStream,
+) -> Result<CompanionRequest, Box<CompanionResponse>> {
+    let mut reader = BufReader::new(stream.try_clone().map_err(|error| {
+        Box::new(CompanionResponse::error(
+            "unknown".to_string(),
+            "source.companion.io",
+            format!("failed to clone companion stream: {error}"),
+        ))
+    })?);
+    let mut line = String::new();
+    reader.read_line(&mut line).map_err(|error| {
+        Box::new(CompanionResponse::error(
+            "unknown".to_string(),
+            "source.companion.io",
+            format!("failed to read companion request: {error}"),
+        ))
+    })?;
+    let request: CompanionRequest = serde_json::from_str(&line).map_err(|error| {
+        Box::new(CompanionResponse::error(
+            "unknown".to_string(),
+            "source.companion.invalid-json",
+            format!("invalid companion request JSON: {error}"),
+        ))
+    })?;
+    if request.protocol_version != SOURCE_COMPANION_PROTOCOL_VERSION {
+        return Err(Box::new(CompanionResponse::error(
+            request.request_id,
+            "source.companion.protocol-unsupported",
+            format!(
+                "unsupported companion protocol version {}",
+                request.protocol_version
+            ),
+        )));
+    }
+    Ok(request)
+}
+
+fn handle_companion_request(
+    cli: &Cli,
+    paths: &crate::config::AppPaths,
+    args: &CompanionServeArgs,
+    request: CompanionRequest,
+) -> Result<CompanionResponse, Box<CompanionResponse>> {
+    if args.token.as_ref() != request.token.as_ref() {
+        return Err(Box::new(CompanionResponse::error(
+            request.request_id,
+            "source.companion.unauthorized",
+            "companion request token did not match",
+        )));
+    }
+    match request.action {
+        CompanionAction::Agents => local_agents_response(cli, paths, request.all_panes)
+            .map(|response| CompanionResponse::agents(request.request_id.clone(), response))
+            .map_err(|error| {
+                Box::new(CompanionResponse::error(
+                    request.request_id,
+                    "source.companion.agents-failed",
+                    error.to_string(),
+                ))
+            }),
+        CompanionAction::Focus => {
+            let Some(pane) = request.pane_id.as_deref() else {
+                return Err(Box::new(CompanionResponse::error(
+                    request.request_id,
+                    "source.companion.missing-pane",
+                    "focus requires paneId",
+                )));
+            };
+            let adapter = TmuxAdapter::new(tmux_backend_from_cli(cli));
+            let pane_id = crate::app::PaneId::new(pane.to_string());
+            adapter
+                .focus_pane(&pane_id)
+                .map(|_| {
+                    CompanionResponse::action(request.request_id.clone(), focus_response(pane))
+                })
+                .map_err(|error| {
+                    Box::new(CompanionResponse::error(
+                        request.request_id,
+                        "source.companion.focus-failed",
+                        error.to_string(),
+                    ))
+                })
+        }
+        CompanionAction::Send => {
+            if !args.allow_send {
+                return Err(Box::new(CompanionResponse::error(
+                    request.request_id,
+                    "source.companion.send-disabled",
+                    "companion server has send disabled",
+                )));
+            }
+            let Some(pane) = request.pane_id.as_deref() else {
+                return Err(Box::new(CompanionResponse::error(
+                    request.request_id,
+                    "source.companion.missing-pane",
+                    "send requires paneId",
+                )));
+            };
+            let text = request.text.as_deref().unwrap_or_default();
+            let adapter = TmuxAdapter::new(tmux_backend_from_cli(cli));
+            let pane_id = crate::app::PaneId::new(pane.to_string());
+            adapter
+                .send_input(&pane_id, text)
+                .map(|result| {
+                    CompanionResponse::action(
+                        request.request_id.clone(),
+                        send_response(pane, result.bytes_sent),
+                    )
+                })
+                .map_err(|error| {
+                    Box::new(CompanionResponse::error(
+                        request.request_id,
+                        "source.companion.send-failed",
+                        error.to_string(),
+                    ))
+                })
+        }
+        CompanionAction::Extensions => {
+            let Some(pane) = request.pane_id.as_deref() else {
+                return Err(Box::new(CompanionResponse::error(
+                    request.request_id,
+                    "source.companion.missing-pane",
+                    "extensions requires paneId",
+                )));
+            };
+            let file_config = load_config(&paths.config_file).map_err(|error| {
+                Box::new(CompanionResponse::error(
+                    request.request_id.clone(),
+                    "source.companion.extensions-failed",
+                    error.to_string(),
+                ))
+            })?;
+            let runtime = RuntimeConfig::from_sources(paths.clone(), file_config, cli);
+            let (mut state, ..) = bootstrap_state(&runtime);
+            apply_linked_repositories_to_state(&mut state, &runtime);
+            let pane_id = crate::app::PaneId::new(pane.to_string());
+            extension_cards_response_for_pane(&state, &pane_id)
+                .map(|value| CompanionResponse::extensions(request.request_id.clone(), value))
+                .map_err(|error| {
+                    Box::new(CompanionResponse::error(
+                        request.request_id,
+                        "source.companion.extensions-failed",
+                        error.to_string(),
+                    ))
+                })
         }
     }
 }
@@ -1323,6 +1820,20 @@ fn source_tmux_endpoint_summary(source_config: &SourceConfig) -> serde_json::Val
             "kind": "snapshot",
             "path": path.display().to_string(),
             "note": "Snapshot sources are read-only cached inventories. Focus/send require a live source transport."
+        }),
+        SourceConfig::Companion {
+            endpoint,
+            allow_send,
+            snapshot_path,
+            registration_path,
+            ..
+        } => serde_json::json!({
+            "kind": "companion",
+            "endpoint": endpoint,
+            "allowSend": allow_send,
+            "snapshotPath": snapshot_path.as_ref().map(|path| path.display().to_string()),
+            "registrationPath": registration_path.as_ref().map(|path| path.display().to_string()),
+            "note": "Companion sources use a live JSON-line TCP protocol, commonly through a reverse SSH tunnel. Send requires allow_send=true on the trusted source config and companion server."
         }),
     }
 }
@@ -1413,6 +1924,9 @@ fn maybe_handle_control_command(
             None => Ok(Some(list_repository_links(paths, false)?)),
         },
         CliCommand::Sources { command } => Ok(Some(handle_sources_command(cli, paths, command)?)),
+        CliCommand::Companion { command } => {
+            Ok(Some(handle_companion_command(cli, paths, command)?))
+        }
         CliCommand::SourceProbe {
             local_only,
             command,
@@ -3226,6 +3740,57 @@ default_sort = "stable"
                 && entry["paneId"] == "%77"
         }));
         assert_eq!(value["partialFailureCount"], 0);
+    }
+
+    #[test]
+    fn sources_add_companion_persists_and_lists_source() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let config_file = temp_dir.path().join("config.toml");
+        let log_dir = temp_dir.path().join("logs");
+        let add = Cli::parse_from([
+            "foreman",
+            "--config-file",
+            config_file.to_str().expect("utf-8 path"),
+            "--log-dir",
+            log_dir.to_str().expect("utf-8 path"),
+            "sources",
+            "add",
+            "companion",
+            "mac",
+            "--endpoint",
+            "127.0.0.1:4040",
+            "--label",
+            "Mac",
+            "--allow-send",
+            "--activation-command",
+            "echo activate",
+            "--json",
+        ]);
+        run(add).expect("add companion source should succeed");
+
+        let list = Cli::parse_from([
+            "foreman",
+            "--config-file",
+            config_file.to_str().expect("utf-8 path"),
+            "--log-dir",
+            log_dir.to_str().expect("utf-8 path"),
+            "sources",
+            "list",
+            "--json",
+        ]);
+        let outcome = run(list).expect("list sources should succeed");
+
+        let RunOutcome::ControlJson(value) = outcome else {
+            panic!("expected JSON outcome, got {outcome:?}");
+        };
+        let sources = value["sources"].as_array().expect("sources array");
+        assert!(sources.iter().any(|source| {
+            source["id"] == "mac" && source["kind"] == "companion" && source["label"] == "Mac"
+        }));
+        let config = std::fs::read_to_string(config_file).expect("config should be readable");
+        assert!(config.contains("kind = \"companion\""));
+        assert!(config.contains("allow_send = true"));
+        assert!(config.contains("activation_command = \"echo activate\""));
     }
 
     #[test]

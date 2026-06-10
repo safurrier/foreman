@@ -1,7 +1,7 @@
 ---
 title: ADR 0004 — Source companion and relay architecture
 summary: Design the post-SSH source model for bidirectional Mac ↔ Coder visibility, prewarmed source state, and robust source display activation.
-status: proposed
+status: accepted
 updated: 2026-06-09
 related:
   code:
@@ -18,7 +18,10 @@ related:
 
 # ADR 0004: Source companion and relay architecture
 
-Status: proposed
+Status: accepted. Initial implementation now includes the snapshot store,
+prewarmer command, registration file, and JSON-line companion transport. The
+current Coder SSH proxy still needs a reachable reverse-forward/port-forward
+path before the live Coder → Mac tunnel proof can be marked complete.
 
 ## Context
 
@@ -74,6 +77,26 @@ The proposed direction is:
 This keeps the proven source-aware UI/action model from ADR 0002 while moving
 latency, endpoint discovery, and display registration out of the popup critical
 path.
+
+## Implementation status
+
+The first implementation on PR #27 adds:
+
+- `SourceSnapshotStore` with atomic snapshot and registration writes.
+- `foreman sources snapshot` and `foreman sources prewarm` for one-shot and
+  looped snapshot publication.
+- `foreman sources register` for source companion heartbeat/metadata files.
+- `snapshot` sources for read-only cached visibility.
+- `companion` sources backed by a JSON-line TCP protocol.
+- `foreman companion serve` for live inventory, focus, extensions, and trusted
+  send over an explicit endpoint.
+- Python live-smoke orchestration in
+  `scripts/source_companion_live_smoke.py`.
+
+The code path is ready for a reverse tunnel or equivalent port-forward, but the
+current Coder SSH proxy accepted `ssh -R` while the forwarded port remained
+unreachable from inside the Coder workspace. Treat that as a transport
+constraint, not a reason to change the companion protocol.
 
 ## Current baseline from ADR 0002
 

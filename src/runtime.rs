@@ -26,8 +26,8 @@ use crate::services::startup_cache::{current_time_ms, write_startup_cache};
 use crate::services::system_stats::{SysinfoSystemStatsBackend, SystemStatsService};
 use crate::services::ui_preferences::{save_ui_preferences, PersistedUiPreferences};
 use crate::sources::{
-    ForemanSource, SnapshotSource, SourceConfig, SourceDescriptor, SourceDiagnostic, SourceScope,
-    SshSource,
+    CompanionSource, ForemanSource, SnapshotSource, SourceConfig, SourceDescriptor,
+    SourceDiagnostic, SourceScope, SshSource,
 };
 use crate::ui::render::{render, sidebar_viewport_rows_for_area_with_popup};
 use crossterm::cursor::{Hide, Show};
@@ -2251,6 +2251,34 @@ fn load_source_aggregate_inventory_refresh_payload(
                     let started = Instant::now();
                     match source.agents() {
                         Ok(response) => {
+                            let source_diagnostics = response.source_diagnostics.clone();
+                            Ok((
+                                inventory_from_agents_response(&descriptor, response),
+                                source_diagnostics,
+                            ))
+                        }
+                        Err(error) => {
+                            let diagnostic = SourceDiagnostic::warning(
+                                &descriptor,
+                                error.code,
+                                error.message,
+                                error.retryable,
+                                Some(started.elapsed().as_millis() as u64),
+                            );
+                            Err((descriptor, diagnostic))
+                        }
+                    }
+                }))
+            }
+            SourceConfig::Companion { .. } => {
+                let descriptor = SourceDescriptor::new(&source_id, &source_config);
+                let cache_runtime = runtime.clone();
+                Some(thread::spawn(move || {
+                    let source = CompanionSource::new(source_id, source_config, false);
+                    let started = Instant::now();
+                    match source.agents() {
+                        Ok(response) => {
+                            write_cached_source_response(&cache_runtime, &descriptor, &response);
                             let source_diagnostics = response.source_diagnostics.clone();
                             Ok((
                                 inventory_from_agents_response(&descriptor, response),

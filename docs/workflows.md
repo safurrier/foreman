@@ -238,12 +238,28 @@ local-only, or the overlap case fails to defer and later apply the remote merge.
 Use this script directly when iterating on event-loop scheduling, popup source
 refresh, PR/extension lookup cadence, or tmux inventory work.
 
-For opt-in live Mac/Coder source companion checks, run
-`FOREMAN_CODER_HOST=<host> scripts/smoke-source-snapshot-coder.sh` after
-installing the candidate Foreman binary on the Coder host. The smoke writes a
-Mac source snapshot, copies it to Coder, configures a temporary snapshot source,
-and verifies that Coder Foreman can render both its local rows and Mac snapshot
-rows.
+For opt-in live Mac/Coder source companion checks, prefer the Python harness:
+
+```bash
+scripts/source_companion_live_smoke.py full --coder --install-coder --json
+```
+
+It builds the candidate, can rsync/install it on Coder, writes Mac source
+snapshots, configures temporary Coder source files, starts a local companion
+server, and records structured artifacts under `.ai/validation/source-companion/`.
+Use focused scenarios while iterating:
+
+```bash
+scripts/source_companion_live_smoke.py snapshot --json
+scripts/source_companion_live_smoke.py companion-local --json
+scripts/source_companion_live_smoke.py coder-snapshot --install-coder --json
+scripts/source_companion_live_smoke.py reverse-actions --install-coder --json
+```
+
+The older `scripts/smoke-source-snapshot-coder.sh` remains a small compatibility
+wrapper for the read-only snapshot path, but complex SSH/tunnel/process
+lifecycle checks should live in the Python harness so failures include JSON
+summaries and captured logs.
 
 When `inventory_tmux` looks expensive, check whether the line shows high
 `captures=` counts or whether cached preview reuse has dropped unexpectedly.

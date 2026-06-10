@@ -6,6 +6,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 pub const SOURCE_SNAPSHOT_SCHEMA_VERSION: u16 = 1;
+pub const SOURCE_REGISTRATION_SCHEMA_VERSION: u16 = 1;
 pub const SNAPSHOT_FRESH_MS: u128 = 2_000;
 pub const SNAPSHOT_WARM_MS: u128 = 15_000;
 pub const SNAPSHOT_STALE_MS: u128 = 5 * 60_000;
@@ -27,6 +28,46 @@ pub struct SourceSnapshotEnvelope {
 pub struct SourceSnapshotHealth {
     pub status: String,
     pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceRegistrationEnvelope {
+    pub schema_version: u16,
+    pub source_id: String,
+    pub label: String,
+    pub registered_at_unix_ms: u128,
+    pub heartbeat_at_unix_ms: u128,
+    #[serde(default)]
+    pub snapshot_path: Option<PathBuf>,
+    #[serde(default)]
+    pub companion_endpoint: Option<String>,
+    #[serde(default)]
+    pub tmux_server_name: Option<String>,
+    #[serde(default)]
+    pub display_activation_command: Option<String>,
+}
+
+impl SourceRegistrationEnvelope {
+    pub fn new(source_id: &SourceId, label: impl Into<String>, now_ms: u128) -> Self {
+        Self {
+            schema_version: SOURCE_REGISTRATION_SCHEMA_VERSION,
+            source_id: source_id.as_str().to_string(),
+            label: label.into(),
+            registered_at_unix_ms: now_ms,
+            heartbeat_at_unix_ms: now_ms,
+            snapshot_path: None,
+            companion_endpoint: None,
+            tmux_server_name: None,
+            display_activation_command: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LoadedSourceRegistration {
+    pub envelope: SourceRegistrationEnvelope,
+    pub stale: bool,
 }
 
 impl SourceSnapshotEnvelope {
@@ -79,6 +120,12 @@ impl SourceSnapshotStore {
             .join(format!("{}.agents.json", source_id.as_str()))
     }
 
+    pub fn default_registration_file_for(&self, source_id: &SourceId) -> PathBuf {
+        self.root
+            .join("sources")
+            .join(format!("{}.registration.json", source_id.as_str()))
+    }
+
     pub fn publish_snapshot(
         &self,
         source_id: &SourceId,
@@ -87,11 +134,31 @@ impl SourceSnapshotStore {
         self.publish_snapshot_to(&self.default_file_for(source_id), envelope)
     }
 
+    pub fn publish_registration(
+        &self,
+        source_id: &SourceId,
+        envelope: &SourceRegistrationEnvelope,
+    ) -> io::Result<PathBuf> {
+        self.publish_registration_to(&self.default_registration_file_for(source_id), envelope)
+    }
+
+    pub fn publish_registration_to(
+        &self,
+        path: &Path,
+        envelope: &SourceRegistrationEnvelope,
+    ) -> io::Result<PathBuf> {
+        self.atomic_write_json(path, envelope)
+    }
+
     pub fn publish_snapshot_to(
         &self,
         path: &Path,
         envelope: &SourceSnapshotEnvelope,
     ) -> io::Result<PathBuf> {
+        self.atomic_write_json(path, envelope)
+    }
+
+    fn atomic_write_json<T: Serialize>(&self, path: &Path, value: &T) -> io::Result<PathBuf> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -100,7 +167,7 @@ impl SourceSnapshotStore {
             std::process::id(),
             crate::sources::unix_ms_now()
         ));
-        let payload = serde_json::to_vec_pretty(envelope).map_err(io::Error::other)?;
+        let payload = serde_json::to_vec_pretty(value).map_err(io::Error::other)?;
         {
             let mut file = fs::File::create(&tmp_path)?;
             file.write_all(&payload)?;
@@ -166,6 +233,42 @@ impl SourceSnapshotStore {
         })
     }
 
+    pub fn load_registration_for_source(
+        &self,
+        source_id: &SourceId,
+        descriptor: &SourceDescriptor,
+        path: &Path,
+        now_ms: u128,
+        stale_after_ms: u128,
+    ) -> SourceResult<LoadedSourceRegistration> {
+        let payload = fs::read_to_string(path).map_err(|error| {
+            SourceError::new(
+                "source.registration.unavailable",
+                format!(
+                    "source registration {} could not read {}: {error}",
+                    source_id,
+                    path.display()
+                ),
+                true,
+            )
+        })?;
+        let envelope: SourceRegistrationEnvelope =
+            serde_json::from_str(&payload).map_err(|error| {
+                SourceError::new(
+                    "source.registration.invalid-json",
+                    format!(
+                        "source registration {} returned invalid JSON: {error}",
+                        source_id
+                    ),
+                    false,
+                )
+            })?;
+        validate_registration(source_id, &envelope)?;
+        let stale = now_ms.saturating_sub(envelope.heartbeat_at_unix_ms) > stale_after_ms;
+        let _ = descriptor;
+        Ok(LoadedSourceRegistration { envelope, stale })
+    }
+
     pub fn stale_diagnostic(
         descriptor: &SourceDescriptor,
         freshness: SnapshotFreshness,
@@ -187,6 +290,33 @@ impl SourceSnapshotStore {
             None,
         ))
     }
+}
+
+fn validate_registration(
+    source_id: &SourceId,
+    envelope: &SourceRegistrationEnvelope,
+) -> SourceResult<()> {
+    if envelope.schema_version != SOURCE_REGISTRATION_SCHEMA_VERSION {
+        return Err(SourceError::new(
+            "source.registration.schema-unsupported",
+            format!(
+                "source registration {} returned unsupported registration schema version {}",
+                source_id, envelope.schema_version
+            ),
+            false,
+        ));
+    }
+    if envelope.source_id != source_id.as_str() {
+        return Err(SourceError::new(
+            "source.registration.source-id-mismatch",
+            format!(
+                "source registration {} contained source id {}",
+                source_id, envelope.source_id
+            ),
+            false,
+        ));
+    }
+    Ok(())
 }
 
 fn validate_envelope(source_id: &SourceId, envelope: &SourceSnapshotEnvelope) -> SourceResult<()> {
@@ -277,6 +407,52 @@ mod tests {
         assert_eq!(loaded.envelope.source_id, "mac");
         assert_eq!(loaded.envelope.response.entries[0].pane_id, "%42");
         assert_eq!(loaded.freshness, SnapshotFreshness::Fresh);
+    }
+
+    #[test]
+    fn snapshot_store_round_trips_registration_atomically() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SourceSnapshotStore::new(dir.path());
+        let source_id = SourceId::new("mac");
+        let registration = SourceRegistrationEnvelope::new(&source_id, "Mac", 1_000);
+        let path = store
+            .publish_registration(&source_id, &registration)
+            .expect("publish registration");
+        let loaded = store
+            .load_registration_for_source(&source_id, &descriptor(), &path, 2_000, 5_000)
+            .expect("load registration");
+        assert_eq!(loaded.envelope.label, "Mac");
+        assert!(!loaded.stale);
+    }
+
+    #[test]
+    fn snapshot_store_marks_stale_registration() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SourceSnapshotStore::new(dir.path());
+        let source_id = SourceId::new("mac");
+        let registration = SourceRegistrationEnvelope::new(&source_id, "Mac", 1_000);
+        let path = store
+            .publish_registration(&source_id, &registration)
+            .expect("publish registration");
+        let loaded = store
+            .load_registration_for_source(&source_id, &descriptor(), &path, 10_001, 5_000)
+            .expect("load registration");
+        assert!(loaded.stale);
+    }
+
+    #[test]
+    fn snapshot_store_rejects_registration_source_id_mismatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SourceSnapshotStore::new(dir.path());
+        let requested = SourceId::new("mac");
+        let registration = SourceRegistrationEnvelope::new(&SourceId::new("other"), "Other", 1_000);
+        let path = store
+            .publish_registration_to(&dir.path().join("bad-registration.json"), &registration)
+            .expect("publish registration");
+        let error = store
+            .load_registration_for_source(&requested, &descriptor(), &path, 2_000, 5_000)
+            .expect_err("source mismatch should fail");
+        assert_eq!(error.code, "source.registration.source-id-mismatch");
     }
 
     #[test]

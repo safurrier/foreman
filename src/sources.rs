@@ -1,4 +1,7 @@
 use crate::services::control_api::{ActionResponse, AgentsResponse};
+use crate::source_companion::{
+    validate_action_response, validate_agents_response, CompanionAction, CompanionClient,
+};
 use crate::source_snapshots::{SnapshotFreshness, SourceSnapshotStore};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -42,6 +45,10 @@ fn default_foreman_binary() -> String {
 
 fn default_ssh_binary() -> String {
     "ssh".to_string()
+}
+
+fn default_companion_timeout_ms() -> u64 {
+    1_000
 }
 
 fn default_enabled() -> bool {
@@ -220,6 +227,26 @@ pub enum SourceConfig {
         #[serde(default)]
         display: SourceDisplayConfig,
     },
+    Companion {
+        label: String,
+        endpoint: String,
+        #[serde(default = "default_companion_timeout_ms")]
+        timeout_ms: u64,
+        #[serde(default = "default_enabled")]
+        enabled: bool,
+        #[serde(default)]
+        allow_send: bool,
+        #[serde(default)]
+        token: Option<String>,
+        #[serde(default)]
+        snapshot_path: Option<PathBuf>,
+        #[serde(default)]
+        registration_path: Option<PathBuf>,
+        #[serde(default)]
+        display: SourceDisplayConfig,
+        #[serde(default)]
+        jump: SourceJumpConfig,
+    },
 }
 
 fn default_local_label() -> String {
@@ -238,9 +265,10 @@ impl SourceConfig {
 
     pub fn label(&self) -> &str {
         match self {
-            Self::Local { label, .. } | Self::Ssh { label, .. } | Self::Snapshot { label, .. } => {
-                label
-            }
+            Self::Local { label, .. }
+            | Self::Ssh { label, .. }
+            | Self::Snapshot { label, .. }
+            | Self::Companion { label, .. } => label,
         }
     }
 
@@ -261,14 +289,15 @@ impl SourceConfig {
         match self {
             Self::Local { display, .. }
             | Self::Ssh { display, .. }
-            | Self::Snapshot { display, .. } => display,
+            | Self::Snapshot { display, .. }
+            | Self::Companion { display, .. } => display,
         }
     }
 
     pub fn jump(&self) -> Option<&SourceJumpConfig> {
         match self {
             Self::Local { .. } | Self::Snapshot { .. } => None,
-            Self::Ssh { jump, .. } => Some(jump),
+            Self::Ssh { jump, .. } | Self::Companion { jump, .. } => Some(jump),
         }
     }
 
@@ -277,6 +306,7 @@ impl SourceConfig {
             Self::Local { .. } => SourceKind::Local,
             Self::Ssh { .. } => SourceKind::Ssh,
             Self::Snapshot { .. } => SourceKind::Snapshot,
+            Self::Companion { .. } => SourceKind::Companion,
         }
     }
 
@@ -284,7 +314,8 @@ impl SourceConfig {
         match self {
             Self::Local { enabled, .. }
             | Self::Ssh { enabled, .. }
-            | Self::Snapshot { enabled, .. } => *enabled,
+            | Self::Snapshot { enabled, .. }
+            | Self::Companion { enabled, .. } => *enabled,
         }
     }
 }
@@ -295,6 +326,7 @@ pub enum SourceKind {
     Local,
     Ssh,
     Snapshot,
+    Companion,
 }
 
 impl SourceKind {
@@ -303,6 +335,7 @@ impl SourceKind {
             Self::Local => "local",
             Self::Ssh => "ssh",
             Self::Snapshot => "snapshot",
+            Self::Companion => "companion",
         }
     }
 }
@@ -873,6 +906,211 @@ impl ForemanSource for SnapshotSource {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct CompanionSource {
+    id: SourceId,
+    descriptor: SourceDescriptor,
+    endpoint: String,
+    timeout_ms: u64,
+    allow_send: bool,
+    token: Option<String>,
+    snapshot_path: Option<PathBuf>,
+    all_panes: bool,
+}
+
+impl CompanionSource {
+    pub fn new(id: SourceId, config: SourceConfig, all_panes: bool) -> Self {
+        let descriptor = SourceDescriptor::new(&id, &config);
+        let (endpoint, timeout_ms, allow_send, token, snapshot_path) = match config {
+            SourceConfig::Companion {
+                endpoint,
+                timeout_ms,
+                allow_send,
+                token,
+                snapshot_path,
+                ..
+            } => (endpoint, timeout_ms, allow_send, token, snapshot_path),
+            _ => (
+                String::new(),
+                default_companion_timeout_ms(),
+                false,
+                None,
+                None,
+            ),
+        };
+        Self {
+            id,
+            descriptor,
+            endpoint,
+            timeout_ms,
+            allow_send,
+            token,
+            snapshot_path,
+            all_panes,
+        }
+    }
+
+    fn client(&self) -> CompanionClient {
+        CompanionClient::new(self.endpoint.clone(), self.timeout_ms, self.token.clone())
+    }
+
+    fn cached_snapshot_agents(&self) -> Option<SourceResult<AgentsResponse>> {
+        let path = self.snapshot_path.as_ref()?;
+        let store = SourceSnapshotStore::new(
+            path.parent()
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from(".")),
+        );
+        let now_ms = unix_ms_now();
+        Some(
+            store
+                .load_snapshot_for_source(&self.id, &self.descriptor, path, now_ms)
+                .map(|loaded| {
+                    let mut response = loaded.envelope.response;
+                    response.source_diagnostics.push(SourceDiagnostic::warning(
+                        &self.descriptor,
+                        "source.companion.fallback-snapshot",
+                        format!(
+                            "{} live companion unavailable; using cached snapshot",
+                            self.descriptor.label
+                        ),
+                        true,
+                        None,
+                    ));
+                    response.partial_failure_count += 1;
+                    if let Some(diagnostic) = SourceSnapshotStore::stale_diagnostic(
+                        &self.descriptor,
+                        loaded.freshness,
+                        loaded.envelope.captured_at_unix_ms,
+                        now_ms,
+                    ) {
+                        response.source_diagnostics.push(diagnostic);
+                        response.partial_failure_count += 1;
+                    }
+                    response
+                }),
+        )
+    }
+
+    fn map_error(&self, error: crate::source_companion::CompanionClientError) -> SourceError {
+        match error {
+            crate::source_companion::CompanionClientError::Remote { code, message } => {
+                SourceError::new(code, message, true)
+            }
+            other => SourceError::new(
+                "source.companion.unavailable",
+                format!("companion source {} failed: {other}", self.id),
+                true,
+            ),
+        }
+    }
+}
+
+impl ForemanSource for CompanionSource {
+    fn descriptor(&self) -> SourceDescriptor {
+        self.descriptor.clone()
+    }
+
+    fn agents(&self) -> SourceResult<AgentsResponse> {
+        let response =
+            match self
+                .client()
+                .request(CompanionAction::Agents, None, None, self.all_panes)
+            {
+                Ok(response) => response,
+                Err(error) => {
+                    if let Some(cached) = self.cached_snapshot_agents() {
+                        return cached;
+                    }
+                    return Err(self.map_error(error));
+                }
+            };
+        let agents = response.agents.ok_or_else(|| {
+            SourceError::new(
+                "source.companion.invalid-response",
+                format!("companion source {} did not return agents", self.id),
+                false,
+            )
+        })?;
+        validate_agents_response(agents).map_err(|message| {
+            SourceError::new("source.companion.schema-unsupported", message, false)
+        })
+    }
+
+    fn focus(&self, pane_id: &str) -> SourceResult<ActionResponse> {
+        let response = self
+            .client()
+            .request(
+                CompanionAction::Focus,
+                Some(pane_id.to_string()),
+                None,
+                false,
+            )
+            .map_err(|error| self.map_error(error))?;
+        let action = response.action.ok_or_else(|| {
+            SourceError::new(
+                "source.companion.invalid-response",
+                format!("companion source {} did not return focus action", self.id),
+                false,
+            )
+        })?;
+        validate_action_response(action).map_err(|message| {
+            SourceError::new("source.companion.schema-unsupported", message, false)
+        })
+    }
+
+    fn send(&self, pane_id: &str, text: &str) -> SourceResult<ActionResponse> {
+        if !self.allow_send {
+            return Err(SourceError::new(
+                "source.companion.send-disabled",
+                format!(
+                    "companion source {} has send disabled; set allow_send=true only for trusted transports",
+                    self.id
+                ),
+                false,
+            ));
+        }
+        let response = self
+            .client()
+            .request(
+                CompanionAction::Send,
+                Some(pane_id.to_string()),
+                Some(text.to_string()),
+                false,
+            )
+            .map_err(|error| self.map_error(error))?;
+        let action = response.action.ok_or_else(|| {
+            SourceError::new(
+                "source.companion.invalid-response",
+                format!("companion source {} did not return send action", self.id),
+                false,
+            )
+        })?;
+        validate_action_response(action).map_err(|message| {
+            SourceError::new("source.companion.schema-unsupported", message, false)
+        })
+    }
+
+    fn extensions(&self, pane_id: &str) -> SourceResult<Value> {
+        let response = self
+            .client()
+            .request(
+                CompanionAction::Extensions,
+                Some(pane_id.to_string()),
+                None,
+                false,
+            )
+            .map_err(|error| self.map_error(error))?;
+        response.extensions.ok_or_else(|| {
+            SourceError::new(
+                "source.companion.invalid-response",
+                format!("companion source {} did not return extensions", self.id),
+                false,
+            )
+        })
+    }
+}
+
 fn validate_action_schema(
     source_id: &SourceId,
     action: &str,
@@ -1173,6 +1411,74 @@ mod tests {
             started.elapsed() < Duration::from_millis(275),
             "sources should be queried concurrently"
         );
+    }
+
+    #[test]
+    fn companion_source_queries_json_line_endpoint() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = listener.local_addr().unwrap().to_string();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            use std::io::{BufRead, Write};
+            reader.read_line(&mut line).unwrap();
+            let request: crate::source_companion::CompanionRequest =
+                serde_json::from_str(&line).unwrap();
+            serde_json::to_writer(
+                &mut stream,
+                &crate::source_companion::CompanionResponse::agents(
+                    request.request_id,
+                    response("%9"),
+                ),
+            )
+            .unwrap();
+            stream.write_all(b"\n").unwrap();
+        });
+        let source = CompanionSource::new(
+            SourceId::new("mac"),
+            SourceConfig::Companion {
+                label: "Mac".to_string(),
+                endpoint,
+                timeout_ms: 1_000,
+                enabled: true,
+                allow_send: false,
+                token: None,
+                snapshot_path: None,
+                registration_path: None,
+                display: SourceDisplayConfig::default(),
+                jump: SourceJumpConfig::default(),
+            },
+            true,
+        );
+
+        let result = source.agents().unwrap();
+        assert_eq!(result.entries[0].pane_id, "%9");
+    }
+
+    #[test]
+    fn companion_source_requires_explicit_send_trust() {
+        let source = CompanionSource::new(
+            SourceId::new("mac"),
+            SourceConfig::Companion {
+                label: "Mac".to_string(),
+                endpoint: "127.0.0.1:1".to_string(),
+                timeout_ms: 1,
+                enabled: true,
+                allow_send: false,
+                token: None,
+                snapshot_path: None,
+                registration_path: None,
+                display: SourceDisplayConfig::default(),
+                jump: SourceJumpConfig::default(),
+            },
+            false,
+        );
+
+        let error = source
+            .send("%1", "hello")
+            .expect_err("send should be gated");
+        assert_eq!(error.code, "source.companion.send-disabled");
     }
 
     #[test]
