@@ -245,6 +245,15 @@ pub struct ControlDiagnostic {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DisplayActivationResponse {
+    pub attempted: bool,
+    pub ok: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ActionResponse {
     pub schema_version: u16,
     pub ok: bool,
@@ -255,6 +264,8 @@ pub struct ActionResponse {
     #[serde(default = "default_source_pane_id")]
     pub source_pane_id: String,
     pub bytes_sent: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_activation: Option<DisplayActivationResponse>,
 }
 
 impl ActionResponse {
@@ -345,6 +356,7 @@ pub fn focus_response(pane_id: &str) -> ActionResponse {
         pane_id: pane_id.to_string(),
         source_pane_id,
         bytes_sent: None,
+        display_activation: None,
     }
 }
 
@@ -358,6 +370,7 @@ pub fn send_response(pane_id: &str, bytes_sent: usize) -> ActionResponse {
         pane_id: pane_id.to_string(),
         source_pane_id,
         bytes_sent: Some(bytes_sent),
+        display_activation: None,
     }
 }
 

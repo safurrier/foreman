@@ -81,12 +81,20 @@ Claude, Codex, and Pi E2Es with `mise run verify-native`.
   this overlay.
 
 - **DO** verify remote SSH sources use the same remote tmux binary/path as the
-  attached terminal session, especially on Coder. **NOT** assume `/usr/bin/tmux`
-  can query a server created by Homebrew/Nix tmux. **BECAUSE** Coder's
-  non-login SSH path can pick `/usr/bin/tmux 3.2a`, while the interactive
-  `tmux -L user` server may be `tmux 3.6a`; the symptom is `server exited
-  unexpectedly` or missing remote agent panes until the source command loads
-  the login PATH or uses a wrapper.
+  attached terminal session, especially on remote dev hosts such as Coder.
+  **NOT** assume `/usr/bin/tmux` can query a server created by Homebrew/Nix
+  tmux. **BECAUSE** non-login SSH paths can pick a different tmux than the
+  interactive shell; the symptom is `server exited unexpectedly` or missing
+  remote agent panes until the source command loads the login PATH or uses a
+  wrapper.
+
+- **DO** keep public examples and built-in command names generic for source
+  companion flows: say remote dev host, SSH host, laptop, workstation, or Coder
+  as a vendor-neutral platform example. **NOT** bake company-specific hostnames,
+  internal infrastructure names, or personal Discord workflow details into repo
+  docs, CLI names, tests, or validation artifacts. **BECAUSE** Foreman is a
+  public repo and source-companion support should read as general remote-host
+  infrastructure, not Alex's work setup.
 
 - **DO** treat normal typing in the macOS overlay as search input and arrow
   keys as agent navigation. **NOT** require users to manually re-focus the
@@ -164,12 +172,24 @@ Claude, Codex, and Pi E2Es with `mise run verify-native`.
   about; operators should not need to remember that "global overview" only
   exists in the native app.
 
+- **DO** validate source companion reverse tunnels with `foreman companion
+  probe` or another real JSON-line companion request. **NOT** add ad hoc
+  remote Python/socket probes or open-and-close TCP readiness checks. **BECAUSE**
+  Foreman should stay Rust-native, and half-open/empty probes can consume or
+  stall the companion server's first single-threaded request and make a working
+  `ssh -R` tunnel look broken with `Connection refused` later.
+
+- **DO** run live source-companion smokes against an isolated tmux server/socket
+  and pass that socket to Foreman. **NOT** create or kill smoke sessions on the
+  default user tmux server. **BECAUSE** validation must never disrupt the
+  operator's real tmux workspace.
+
 - **DO** make all-source popup UX stay fast and readable with local-first,
   config-driven source labels, deduped session grouping, and async/cached remote
   refresh. **NOT** block every popup open or navigation move on live SSH, or
   force users to cycle source targets manually. **BECAUSE** Foreman is a
   command-palette-like operator console where users expect all work at a glance
-  and Enter/focus to jump directly to the selected local or Coder pane.
+  and Enter/focus to jump directly to the selected local or remote pane.
 
 - **DO** keep popup keypress performance covered by `mise run verify-ux` and
   `scripts/smoke-popup-key-latency.sh` when touching runtime scheduling,

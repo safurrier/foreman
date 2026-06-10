@@ -1,7 +1,7 @@
 ---
 title: ADR 0004 — Source companion and relay architecture
-summary: Design the post-SSH source model for bidirectional Mac ↔ Coder visibility, prewarmed source state, and robust source display activation.
-status: proposed
+summary: Design the post-SSH source model for bidirectional workstation ↔ remote-host visibility, prewarmed source state, and robust source display activation.
+status: accepted
 updated: 2026-06-09
 related:
   code:
@@ -18,27 +18,31 @@ related:
 
 # ADR 0004: Source companion and relay architecture
 
-Status: proposed
+Status: accepted. Initial implementation now includes the snapshot store,
+prewarmer command, registration file, JSON-line companion transport,
+`connect-ssh` supervisor, and live remote-host → workstation reverse-forward
+smokes.
 
 ## Context
 
 ADR 0002 made Foreman source-aware. A local Foreman process can now query local
-tmux plus configured SSH sources such as Coder, merge source-scoped rows, and
-route safe actions like focus and send to the selected source. ADR 0003 added the
-first jump-to bridge: after focusing a remote tmux pane, Foreman can run a
-local activation command to bring the terminal tab that displays that source to
-the front.
+tmux plus configured SSH sources such as remote development hosts, merge
+source-scoped rows, and route safe actions like focus and send to the selected
+source. ADR 0003 added the first jump-to bridge: after focusing a remote tmux
+pane, Foreman can run a local activation command to bring the terminal tab that
+displays that source to the front.
 
 That architecture is intentionally one-shot and directional:
 
 ```text
-Mac Foreman → local tmux
-Mac Foreman → ssh → Coder foreman source-probe --local-only → Coder tmux
+Workstation Foreman → local tmux
+Workstation Foreman → ssh → remote Foreman source-probe --local-only → remote tmux
 ```
 
-It works for Mac → Coder because the Mac can initiate SSH. It does not cleanly
-solve the reverse view, where Foreman running on Coder should also be able to
-show Mac work, unless the Mac exposes an inbound endpoint or a tunnel exists.
+It works for workstation → remote because the workstation can initiate SSH. It
+does not cleanly solve the reverse view, where Foreman running on the remote host
+should also be able to show workstation work, unless the workstation exposes an
+inbound endpoint or a tunnel exists.
 It also leaves first-paint performance dependent on cache freshness plus live
 SSH refresh behavior, and terminal activation depends on user-provided title or
 script matching instead of registered display identity.
@@ -47,8 +51,8 @@ script matching instead of registered display identity.
 
 Foreman needs a next architecture that can support:
 
-- bidirectional Mac ↔ Coder source visibility without assuming inbound SSH to
-  the Mac
+- bidirectional workstation ↔ remote-host source visibility without assuming
+  inbound SSH to the workstation
 - prewarmed source snapshots so popup first paint does not wait on live SSH
 - precise source endpoint discovery for tmux server/socket/binary mismatches
 - terminal display identity for jump-to behavior without brittle title matching
@@ -75,21 +79,46 @@ This keeps the proven source-aware UI/action model from ADR 0002 while moving
 latency, endpoint discovery, and display registration out of the popup critical
 path.
 
+## Implementation status
+
+The first implementation on PR #27 adds:
+
+- `SourceSnapshotStore` with atomic snapshot and registration writes.
+- `foreman sources snapshot` and `foreman sources prewarm` for one-shot and
+  looped snapshot publication.
+- `foreman sources register` for source companion heartbeat/metadata files.
+- `snapshot` sources for read-only cached visibility.
+- `companion` sources backed by a JSON-line TCP protocol.
+- `foreman companion serve` for live inventory, focus, extensions, trusted send,
+  and source-local display activation over an explicit endpoint.
+- `foreman companion connect-ssh` as the generic happy path that starts the
+  local companion, opens an SSH reverse tunnel, probes with a real companion
+  JSON-line request, and configures the remote host's companion source.
+- Python live-smoke orchestration in
+  `scripts/source_companion_live_smoke.py`.
+
+The code path has been proven with OpenSSH `-R` reverse forwards from a
+workstation to a remote SSH host. A validation gotcha from the first attempt: do
+not test readiness by opening and immediately closing the companion port, because
+that can consume or stall a single-threaded companion request. Probe with a valid
+JSON-line companion request or wait for SSH's forward-success signal before
+invoking Foreman.
+
 ## Current baseline from ADR 0002
 
 ```mermaid
 sequenceDiagram
-    participant Popup as Mac Foreman popup
+    participant Popup as workstation Foreman popup
     participant Local as Local tmux
     participant SSH as SSH command
-    participant Remote as Coder Foreman
-    participant Coder as Coder tmux
+    participant Remote as remote Foreman
+    participant remote host as remote tmux
 
     Popup->>Local: query local inventory
     Popup->>SSH: foreman source-probe --local-only agents --json
     SSH->>Remote: execute remote Foreman
-    Remote->>Coder: query tmux -L user
-    Coder-->>Remote: remote panes
+    Remote->>remote host: query tmux -L user
+    remote host-->>Remote: remote panes
     Remote-->>SSH: source-local JSON
     SSH-->>Popup: remote JSON
     Popup->>Popup: wrap rows with source id and merge
@@ -113,29 +142,29 @@ Limits:
 
 ### Option A — Reverse SSH tunnel
 
-A tunnel connects a Coder-side Foreman process back to a Mac-local Foreman
-endpoint. The Mac opens or maintains the tunnel, then Coder can query the Mac
-through localhost on the Coder side.
+A tunnel connects a remote-host-side Foreman process back to a workstation-local Foreman
+endpoint. The workstation opens or maintains the tunnel, then the remote host can query the workstation
+through localhost on the remote-host side.
 
 ```mermaid
 sequenceDiagram
-    participant Mac as Mac Foreman endpoint
+    participant workstation as workstation Foreman endpoint
     participant Tunnel as Reverse SSH tunnel
-    participant Coder as Coder Foreman
-    participant MacTmux as Mac tmux
+    participant remote host as remote Foreman
+    participant workstationTmux as workstation tmux
 
-    Mac->>Tunnel: establish reverse tunnel
-    Coder->>Tunnel: query mac-source agents
-    Tunnel->>Mac: forward request
-    Mac->>MacTmux: query local tmux
-    Mac-->>Tunnel: source snapshot
-    Tunnel-->>Coder: Mac rows
+    workstation->>Tunnel: establish reverse tunnel
+    remote host->>Tunnel: query workstation-source agents
+    Tunnel->>workstation: forward request
+    workstation->>workstationTmux: query local tmux
+    workstation-->>Tunnel: source snapshot
+    Tunnel-->>remote host: workstation rows
 ```
 
 Pros:
 
-- enables Coder → Mac without inbound macOS SSH
-- reuses SSH trust and existing Coder connectivity
+- enables remote host → workstation without inbound macOS SSH
+- reuses SSH trust and existing SSH connectivity
 - can carry the same source-probe/control API initially
 
 Cons:
@@ -143,9 +172,9 @@ Cons:
 - tunnel lifecycle becomes user-visible unless managed
 - action auth and endpoint exposure need explicit design
 - does not by itself solve prewarmed local popup state
-- fragile if laptop sleeps, network changes, or Coder restarts
+- fragile if laptop sleeps, network changes, or remote host restarts
 
-Best use: transport for a companion protocol when Mac ↔ Coder bidirectionality is
+Best use: transport for a companion protocol when workstation ↔ remote host bidirectionality is
 needed before a general relay exists.
 
 ### Option B — Source companion process
@@ -156,10 +185,10 @@ optionally accepts focus/send actions.
 
 ```mermaid
 sequenceDiagram
-    participant Companion as Coder source companion
-    participant Tmux as Coder tmux
+    participant Companion as remote source companion
+    participant Tmux as remote tmux
     participant Cache as Source snapshot cache
-    participant Popup as Mac Foreman popup
+    participant Popup as workstation Foreman popup
     participant Transport as SSH/tunnel/relay transport
 
     loop every N seconds or on activity
@@ -168,7 +197,7 @@ sequenceDiagram
         Companion->>Cache: publish fresh snapshot
     end
 
-    Popup->>Cache: load fresh-enough Coder snapshot
+    Popup->>Cache: load fresh-enough remote snapshot
     Cache-->>Popup: cached rows for first paint
     Popup->>Transport: optional live refresh/focus/send
     Transport->>Companion: action or live query
@@ -198,16 +227,16 @@ send actions through registered channels.
 
 ```mermaid
 sequenceDiagram
-    participant MacC as Mac companion
-    participant CoderC as Coder companion
+    participant WorkstationC as workstation companion
+    participant RemoteC as remote companion
     participant Relay as Relay/cache
     participant Client as Foreman client
 
-    MacC->>Relay: publish Mac snapshot + endpoint
-    CoderC->>Relay: publish Coder snapshot + endpoint
+    WorkstationC->>Relay: publish workstation snapshot + endpoint
+    RemoteC->>Relay: publish remote snapshot + endpoint
     Client->>Relay: read all fresh snapshots
-    Client->>Relay: focus source=coder pane=%42
-    Relay->>CoderC: deliver action
+    Client->>Relay: focus source=remote pane=%42
+    Relay->>RemoteC: deliver action
 ```
 
 Pros:
@@ -215,12 +244,12 @@ Pros:
 - strongest long-term multi-host model
 - naturally bidirectional
 - can make every Foreman surface a cache reader first
-- good fit if sources expand beyond Mac/Coder
+- good fit if sources expand beyond workstation/remote host
 
 Cons:
 
 - largest auth, persistence, and operations surface area
-- overkill for a single user's Mac/Coder loop today
+- overkill for a single user's workstation/remote host loop today
 - makes Foreman depend on a service unless carefully optional
 
 Best use: future transport if reverse tunnels or local companion files are too
@@ -233,7 +262,7 @@ periodically runs source refreshes and writes cached snapshots.
 
 ```mermaid
 sequenceDiagram
-    participant Prewarmer as Mac prewarmer
+    participant Prewarmer as workstation prewarmer
     participant SSH as SSH source
     participant Cache as Local source cache
     participant Popup as Foreman popup
@@ -253,8 +282,8 @@ Pros:
 
 Cons:
 
-- Mac-only control-plane shape remains
-- reverse Coder → Mac is unsolved
+- workstation-only control-plane shape remains
+- reverse remote host → workstation is unsolved
 - endpoint/display registration remains config/script based
 
 Best use: incremental performance slice if companion design is not ready.
@@ -269,10 +298,10 @@ safe actions. It should not own tmux panes or become a general remote shell.
 ```json
 {
   "schemaVersion": 1,
-  "sourceId": "coder-dev-gpu-1",
-  "sourceLabel": "Coder",
+  "sourceId": "remote-dev-gpu-1",
+  "sourceLabel": "remote host",
   "sourceKind": "companion",
-  "host": "alex-furrier-dev-gpu-1",
+  "host": "remote-dev.example",
   "tmux": {
     "serverName": "user",
     "socketPath": "/tmp/tmux-1000/user",
@@ -284,7 +313,7 @@ safe actions. It should not own tmux panes or become a general remote shell.
     "bundleId": "com.mitchellh.ghostty",
     "windowId": "...",
     "tabId": "...",
-    "title": "Coder"
+    "title": "remote host"
   },
   "endpoints": {
     "query": "local-file|ssh|reverse-tunnel|relay",
@@ -307,7 +336,7 @@ and relabeling ambiguous.
 ```json
 {
   "schemaVersion": 1,
-  "sourceId": "coder-dev-gpu-1",
+  "sourceId": "remote-dev-gpu-1",
   "capturedAtUnixMs": 1780000000000,
   "expiresAtUnixMs": 1780000002500,
   "agentsResponseSchemaVersion": 2,
@@ -340,7 +369,7 @@ Safe action requests should be explicit and source-scoped:
 {
   "schemaVersion": 1,
   "requestId": "uuid",
-  "sourceId": "coder-dev-gpu-1",
+  "sourceId": "remote-dev-gpu-1",
   "action": "focus",
   "paneId": "%42",
   "createdAtUnixMs": 1780000000000
@@ -422,40 +451,40 @@ missing or changed.
 
 ## Sequence diagrams
 
-### Mac first paint from prewarmed Coder source
+### workstation first paint from prewarmed remote host source
 
 ```mermaid
 sequenceDiagram
-    participant Popup as Mac popup
+    participant Popup as workstation popup
     participant Cache as Local cache
     participant Worker as Source prewarmer
-    participant Coder as Coder companion/SSH
+    participant remote host as remote companion/SSH
 
-    Worker->>Coder: refresh Coder snapshot before popup opens
-    Coder-->>Worker: agents snapshot
+    Worker->>remote host: refresh remote snapshot before popup opens
+    remote host-->>Worker: agents snapshot
     Worker->>Cache: write fresh snapshot
-    Popup->>Cache: load local + Coder snapshots
+    Popup->>Cache: load local + remote snapshots
     Cache-->>Popup: immediate rows
     Popup->>Popup: handle keypresses first
-    Popup->>Coder: idle live refresh
+    Popup->>remote host: idle live refresh
 ```
 
-### Coder viewing Mac through reverse tunnel
+### remote host viewing workstation through reverse tunnel
 
 ```mermaid
 sequenceDiagram
-    participant MacComp as Mac companion
+    participant WorkstationComp as workstation companion
     participant Tunnel as Reverse tunnel
-    participant CoderUI as Coder Foreman
-    participant MacTmux as Mac tmux
+    participant remote hostUI as remote Foreman
+    participant workstationTmux as workstation tmux
 
-    MacComp->>Tunnel: maintain reachable endpoint
-    CoderUI->>Tunnel: request Mac snapshot
-    Tunnel->>MacComp: forward query
-    MacComp->>MacTmux: query local tmux
-    MacTmux-->>MacComp: inventory
-    MacComp-->>Tunnel: source snapshot
-    Tunnel-->>CoderUI: Mac source rows
+    WorkstationComp->>Tunnel: maintain reachable endpoint
+    remote hostUI->>Tunnel: request workstation snapshot
+    Tunnel->>WorkstationComp: forward query
+    WorkstationComp->>workstationTmux: query local tmux
+    workstationTmux-->>WorkstationComp: inventory
+    WorkstationComp-->>Tunnel: source snapshot
+    Tunnel-->>remote hostUI: workstation source rows
 ```
 
 ### Focus remote source with registered display identity
@@ -463,11 +492,11 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant UI as Foreman UI
-    participant Companion as Coder companion
-    participant Tmux as Coder tmux
+    participant Companion as remote companion
+    participant Tmux as remote tmux
     participant Display as Ghostty/AppKit
 
-    UI->>Companion: focus source=coder pane=%42
+    UI->>Companion: focus source=remote pane=%42
     Companion->>Tmux: switch-client/select-pane %42
     Tmux-->>Companion: ok
     Companion-->>UI: action ok + display identity
@@ -481,7 +510,7 @@ sequenceDiagram
 | source offline | Keep healthy sources visible; show source diagnostic. | `source.companion.offline` |
 | snapshot fresh but live refresh slow | Render snapshot, defer merge while user is navigating. | timing logs, no blocking alert |
 | snapshot expired | Hide rows by default; show source diagnostic. | `source.snapshot.expired` |
-| reverse tunnel down | Coder view shows Mac source unavailable; Mac local view still works. | `source.transport.unavailable` |
+| reverse tunnel down | remote host view shows workstation source unavailable; workstation local view still works. | `source.transport.unavailable` |
 | companion schema too new | Ignore rows; show unsupported schema diagnostic. | `source.companion.schema-unsupported` |
 | terminal tab closed | tmux focus may succeed; activation reports unavailable. | `source.display.unavailable` |
 | tmux server mismatch | Source doctor reports configured and discovered tmux endpoint. | `source.tmux.endpoint-mismatch` |
@@ -588,7 +617,7 @@ app bundle, keyboard/focus, screenshot, or control-API paths change, also run
 
 ### Slice 5 — reverse tunnel proof
 
-- Prototype Coder querying a Mac companion through a manually established reverse
+- Prototype remote host querying a workstation companion through a manually established reverse
   tunnel.
 - Document tunnel setup, teardown, auth, and failure diagnostics.
 - Do not generalize a transport framework until this creates a second concrete

@@ -26,7 +26,8 @@ use crate::services::startup_cache::{current_time_ms, write_startup_cache};
 use crate::services::system_stats::{SysinfoSystemStatsBackend, SystemStatsService};
 use crate::services::ui_preferences::{save_ui_preferences, PersistedUiPreferences};
 use crate::sources::{
-    ForemanSource, SourceConfig, SourceDescriptor, SourceDiagnostic, SourceScope, SshSource,
+    CompanionSource, ForemanSource, SnapshotSource, SourceConfig, SourceDescriptor,
+    SourceDiagnostic, SourceScope, SshSource,
 };
 use crate::ui::render::{render, sidebar_viewport_rows_for_area_with_popup};
 use crossterm::cursor::{Hide, Show};
@@ -2224,7 +2225,65 @@ fn load_source_aggregate_inventory_refresh_payload(
                     match source.agents() {
                         Ok(response) => {
                             write_cached_source_response(&cache_runtime, &descriptor, &response);
-                            Ok(inventory_from_agents_response(&descriptor, response))
+                            let source_diagnostics = response.source_diagnostics.clone();
+                            Ok((
+                                inventory_from_agents_response(&descriptor, response),
+                                source_diagnostics,
+                            ))
+                        }
+                        Err(error) => {
+                            let diagnostic = SourceDiagnostic::warning(
+                                &descriptor,
+                                error.code,
+                                error.message,
+                                error.retryable,
+                                Some(started.elapsed().as_millis() as u64),
+                            );
+                            Err((descriptor, diagnostic))
+                        }
+                    }
+                }))
+            }
+            SourceConfig::Snapshot { .. } => {
+                let descriptor = SourceDescriptor::new(&source_id, &source_config);
+                Some(thread::spawn(move || {
+                    let source = SnapshotSource::new(source_id, source_config);
+                    let started = Instant::now();
+                    match source.agents() {
+                        Ok(response) => {
+                            let source_diagnostics = response.source_diagnostics.clone();
+                            Ok((
+                                inventory_from_agents_response(&descriptor, response),
+                                source_diagnostics,
+                            ))
+                        }
+                        Err(error) => {
+                            let diagnostic = SourceDiagnostic::warning(
+                                &descriptor,
+                                error.code,
+                                error.message,
+                                error.retryable,
+                                Some(started.elapsed().as_millis() as u64),
+                            );
+                            Err((descriptor, diagnostic))
+                        }
+                    }
+                }))
+            }
+            SourceConfig::Companion { .. } => {
+                let descriptor = SourceDescriptor::new(&source_id, &source_config);
+                let cache_runtime = runtime.clone();
+                Some(thread::spawn(move || {
+                    let source = CompanionSource::new(source_id, source_config, false);
+                    let started = Instant::now();
+                    match source.agents() {
+                        Ok(response) => {
+                            write_cached_source_response(&cache_runtime, &descriptor, &response);
+                            let source_diagnostics = response.source_diagnostics.clone();
+                            Ok((
+                                inventory_from_agents_response(&descriptor, response),
+                                source_diagnostics,
+                            ))
                         }
                         Err(error) => {
                             let diagnostic = SourceDiagnostic::warning(
@@ -2244,7 +2303,10 @@ fn load_source_aggregate_inventory_refresh_payload(
         .collect::<Vec<_>>();
     for handle in remote_handles {
         match handle.join() {
-            Ok(Ok(mut inventory)) => aggregate_inventory.sessions.append(&mut inventory.sessions),
+            Ok(Ok((mut inventory, mut source_diagnostics))) => {
+                aggregate_inventory.sessions.append(&mut inventory.sessions);
+                diagnostics.append(&mut source_diagnostics);
+            }
             Ok(Err((descriptor, diagnostic))) => {
                 if let Some(mut cached_inventory) =
                     load_cached_source_inventory(runtime, &descriptor)
