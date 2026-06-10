@@ -27,8 +27,10 @@ Historical hand-authored slice plans live under `.ai/plans/`; new Harness Toolki
 - Implemented the first ADR 0004 slice as a read-only snapshot source, not a daemon or reverse tunnel: SourceSnapshotStore owns atomic JSON snapshot lifecycle; sources snapshot writes a source-local AgentsResponse envelope; snapshot source config lets another Foreman instance render cached rows; live actions still require SSH/future companion transport.
 - Expanded PR #27 from Phase 1 snapshot foundation to the full Phase 2-6 source companion definition of done in one PR: prewarmer loop, companion registration, reverse/live transport, live focus/send action transport, and display activation parity. Validation smokes should move from shell glue toward a Python integration harness.
 - PR #27 now implements the source companion architecture through the code seams for Phase 2-6: prewarmer loop, registration metadata, companion live transport, gated focus/send actions, and activation-command configuration. Live Coder reverse-actions validation is not complete because the current Coder SSH proxy accepts ssh -R but does not expose a reachable forwarded port; this is documented as a transport/environment blocker rather than a protocol blocker.
+- Diagnosed the apparent Coder ssh -R failure as a validation harness bug, not a Coder proxy/product transport blocker. Opening and closing the forwarded companion port without sending JSON could consume/stall the first companion request; probing with a valid companion request makes live Coder→Mac inventory/focus/send pass.
   - Spec: updated: Spec/docs updated or verified.; refs: docs/operator-guide.md, docs/workflows.md
   - Spec: updated: Spec/docs updated or verified.; refs: docs/decisions/0004-source-companion-relay.md
+  - Spec: updated: Spec/docs updated or verified.; refs: docs/decisions/0004-source-companion-relay.md, docs/operator-guide.md
   - Spec: updated: Spec/docs updated or verified.; refs: docs/decisions/0004-source-companion-relay.md, docs/operator-guide.md
 
 ## Learning
@@ -55,6 +57,10 @@ Historical hand-authored slice plans live under `.ai/plans/`; new Harness Toolki
 - `scripts/source_companion_live_smoke.py companion-local --artifact-dir .ai/validation/source-companion/companion-local --json --no-build`: pass (exit 0) — validates: Python companion-local smoke after all-panes propagation fix: local and companion rows both include all panes. — `<local HK state not exported>`
 - `scripts/source_companion_live_smoke.py coder-snapshot --artifact-dir .ai/validation/source-companion/coder-snapshot --install-coder --json`: pass (exit 0) — validates: Live Coder snapshot smoke after review fixes and candidate reinstall. — `<local HK state not exported>`
 - `mise run check`: pass (exit 0) — validates: Fast gate after reviewer blocker fixes for companion all-panes propagation and socket read/write timeouts. — `<local HK state not exported>`
+- `scripts/source_companion_live_smoke.py reverse-actions --artifact-dir .ai/validation/source-companion/reverse-actions --install-coder --json --no-build`: pass (exit 0) — validates: Diagnosed reverse tunnel issue: fixed harness readiness probe to send valid companion JSON-line request; live Coder→Mac reverse tunnel inventory/focus/send now passes. — `<local HK state not exported>`
+- `cargo test --lib source --quiet`: pass (exit 0) — validates: Focused source tests after reverse-action harness fix. — `<local HK state not exported>`
+- `uv run python /Users/alex.furrier/.pi/agent/skills/context-engineering-context-docs/scripts/docs_verify.py .`: pass (exit 0) — validates: Docs verifier after recording source companion reverse-tunnel diagnosis and AGENTS gotcha. — `<local HK state not exported>`
+- `mise run check`: pass (exit 0) — validates: Fast gate after reverse-tunnel diagnosis fix and documentation update. — `<local HK state not exported>`
 
 ## Readiness
 - context: info — context recorded
@@ -62,8 +68,8 @@ Historical hand-authored slice plans live under `.ai/plans/`; new Harness Toolki
 - decision: pass — decision and spec reflection recorded
 - validation: fail — validation evidence is stale for current changed paths; rerun hk validate or dangerously-skip validation. Current changed paths: .pi/state/codex-pr-review-monitor.json.
 - review: fail — accepted review does not cover current changed paths; run a targeted follow-up review with `hk review add --path PATH ...` or dangerously-skip review. Current changed paths: .pi/state/codex-pr-review-monitor.json.
-- profile-check:fast-gate: pass — required profile check recorded: fast-gate (matched docs/decisions/0004-source-companion-relay.md, docs/operator-guide.md, docs/workflows.md, +8 more)
-- profile-review:codex-review: pass — required profile review recorded: codex-review (matched scripts/smoke-source-snapshot-coder.sh, src/cli.rs, src/lib.rs, +5 more)
+- profile-check:fast-gate: pass — required profile check recorded: fast-gate (matched AGENTS.md, docs/decisions/0004-source-companion-relay.md, docs/operator-guide.md, +9 more)
+- profile-review:codex-review: pass — required profile review recorded: codex-review (matched scripts/smoke-source-snapshot-coder.sh, scripts/source_companion_live_smoke.py, src/cli.rs, +5 more)
 
 ## Review
 - subagent / reviewer: Reviewed source snapshot/prewarmer implementation. Fixed blockers: sources doctor now preserves successful snapshot warm/stale diagnostics; runtime aggregation carries successful snapshot diagnostics into operator UI diagnostics; source summary staleness reflects snapshot warm/stale diagnostics; live Coder smoke now asserts both local and Mac rows. paths: src/source_snapshots.rs, src/sources.rs, src/cli.rs, +4 more. [accepted]
@@ -73,3 +79,5 @@ Historical hand-authored slice plans live under `.ai/plans/`; new Harness Toolki
 - subagent / reviewer: Targeted review plus fixes for source companion Phase 2-6 work. Review-only subagent found two blockers; implementation now addresses both and validation passed afterwards. paths: src/source_companion.rs, src/source_snapshots.rs, src/sources.rs, +7 more. [accepted]
 - subagent / reviewer [codex-review]: Reviewed module export change for source_companion; src/lib.rs only exposes the new source_companion module used by cli/sources tests. paths: src/lib.rs. [accepted]
 - subagent / reviewer: Reviewed src/lib.rs module export for source companion. paths: src/lib.rs. [accepted]
+- subagent / reviewer: Reviewed reverse-tunnel diagnosis fix: harness now validates readiness with a real JSON-line companion request instead of half-opening the port; docs and AGENTS capture the gotcha; live Coder→Mac inventory/focus/send validation passes. paths: scripts/source_companion_live_smoke.py, docs/decisions/0004-source-companion-relay.md, docs/operator-guide.md, +2 more. [accepted]
+- subagent / reviewer [codex-review]: Codex-review coverage for reverse-tunnel diagnosis follow-up: reviewed harness probe fix, docs, AGENTS gotcha, and validation evidence. paths: scripts/source_companion_live_smoke.py, docs/decisions/0004-source-companion-relay.md, docs/operator-guide.md, +2 more. [accepted]

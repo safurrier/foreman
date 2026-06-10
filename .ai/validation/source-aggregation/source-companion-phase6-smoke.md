@@ -47,12 +47,35 @@ Result:
 }
 ```
 
+```bash
+scripts/source_companion_live_smoke.py reverse-actions \
+  --artifact-dir .ai/validation/source-companion/reverse-actions \
+  --install-coder \
+  --json --no-build
+```
+
+Result:
+
+```json
+{
+  "ok": true,
+  "scenario": "reverse-actions",
+  "result": {
+    "remoteEndpoint": "127.0.0.1:46631",
+    "paneId": "%71",
+    "counts": {"local": 5, "mac-live": 31},
+    "focusOk": true,
+    "sendOk": true
+  }
+}
+```
+
 ## Reverse tunnel finding
 
-The harness also attempted `reverse-actions` with OpenSSH `-R` from Mac to
-Coder. The Coder SSH proxy accepted the remote-forward request in verbose SSH
-logs, but the forwarded port was not reachable from inside the Coder workspace
-(`Connection refused`). This means the product code now has a companion live
-action transport and validation harness, but the current Coder proxy path still
-needs a working tunnel/port-forward mechanism before the live Coder→Mac proof can
-be marked complete.
+Initial `reverse-actions` attempts looked like a Coder SSH proxy problem because
+`ssh -R` reported success while a later Foreman request saw `Connection refused`.
+The root cause was the harness readiness probe: it opened and closed the
+companion port without sending a JSON-line request, which could consume/stall the
+single-threaded companion server's first request. The fixed harness probes with a
+valid companion request before running Foreman through the reverse tunnel. With
+that fix, live Coder → Mac inventory, focus, and trusted send all passed.

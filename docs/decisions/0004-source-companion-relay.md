@@ -19,9 +19,8 @@ related:
 # ADR 0004: Source companion and relay architecture
 
 Status: accepted. Initial implementation now includes the snapshot store,
-prewarmer command, registration file, and JSON-line companion transport. The
-current Coder SSH proxy still needs a reachable reverse-forward/port-forward
-path before the live Coder → Mac tunnel proof can be marked complete.
+prewarmer command, registration file, JSON-line companion transport, and a live
+Coder → Mac reverse-forward smoke.
 
 ## Context
 
@@ -93,10 +92,11 @@ The first implementation on PR #27 adds:
 - Python live-smoke orchestration in
   `scripts/source_companion_live_smoke.py`.
 
-The code path is ready for a reverse tunnel or equivalent port-forward, but the
-current Coder SSH proxy accepted `ssh -R` while the forwarded port remained
-unreachable from inside the Coder workspace. Treat that as a transport
-constraint, not a reason to change the companion protocol.
+The code path has been proven with an OpenSSH `-R` reverse forward from Mac to
+Coder. A validation gotcha from the first attempt: do not test readiness by
+opening and immediately closing the companion port, because that can consume or
+stall a single-threaded companion request. Probe with a valid JSON-line companion
+request or wait for SSH's forward-success signal before invoking Foreman.
 
 ## Current baseline from ADR 0002
 

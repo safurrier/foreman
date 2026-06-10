@@ -344,10 +344,11 @@ foreman sources add companion mac-live \
   --json
 ```
 
-The current Coder SSH proxy used in local validation accepted the remote-forward
-request but did not expose a reachable forwarded port inside the Coder workspace.
-If that happens, keep using snapshots/SSH fallback and validate the companion
-protocol locally until a working Coder port-forward path is available.
+When validating a tunnel, probe it with a valid companion JSON-line request or
+run a Foreman command through the configured companion source. Avoid checking
+readiness by opening and immediately closing the companion port; that can consume
+or stall the first single-threaded companion request and make the tunnel look
+broken when it is not.
 
 Only set `allow_send = true` when the companion endpoint is inside an explicit
 trusted boundary, such as a local reverse SSH tunnel. Snapshot sources remain

@@ -164,6 +164,12 @@ Claude, Codex, and Pi E2Es with `mise run verify-native`.
   about; operators should not need to remember that "global overview" only
   exists in the native app.
 
+- **DO** validate source companion reverse tunnels with a real JSON-line
+  companion request. **NOT** probe readiness by opening and immediately closing
+  the forwarded TCP port. **BECAUSE** a half-open/empty probe can consume or
+  stall the companion server's first single-threaded request and make a working
+  `ssh -R` tunnel look broken with `Connection refused` later.
+
 - **DO** make all-source popup UX stay fast and readable with local-first,
   config-driven source labels, deduped session grouping, and async/cached remote
   refresh. **NOT** block every popup open or navigation move on live SSH, or
