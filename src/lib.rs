@@ -7,6 +7,7 @@ pub mod integrations;
 pub mod runtime;
 pub mod services;
 pub mod source_companion;
+pub mod source_companion_connect;
 pub mod source_snapshots;
 pub mod sources;
 pub mod ui;

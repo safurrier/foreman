@@ -235,8 +235,8 @@ sources. The local tmux server is the default source. SSH sources let the local
 terminal dashboard, tmux popup, and macOS overlay show remote agent work through
 the same source-aware control API.
 
-A Coder source should be persisted once in Foreman's config instead of selected
-manually on every launch:
+A remote SSH source should be persisted once in Foreman's config instead of
+selected manually on every launch:
 
 ```toml
 [sources]
@@ -246,40 +246,40 @@ query_timeout_ms = 5000
 
 [sources.local]
 kind = "local"
-label = "Local Mac"
+label = "Local Workstation"
 enabled = true
 
 [sources.local.display]
 show_label = false
 
-[sources.coder-dev-gpu-1]
+[sources.remote-dev]
 kind = "ssh"
-label = "Coder"
-host = "coder.alex-furrier-dev-gpu-1"
-foreman = "/home/discord/.cargo/bin/foreman-coder-source"
+label = "Remote Dev"
+host = "remote-dev.example"
+foreman = "foreman"
 tmux_server_name = "user"
 ssh = "ssh"
 enabled = true
 query_timeout_ms = 5000
 extra_ssh_args = []
 
-[sources.coder-dev-gpu-1.display]
+[sources.remote-dev.display]
 show_label = true
 
-[sources.coder-dev-gpu-1.jump]
+[sources.remote-dev.jump]
 # Optional local command to activate the terminal/tab displaying this source
 # after Foreman focuses the remote tmux pane.
-activation_command = "~/.config/foreman/focus-coder-ghostty-tab.sh"
+activation_command = "~/.config/foreman/focus-remote-terminal-tab.sh"
 ```
 
 Source-scoped commands route actions to the selected host and tmux server:
 
 ```bash
 foreman sources list --json
-foreman sources doctor coder-dev-gpu-1
+foreman sources doctor remote-dev
 foreman agents --json --sources all
-foreman focus --source coder-dev-gpu-1 --pane %42 --json
-foreman send --source coder-dev-gpu-1 --pane %42 --stdin --json
+foreman focus --source remote-dev --pane %42 --json
+foreman send --source remote-dev --pane %42 --stdin --json
 ```
 
 Rows from different sources may share the same tmux pane id, so source-aware
@@ -288,11 +288,12 @@ as source-local display data. If a source is unreachable, Foreman reports a
 source diagnostic and continues rendering healthy sources.
 
 Snapshot sources are read-only cached inventories. They are useful for the first
-source companion/prewarmer slice and for manual Mac → Coder visibility checks:
+source companion/prewarmer slice and for manual workstation → remote-host
+visibility checks:
 
 ```bash
-foreman sources snapshot --source-id mac --output /tmp/foreman-mac.agents.json --json
-foreman sources add snapshot mac --path /tmp/foreman-mac.agents.json --label Mac --json
+foreman sources snapshot --source-id workstation --output /tmp/foreman-workstation.agents.json --json
+foreman sources add snapshot workstation --path /tmp/foreman-workstation.agents.json --label Workstation --json
 foreman agents --sources all --json
 ```
 
@@ -301,8 +302,8 @@ snapshot:
 
 ```bash
 foreman sources prewarm \
-  --source-id mac \
-  --output /tmp/foreman-mac.agents.json \
+  --source-id workstation \
+  --output /tmp/foreman-workstation.agents.json \
   --interval-ms 2000 \
   --json
 ```
@@ -312,35 +313,60 @@ freshness and registration freshness separate when diagnosing source health:
 
 ```bash
 foreman sources register \
-  --source-id mac \
-  --label Mac \
-  --output /tmp/foreman-mac.registration.json \
-  --snapshot-path /tmp/foreman-mac.agents.json \
+  --source-id workstation \
+  --label Workstation \
+  --output /tmp/foreman-workstation.registration.json \
+  --snapshot-path /tmp/foreman-workstation.agents.json \
   --companion-endpoint 127.0.0.1:4040 \
-  --display-activation-command ~/.config/foreman/focus-coder-ghostty-tab.sh \
+  --display-activation-command ~/.config/foreman/focus-terminal-tab.sh \
   --json
 ```
 
 Companion sources provide a live JSON-line TCP transport for source inventory,
-focus, extensions, and trusted send. The intended Coder → Mac path is a Mac
-companion server exposed to Coder through a reverse tunnel or equivalent
-port-forward:
+focus, extensions, and trusted send. The happy path for a workstation/laptop to
+expose itself to a remote SSH host is `connect-ssh`:
 
 ```bash
-# On the source host, usually Mac:
-foreman companion serve --bind 127.0.0.1:4040 --allow-send --json
+# On the source host, usually your workstation/laptop:
+foreman companion connect-ssh remote-dev.example \
+  --source-id workstation \
+  --label Workstation \
+  --remote-port 4040 \
+  --allow-send \
+  --activation-command ~/.config/foreman/focus-terminal-tab.sh
+```
 
-# When the SSH path supports remote forwards, expose Mac's companion on Coder:
+`connect-ssh` starts a local companion server, opens a reverse SSH tunnel,
+probes the tunnel with a real companion JSON-line request, and configures the
+remote host with a companion source. The remote host must have `python3` for the
+current probe helper. With `--json`, `connect-ssh` writes a readiness event to
+stdout and then keeps supervising until interrupted. The split commands remain
+useful for manual debugging:
+
+```bash
+# On the source host:
+export FOREMAN_COMPANION_TOKEN="$(openssl rand -hex 24)"
+
+foreman companion serve \
+  --bind 127.0.0.1:4040 \
+  --source-id workstation \
+  --token "$FOREMAN_COMPANION_TOKEN" \
+  --allow-send \
+  --activation-command ~/.config/foreman/focus-terminal-tab.sh \
+  --activation-timeout-ms 2000 \
+  --json
+
+# Expose the companion endpoint on the remote SSH host:
 ssh -N -o ExitOnForwardFailure=yes \
   -R 127.0.0.1:4040:127.0.0.1:4040 \
-  coder.alex-furrier-dev-gpu-1
+  remote-dev.example
 
-# On the consuming host, usually Coder:
-foreman sources add companion mac-live \
+# On the consuming remote host:
+foreman sources add companion workstation \
   --endpoint 127.0.0.1:4040 \
-  --label "Mac Live" \
+  --label Workstation \
+  --token "$FOREMAN_COMPANION_TOKEN" \
   --allow-send \
-  --activation-command ~/.config/foreman/focus-mac-terminal.sh \
   --json
 ```
 
@@ -350,17 +376,24 @@ readiness by opening and immediately closing the companion port; that can consum
 or stall the first single-threaded companion request and make the tunnel look
 broken when it is not.
 
+Companion-side display activation is best-effort: tmux focus remains successful
+when the activation command exits nonzero or times out, and the action response
+includes `displayActivation` with the activation warning.
+
 Only set `allow_send = true` when the companion endpoint is inside an explicit
-trusted boundary, such as a local reverse SSH tunnel. Snapshot sources remain
+trusted boundary, such as a local reverse SSH tunnel. `companion serve` rejects
+`--allow-send` unless a token is configured; `connect-ssh` generates and wires a
+token automatically. Snapshot sources remain
 read-only; if a companion source has `snapshot_path` configured, Foreman may use
 that cached snapshot for visibility when the live companion endpoint is down.
 
-For Alex's Coder workflow, `coder_connect` attaches to `tmux -L user`. Foreman
-supports this through `--tmux-server-name user` and the persisted
-`tmux_server_name = "user"` source setting. If noninteractive SSH resolves a
-different tmux binary than the attached Coder shell, point `foreman` at a small
-remote wrapper that loads the same Homebrew/Nix/login PATH before execing the
-Foreman binary. The fast popup binding should stay in direct argv form:
+For hosted remote development environments, the attached terminal may use a
+named tmux server such as `tmux -L user`. Foreman supports this through
+`--tmux-server-name user` and the persisted `tmux_server_name = "user"` source
+setting. If noninteractive SSH resolves a different tmux binary than the
+attached remote shell, point `foreman` at a small remote wrapper that loads the
+same Homebrew/Nix/login PATH before execing the Foreman binary. The fast popup
+binding should stay in direct argv form:
 
 ```tmux
 bind a display-popup -h 80% -w 80% -E -- "$HOME/.cargo/bin/foreman" --popup

@@ -238,25 +238,33 @@ local-only, or the overlap case fails to defer and later apply the remote merge.
 Use this script directly when iterating on event-loop scheduling, popup source
 refresh, PR/extension lookup cadence, or tmux inventory work.
 
-For opt-in live Mac/Coder source companion checks, prefer the Python harness:
+For opt-in live workstation/remote-host source companion checks, prefer the
+Python harness:
 
 ```bash
-scripts/source_companion_live_smoke.py full --coder --install-coder --json
+scripts/source_companion_live_smoke.py full \
+  --remote \
+  --remote-host "$FOREMAN_REMOTE_DEV_HOST" \
+  --install-remote \
+  --json
 ```
 
-It builds the candidate, can rsync/install it on Coder, writes Mac source
-snapshots, configures temporary Coder source files, starts a local companion
-server, and records structured artifacts under `.ai/validation/source-companion/`.
-Use focused scenarios while iterating:
+It builds the candidate, can rsync/install it on a remote SSH host, writes
+workstation source snapshots, configures temporary remote source files, starts a
+local companion server, exercises `connect-ssh`, and records structured artifacts
+under `.ai/validation/source-companion/`. The harness uses an isolated tmux
+socket/server for live local panes; do not replace that with the default tmux
+server. Use focused scenarios while iterating:
 
 ```bash
 scripts/source_companion_live_smoke.py snapshot --json
 scripts/source_companion_live_smoke.py companion-local --json
-scripts/source_companion_live_smoke.py coder-snapshot --install-coder --json
-scripts/source_companion_live_smoke.py reverse-actions --install-coder --json
+scripts/source_companion_live_smoke.py remote-snapshot --install-remote --json
+scripts/source_companion_live_smoke.py reverse-actions --install-remote --json
+scripts/source_companion_live_smoke.py connect-ssh --install-remote --json
 ```
 
-The older `scripts/smoke-source-snapshot-coder.sh` remains a small compatibility
+The older `scripts/smoke-source-snapshot-remote.sh` remains a small compatibility
 wrapper for the read-only snapshot path, but complex SSH/tunnel/process
 lifecycle checks should live in the Python harness so failures include JSON
 summaries and captured logs.

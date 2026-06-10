@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Live Foreman source-companion smoke harness.
 
-This is intentionally standard-library only so agents can run it on Mac and Coder
+This is intentionally standard-library only so agents can run it on workstation and remote SSH hosts
 without bootstrapping Python dependencies. It orchestrates real Foreman binaries,
 SSH/SCP where requested, and writes structured artifacts for HK evidence.
 """
@@ -24,7 +24,7 @@ from typing import Any
 
 
 REPO = Path(__file__).resolve().parents[1]
-DEFAULT_CODER_HOST = "coder.alex-furrier-dev-gpu-1"
+DEFAULT_REMOTE_HOST = os.environ.get("FOREMAN_REMOTE_DEV_HOST", "remote-dev")
 
 
 @dataclass
@@ -74,28 +74,68 @@ def build_candidate(binary: Path) -> None:
         shutil.copy2(built, binary)
 
 
-def base_config(snapshot: Path | None = None, companion_endpoint: str | None = None) -> str:
+@dataclass
+class TmuxFixture:
+    socket: Path
+    session: str
+    pane_id: str
+
+
+def create_tmux_fixture(artifact_dir: Path) -> TmuxFixture:
+    socket = Path(tempfile.gettempdir()) / f"foreman-smoke-{os.getpid()}.sock"
+    session = f"foreman-smoke-{os.getpid()}"
+    run(["tmux", "-S", str(socket), "new-session", "-d", "-s", session, "sh"], timeout=30)
+    pane_id = run(
+        ["tmux", "-S", str(socket), "display-message", "-p", "-t", session, "#{pane_id}"],
+        timeout=30,
+    ).stdout.strip()
+    return TmuxFixture(socket=socket, session=session, pane_id=pane_id)
+
+
+def kill_tmux_fixture(fixture: TmuxFixture | None) -> None:
+    if fixture is None:
+        return
+    subprocess.run(
+        ["tmux", "-S", str(fixture.socket), "kill-server"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        timeout=10,
+    )
+    try:
+        fixture.socket.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def base_config(
+    snapshot: Path | None = None,
+    companion_endpoint: str | None = None,
+    companion_token: str | None = None,
+) -> str:
     chunks = ["[sources]\ndefault_scope = \"all\"\nquery_timeout_ms = 1000\n"]
     if snapshot:
         chunks.append(
             f"""
-[sources.mac]
+[sources.workstation]
 kind = "snapshot"
-label = "Mac"
+label = "Workstation"
 path = "{snapshot}"
 """
         )
     if companion_endpoint:
         chunks.append(
             f"""
-[sources.mac-live]
+[sources.workstation]
 kind = "companion"
-label = "Mac Live"
+label = "Workstation"
 endpoint = "{companion_endpoint}"
 timeout_ms = 1000
 allow_send = true
 """
         )
+        if companion_token:
+            chunks.append(f'token = "{companion_token}"\n')
     return "\n".join(chunks)
 
 
@@ -115,29 +155,51 @@ def snapshot(args: argparse.Namespace, artifact_dir: Path) -> dict[str, Any]:
     binary = Path(args.binary)
     if args.build:
         build_candidate(binary)
-    snapshot_path = artifact_dir / "mac-source.agents.json"
-    result = json_run(
-        [str(binary), "sources", "snapshot", "--source-id", "mac", "--output", str(snapshot_path), "--all-panes", "--json"],
-        timeout=120,
-    )
-    write(artifact_dir / "snapshot-result.json", json.dumps(result, indent=2) + "\n")
-    return {"snapshot": result, "snapshotPath": str(snapshot_path)}
+    fixture: TmuxFixture | None = None
+    try:
+        fixture = create_tmux_fixture(artifact_dir)
+        snapshot_path = artifact_dir / "workstation-source.agents.json"
+        result = json_run(
+            [
+                str(binary),
+                "--tmux-socket",
+                str(fixture.socket),
+                "sources",
+                "snapshot",
+                "--source-id",
+                "workstation",
+                "--output",
+                str(snapshot_path),
+                "--all-panes",
+                "--json",
+            ],
+            timeout=120,
+        )
+        write(artifact_dir / "snapshot-result.json", json.dumps(result, indent=2) + "\n")
+        return {"snapshot": result, "snapshotPath": str(snapshot_path)}
+    finally:
+        kill_tmux_fixture(fixture)
 
 
 def companion_local(args: argparse.Namespace, artifact_dir: Path) -> dict[str, Any]:
     binary = Path(args.binary)
     if args.build:
         build_candidate(binary)
+    fixture = create_tmux_fixture(artifact_dir)
     ready_file = artifact_dir / "companion-ready.txt"
     config_file = artifact_dir / "companion-client.toml"
     server = subprocess.Popen(
         [
             str(binary),
+            "--tmux-socket",
+            str(fixture.socket),
             "companion",
             "serve",
             "--bind",
             "127.0.0.1:0",
             "--allow-send",
+            "--token",
+            "smoke-token",
             "--max-requests",
             "1",
             "--ready-file",
@@ -159,12 +221,21 @@ def companion_local(args: argparse.Namespace, artifact_dir: Path) -> dict[str, A
         if not ready_file.exists():
             raise TimeoutError("companion server did not write ready file")
         endpoint = ready_file.read_text().strip()
-        write(config_file, base_config(companion_endpoint=endpoint))
+        write(config_file, base_config(companion_endpoint=endpoint, companion_token="smoke-token"))
         payload = json_run(
-            [str(binary), "--config-file", str(config_file), "agents", "--json", "--all-panes"],
+            [
+                str(binary),
+                "--tmux-socket",
+                str(fixture.socket),
+                "--config-file",
+                str(config_file),
+                "agents",
+                "--json",
+                "--all-panes",
+            ],
             timeout=120,
         )
-        counts = assert_source_counts(payload, {"local", "mac-live"})
+        counts = assert_source_counts(payload, {"local", "workstation"})
         out, err = server.communicate(timeout=10)
         write(artifact_dir / "companion-server.stdout.log", out)
         write(artifact_dir / "companion-server.stderr.log", err)
@@ -177,12 +248,13 @@ def companion_local(args: argparse.Namespace, artifact_dir: Path) -> dict[str, A
                 server.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 server.kill()
+        kill_tmux_fixture(fixture)
 
 
-def install_coder_candidate(args: argparse.Namespace) -> None:
-    remote_dir = args.coder_workdir.rstrip("/") + "/repo"
+def install_remote_candidate(args: argparse.Namespace) -> None:
+    remote_dir = args.remote_workdir.rstrip("/") + "/repo"
     quoted_remote_dir = shlex.quote(remote_dir)
-    run(["ssh", args.coder_host, f"rm -rf {quoted_remote_dir} && mkdir -p {quoted_remote_dir}"], timeout=120)
+    run(["ssh", args.remote_host, f"rm -rf {quoted_remote_dir} && mkdir -p {quoted_remote_dir}"], timeout=120)
     run(
         [
             "rsync",
@@ -195,48 +267,48 @@ def install_coder_candidate(args: argparse.Namespace) -> None:
             "--exclude",
             ".pi/",
             str(REPO) + "/",
-            f"{args.coder_host}:{remote_dir}/",
+            f"{args.remote_host}:{remote_dir}/",
         ],
         timeout=300,
     )
     run(
         [
             "ssh",
-            args.coder_host,
+            args.remote_host,
             f"cd {quoted_remote_dir} && cargo install --path . --locked --force",
         ],
         timeout=900,
     )
 
 
-def coder_snapshot(args: argparse.Namespace, artifact_dir: Path) -> dict[str, Any]:
+def remote_snapshot(args: argparse.Namespace, artifact_dir: Path) -> dict[str, Any]:
     binary = Path(args.binary)
     if args.build:
         build_candidate(binary)
-    if args.install_coder:
-        install_coder_candidate(args)
+    if args.install_remote:
+        install_remote_candidate(args)
     snap = snapshot(args, artifact_dir)
     snapshot_path = Path(snap["snapshotPath"])
-    remote_dir = args.coder_workdir.rstrip("/")
-    remote_snapshot = f"{remote_dir}/mac-source.agents.json"
-    remote_config = f"{remote_dir}/coder-snapshot.toml"
-    run(["ssh", args.coder_host, f"mkdir -p {shlex.quote(remote_dir)}"], timeout=60)
-    run(["scp", str(snapshot_path), f"{args.coder_host}:{remote_snapshot}"], timeout=120)
+    remote_dir = args.remote_workdir.rstrip("/")
+    remote_snapshot = f"{remote_dir}/workstation-source.agents.json"
+    remote_config = f"{remote_dir}/remote-snapshot.toml"
+    run(["ssh", args.remote_host, f"mkdir -p {shlex.quote(remote_dir)}"], timeout=60)
+    run(["scp", str(snapshot_path), f"{args.remote_host}:{remote_snapshot}"], timeout=120)
     config_text = base_config(snapshot=Path(remote_snapshot))
-    local_config = artifact_dir / "coder-snapshot.toml"
+    local_config = artifact_dir / "remote-snapshot.toml"
     write(local_config, config_text)
-    run(["scp", str(local_config), f"{args.coder_host}:{remote_config}"], timeout=120)
+    run(["scp", str(local_config), f"{args.remote_host}:{remote_config}"], timeout=120)
     payload_text = run(
         [
             "ssh",
-            args.coder_host,
-            f"{shlex.quote(args.coder_foreman)} --config-file {shlex.quote(remote_config)} agents --json --all-panes",
+            args.remote_host,
+            f"{shlex.quote(args.remote_foreman)} --config-file {shlex.quote(remote_config)} agents --sources all --json --all-panes",
         ],
         timeout=120,
     ).stdout
     payload = json.loads(payload_text)
-    counts = assert_source_counts(payload, {"local", "mac"})
-    write(artifact_dir / "coder-agents-response.json", json.dumps(payload, indent=2) + "\n")
+    counts = assert_source_counts(payload, {"local", "workstation"})
+    write(artifact_dir / "remote-agents-response.json", json.dumps(payload, indent=2) + "\n")
     return {"entryCount": len(payload.get("entries", [])), "bySource": counts, "diagnostics": payload.get("sourceDiagnostics", [])}
 
 
@@ -244,27 +316,30 @@ def reverse_actions(args: argparse.Namespace, artifact_dir: Path) -> dict[str, A
     binary = Path(args.binary)
     if args.build:
         build_candidate(binary)
-    if args.install_coder:
-        install_coder_candidate(args)
+    if args.install_remote:
+        install_remote_candidate(args)
 
-    session = f"foreman-smoke-{os.getpid()}"
-    run(["tmux", "new-session", "-d", "-s", session, "sh"], timeout=30)
-    pane_id = run(["tmux", "display-message", "-p", "-t", session, "#{pane_id}"], timeout=30).stdout.strip()
+    fixture = create_tmux_fixture(artifact_dir)
+    pane_id = fixture.pane_id
     ready_file = artifact_dir / "companion-ready.txt"
     remote_port = 46000 + (os.getpid() % 1000)
-    remote_dir = args.coder_workdir.rstrip("/")
-    remote_config = f"{remote_dir}/coder-companion.toml"
+    remote_dir = args.remote_workdir.rstrip("/")
+    remote_config = f"{remote_dir}/remote-companion.toml"
     server: subprocess.Popen[str] | None = None
     tunnel: subprocess.Popen[str] | None = None
     try:
         server = subprocess.Popen(
             [
                 str(binary),
+                "--tmux-socket",
+                str(fixture.socket),
                 "companion",
                 "serve",
                 "--bind",
                 "127.0.0.1:0",
                 "--allow-send",
+                "--token",
+                "smoke-token",
                 "--ready-file",
                 str(ready_file),
                 "--json",
@@ -294,7 +369,7 @@ def reverse_actions(args: argparse.Namespace, artifact_dir: Path) -> dict[str, A
                 "ExitOnForwardFailure=yes",
                 "-R",
                 f"127.0.0.1:{remote_port}:127.0.0.1:{local_port}",
-                args.coder_host,
+                args.remote_host,
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -304,7 +379,7 @@ def reverse_actions(args: argparse.Namespace, artifact_dir: Path) -> dict[str, A
         probe_code = (
             "import json,socket; "
             f"s=socket.create_connection(('127.0.0.1',{remote_port}), 2); "
-            "req={'protocolVersion':1,'requestId':'probe','action':'agents','allPanes':False}; "
+            "req={'protocolVersion':1,'requestId':'probe','token':'smoke-token','action':'agents','allPanes':False}; "
             "s.sendall((json.dumps(req)+'\\n').encode()); "
             "data=s.recv(4096); "
             "assert b'\"ok\":true' in data or b'\"ok\": true' in data, data; "
@@ -315,7 +390,7 @@ def reverse_actions(args: argparse.Namespace, artifact_dir: Path) -> dict[str, A
                 out, err = tunnel.communicate(timeout=1)
                 raise RuntimeError(f"reverse tunnel exited early\nSTDOUT:\n{out}\nSTDERR:\n{err}")
             probe = subprocess.run(
-                ["ssh", args.coder_host, f"python3 -c {shlex.quote(probe_code)}"],
+                ["ssh", args.remote_host, f"python3 -c {shlex.quote(probe_code)}"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -328,27 +403,27 @@ def reverse_actions(args: argparse.Namespace, artifact_dir: Path) -> dict[str, A
             raise TimeoutError(
                 f"reverse tunnel remote port {remote_port} did not pass companion probe; last stderr={probe.stderr!r}"
             )
-        run(["ssh", args.coder_host, f"mkdir -p {shlex.quote(remote_dir)}"], timeout=60)
-        local_config = artifact_dir / "coder-companion.toml"
-        write(local_config, base_config(companion_endpoint=f"127.0.0.1:{remote_port}"))
-        run(["scp", str(local_config), f"{args.coder_host}:{remote_config}"], timeout=120)
+        run(["ssh", args.remote_host, f"mkdir -p {shlex.quote(remote_dir)}"], timeout=60)
+        local_config = artifact_dir / "remote-companion.toml"
+        write(local_config, base_config(companion_endpoint=f"127.0.0.1:{remote_port}", companion_token="smoke-token"))
+        run(["scp", str(local_config), f"{args.remote_host}:{remote_config}"], timeout=120)
         agents = json.loads(
             run(
                 [
                     "ssh",
-                    args.coder_host,
-                    f"{shlex.quote(args.coder_foreman)} --config-file {shlex.quote(remote_config)} agents --json --all-panes",
+                    args.remote_host,
+                    f"{shlex.quote(args.remote_foreman)} --config-file {shlex.quote(remote_config)} agents --sources all --json --all-panes",
                 ],
                 timeout=120,
             ).stdout
         )
-        counts = assert_source_counts(agents, {"local", "mac-live"})
+        counts = assert_source_counts(agents, {"local", "workstation"})
         focus = json.loads(
             run(
                 [
                     "ssh",
-                    args.coder_host,
-                    f"{shlex.quote(args.coder_foreman)} --config-file {shlex.quote(remote_config)} --source mac-live focus --pane {shlex.quote(pane_id)} --json",
+                    args.remote_host,
+                    f"{shlex.quote(args.remote_foreman)} --config-file {shlex.quote(remote_config)} --source workstation focus --pane {shlex.quote(pane_id)} --json",
                 ],
                 timeout=120,
             ).stdout
@@ -358,17 +433,17 @@ def reverse_actions(args: argparse.Namespace, artifact_dir: Path) -> dict[str, A
             run(
                 [
                     "ssh",
-                    args.coder_host,
-                    f"{shlex.quote(args.coder_foreman)} --config-file {shlex.quote(remote_config)} --source mac-live send --pane {shlex.quote(pane_id)} --text {shlex.quote('echo ' + marker)} --json",
+                    args.remote_host,
+                    f"{shlex.quote(args.remote_foreman)} --config-file {shlex.quote(remote_config)} --source workstation send --pane {shlex.quote(pane_id)} --text {shlex.quote('echo ' + marker)} --json",
                 ],
                 timeout=120,
             ).stdout
         )
         time.sleep(0.5)
-        capture = run(["tmux", "capture-pane", "-p", "-t", pane_id], timeout=30).stdout
+        capture = run(["tmux", "-S", str(fixture.socket), "capture-pane", "-p", "-t", pane_id], timeout=30).stdout
         if marker not in capture:
             raise AssertionError(f"send marker {marker} not observed in local tmux pane capture")
-        write(artifact_dir / "coder-live-agents-response.json", json.dumps(agents, indent=2) + "\n")
+        write(artifact_dir / "remote-live-agents-response.json", json.dumps(agents, indent=2) + "\n")
         write(artifact_dir / "focus-response.json", json.dumps(focus, indent=2) + "\n")
         write(artifact_dir / "send-response.json", json.dumps(send, indent=2) + "\n")
         write(artifact_dir / "tmux-capture.txt", capture)
@@ -394,7 +469,148 @@ def reverse_actions(args: argparse.Namespace, artifact_dir: Path) -> dict[str, A
                 server.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 server.kill()
-        run(["tmux", "kill-session", "-t", session], timeout=30)
+        kill_tmux_fixture(fixture)
+
+
+def connect_ssh(args: argparse.Namespace, artifact_dir: Path) -> dict[str, Any]:
+    binary = Path(args.binary)
+    if args.build:
+        build_candidate(binary)
+    if args.install_remote:
+        install_remote_candidate(args)
+
+    fixture = create_tmux_fixture(artifact_dir)
+    pane_id = fixture.pane_id
+    marker_path = artifact_dir / "activation-marker.txt"
+    remote_dir = args.remote_workdir.rstrip("/")
+    remote_config = f"{remote_dir}/connect-ssh.toml"
+    remote_port = 47000 + (os.getpid() % 1000)
+    marker = f"foreman-connect-ssh-{os.getpid()}"
+    activation_command = f"printf '%s\\n' {shlex.quote(marker + ':' + pane_id)} > {shlex.quote(str(marker_path))}"
+    process: subprocess.Popen[str] | None = None
+    try:
+        run(["ssh", args.remote_host, f"mkdir -p {shlex.quote(remote_dir)}"], timeout=60)
+        process = subprocess.Popen(
+            [
+                str(binary),
+                "--tmux-socket",
+                str(fixture.socket),
+                "companion",
+                "connect-ssh",
+                args.remote_host,
+                "--source-id",
+                "workstation",
+                "--label",
+                "Workstation",
+                "--remote-port",
+                str(remote_port),
+                "--allow-send",
+                "--activation-command",
+                activation_command,
+                "--remote-foreman",
+                args.remote_foreman,
+                "--remote-config-file",
+                remote_config,
+                "--replace",
+                "--json",
+            ],
+            cwd=str(REPO),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+
+        agents: dict[str, Any] | None = None
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            if process.poll() is not None:
+                out, err = process.communicate(timeout=1)
+                raise RuntimeError(f"connect-ssh exited early\nSTDOUT:\n{out}\nSTDERR:\n{err}")
+            probe = subprocess.run(
+                [
+                    "ssh",
+                    args.remote_host,
+                    f"{shlex.quote(args.remote_foreman)} --config-file {shlex.quote(remote_config)} agents --sources all --json --all-panes",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=10,
+            )
+            if probe.returncode == 0:
+                payload = json.loads(probe.stdout)
+                try:
+                    assert_source_counts(payload, {"local", "workstation"})
+                    agents = payload
+                    break
+                except AssertionError:
+                    pass
+            time.sleep(0.5)
+        if agents is None:
+            raise TimeoutError("connect-ssh did not configure a usable remote companion source")
+
+        focus = json.loads(
+            run(
+                [
+                    "ssh",
+                    args.remote_host,
+                    f"{shlex.quote(args.remote_foreman)} --config-file {shlex.quote(remote_config)} --source workstation focus --pane {shlex.quote(pane_id)} --json",
+                ],
+                timeout=120,
+            ).stdout
+        )
+        deadline = time.time() + 5
+        while time.time() < deadline and not marker_path.exists():
+            time.sleep(0.1)
+        if not marker_path.exists():
+            raise AssertionError("activation marker was not written by companion-side activation command")
+        activation_text = marker_path.read_text().strip()
+        if marker not in activation_text or pane_id not in activation_text:
+            raise AssertionError(f"activation marker mismatch: {activation_text!r}")
+
+        send = json.loads(
+            run(
+                [
+                    "ssh",
+                    args.remote_host,
+                    f"{shlex.quote(args.remote_foreman)} --config-file {shlex.quote(remote_config)} --source workstation send --pane {shlex.quote(pane_id)} --text {shlex.quote('echo ' + marker)} --json",
+                ],
+                timeout=120,
+            ).stdout
+        )
+        time.sleep(0.5)
+        capture = run(["tmux", "-S", str(fixture.socket), "capture-pane", "-p", "-t", pane_id], timeout=30).stdout
+        if marker not in capture:
+            raise AssertionError(f"send marker {marker} not observed in local tmux pane capture")
+
+        counts = assert_source_counts(agents, {"local", "workstation"})
+        write(artifact_dir / "remote-agents-response.json", json.dumps(agents, indent=2) + "\n")
+        write(artifact_dir / "focus-response.json", json.dumps(focus, indent=2) + "\n")
+        write(artifact_dir / "send-response.json", json.dumps(send, indent=2) + "\n")
+        write(artifact_dir / "tmux-capture.txt", capture)
+        return {
+            "remoteHostLabel": "remote-dev",
+            "remoteEndpoint": f"127.0.0.1:{remote_port}",
+            "paneId": pane_id,
+            "counts": counts,
+            "focusOk": focus.get("ok"),
+            "sendOk": send.get("ok"),
+            "activationOk": True,
+            "marker": marker,
+        }
+    finally:
+        if process and process.poll() is None:
+            os.killpg(process.pid, signal.SIGTERM)
+            try:
+                out, err = process.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                out, err = process.communicate(timeout=5)
+            write(artifact_dir / "connect-ssh.stdout.log", out)
+            write(artifact_dir / "connect-ssh.stderr.log", err)
+        kill_tmux_fixture(fixture)
+
 
 
 def full(args: argparse.Namespace, artifact_dir: Path) -> dict[str, Any]:
@@ -402,24 +618,25 @@ def full(args: argparse.Namespace, artifact_dir: Path) -> dict[str, Any]:
         "snapshot": snapshot(args, artifact_dir / "snapshot"),
         "companionLocal": companion_local(args, artifact_dir / "companion-local"),
     }
-    if args.coder:
-        results["coderSnapshot"] = coder_snapshot(args, artifact_dir / "coder-snapshot")
+    if args.remote:
+        results["remoteSnapshot"] = remote_snapshot(args, artifact_dir / "remote-snapshot")
         results["reverseActions"] = reverse_actions(args, artifact_dir / "reverse-actions")
+        results["connectSsh"] = connect_ssh(args, artifact_dir / "connect-ssh")
     return results
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Foreman source companion live smoke harness")
-    parser.add_argument("scenario", choices=["snapshot", "companion-local", "coder-snapshot", "reverse-actions", "full"])
+    parser.add_argument("scenario", choices=["snapshot", "companion-local", "remote-snapshot", "reverse-actions", "connect-ssh", "full"])
     parser.add_argument("--binary", default=str(REPO / "target" / "debug" / "foreman"))
     parser.add_argument("--build", action="store_true", default=True)
     parser.add_argument("--no-build", action="store_false", dest="build")
     parser.add_argument("--artifact-dir", default=".ai/validation/source-companion/latest")
-    parser.add_argument("--coder", action="store_true", help="Include live Coder SSH checks in full scenario")
-    parser.add_argument("--coder-host", default=DEFAULT_CODER_HOST)
-    parser.add_argument("--coder-workdir", default="/tmp/foreman-source-companion-smoke")
-    parser.add_argument("--coder-foreman", default="/home/discord/.cargo/bin/foreman-coder-source")
-    parser.add_argument("--install-coder", action="store_true", help="Rsync this checkout to Coder and cargo-install it before live Coder checks")
+    parser.add_argument("--remote", action="store_true", help="Include live remote SSH host checks in full scenario")
+    parser.add_argument("--remote-host", default=DEFAULT_REMOTE_HOST)
+    parser.add_argument("--remote-workdir", default="/tmp/foreman-source-companion-smoke")
+    parser.add_argument("--remote-foreman", default="foreman")
+    parser.add_argument("--install-remote", action="store_true", help="Rsync this checkout to the remote SSH host and cargo-install it before live checks")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
@@ -433,10 +650,12 @@ def main() -> int:
             result = snapshot(args, artifact_dir)
         elif args.scenario == "companion-local":
             result = companion_local(args, artifact_dir)
-        elif args.scenario == "coder-snapshot":
-            result = coder_snapshot(args, artifact_dir)
+        elif args.scenario == "remote-snapshot":
+            result = remote_snapshot(args, artifact_dir)
         elif args.scenario == "reverse-actions":
             result = reverse_actions(args, artifact_dir)
+        elif args.scenario == "connect-ssh":
+            result = connect_ssh(args, artifact_dir)
         else:
             result = full(args, artifact_dir)
         summary = {"ok": True, "scenario": args.scenario, "artifactDir": str(artifact_dir), "result": result}

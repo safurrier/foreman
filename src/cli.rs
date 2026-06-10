@@ -17,6 +17,7 @@ use crate::integrations::{
 };
 use crate::services::control_api::{
     agents_response, attach_extension_cards, attach_pull_request, focus_response, send_response,
+    DisplayActivationResponse,
 };
 use crate::services::linked_repositories::{
     linked_repositories_file, load_linked_repositories, resolve_git_repository,
@@ -34,6 +35,7 @@ use crate::services::ui_preferences::{
 use crate::source_companion::{
     CompanionAction, CompanionRequest, CompanionResponse, SOURCE_COMPANION_PROTOCOL_VERSION,
 };
+use crate::source_companion_connect::{connect_ssh, ConnectSshConfig};
 use crate::source_snapshots::{
     SourceRegistrationEnvelope, SourceSnapshotEnvelope, SourceSnapshotStore,
 };
@@ -454,6 +456,8 @@ pub enum SourcesAddCommand {
 pub enum CompanionCommand {
     /// Serve source inventory/actions on a local TCP endpoint.
     Serve(CompanionServeArgs),
+    /// Connect this host to a remote SSH host through a supervised reverse tunnel.
+    ConnectSsh(CompanionConnectSshArgs),
 }
 
 #[derive(Debug, Args, Clone, PartialEq, Eq)]
@@ -561,6 +565,12 @@ pub struct CompanionServeArgs {
     pub bind: String,
     #[arg(long)]
     pub token: Option<String>,
+    #[arg(long, default_value = "local")]
+    pub source_id: String,
+    #[arg(long)]
+    pub activation_command: Option<String>,
+    #[arg(long, default_value_t = 2_000)]
+    pub activation_timeout_ms: u64,
     #[arg(long)]
     pub allow_send: bool,
     #[arg(long)]
@@ -569,6 +579,43 @@ pub struct CompanionServeArgs {
     pub max_requests: Option<u64>,
     #[arg(long)]
     pub ready_file: Option<PathBuf>,
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Clone, PartialEq, Eq)]
+pub struct CompanionConnectSshArgs {
+    pub host: String,
+    #[arg(long, default_value = "workstation")]
+    pub source_id: String,
+    #[arg(long, default_value = "Workstation")]
+    pub label: String,
+    #[arg(long, default_value_t = 4040)]
+    pub remote_port: u16,
+    #[arg(long, default_value = "127.0.0.1")]
+    pub remote_bind_host: String,
+    #[arg(long, default_value = "127.0.0.1:0")]
+    pub local_bind: String,
+    #[arg(long)]
+    pub allow_send: bool,
+    #[arg(long)]
+    pub token: Option<String>,
+    #[arg(long)]
+    pub activation_command: Option<String>,
+    #[arg(long, default_value_t = 2_000)]
+    pub activation_timeout_ms: u64,
+    #[arg(long, default_value = "foreman")]
+    pub remote_foreman: String,
+    #[arg(long)]
+    pub remote_config_file: Option<PathBuf>,
+    #[arg(long, default_value = "ssh")]
+    pub ssh: String,
+    #[arg(long = "extra-ssh-arg")]
+    pub extra_ssh_args: Vec<String>,
+    #[arg(long)]
+    pub replace: bool,
+    #[arg(long)]
+    pub no_remote_config: bool,
     #[arg(long)]
     pub json: bool,
 }
@@ -1568,7 +1615,40 @@ fn handle_companion_command(
 ) -> Result<RunOutcome, RunError> {
     match command {
         CompanionCommand::Serve(args) => serve_companion(cli, paths, args),
+        CompanionCommand::ConnectSsh(args) => connect_ssh_command(cli, args),
     }
+}
+
+fn connect_ssh_command(cli: &Cli, args: &CompanionConnectSshArgs) -> Result<RunOutcome, RunError> {
+    let config = ConnectSshConfig {
+        host: args.host.clone(),
+        source_id: args.source_id.clone(),
+        label: args.label.clone(),
+        remote_port: args.remote_port,
+        remote_bind_host: args.remote_bind_host.clone(),
+        local_bind: args.local_bind.clone(),
+        allow_send: args.allow_send,
+        token: args.token.clone(),
+        activation_command: args.activation_command.clone(),
+        activation_timeout_ms: args.activation_timeout_ms,
+        remote_foreman: args.remote_foreman.clone(),
+        remote_config_file: args.remote_config_file.clone(),
+        ssh: args.ssh.clone(),
+        extra_ssh_args: args.extra_ssh_args.clone(),
+        replace: args.replace,
+        no_remote_config: args.no_remote_config,
+        json: args.json,
+        config_file: cli.config_file.clone(),
+        tmux_socket: cli.tmux_socket.clone(),
+        tmux_server_name: cli.tmux_server_name.clone(),
+    };
+    let summary = connect_ssh(config).map_err(RunError::Usage)?;
+    let value = serde_json::to_value(summary).map_err(|error| {
+        RunError::Usage(format!("failed to encode connect-ssh summary: {error}"))
+    })?;
+    source_action_response(value, args.json, || {
+        println!("Companion SSH connection ended")
+    })
 }
 
 fn serve_companion(
@@ -1576,6 +1656,11 @@ fn serve_companion(
     paths: &crate::config::AppPaths,
     args: &CompanionServeArgs,
 ) -> Result<RunOutcome, RunError> {
+    if args.allow_send && args.token.is_none() {
+        return Err(RunError::Usage(
+            "companion serve --allow-send requires --token".to_string(),
+        ));
+    }
     let listener = TcpListener::bind(&args.bind)
         .map_err(|error| RunError::Usage(format!("failed to bind companion endpoint: {error}")))?;
     let bound = listener.local_addr().map_err(|error| {
@@ -1720,7 +1805,9 @@ fn handle_companion_request(
             adapter
                 .focus_pane(&pane_id)
                 .map(|_| {
-                    CompanionResponse::action(request.request_id.clone(), focus_response(pane))
+                    let mut response = focus_response(pane);
+                    response.display_activation = run_companion_activation(args, pane);
+                    CompanionResponse::action(request.request_id.clone(), response)
                 })
                 .map_err(|error| {
                     Box::new(CompanionResponse::error(
@@ -1792,6 +1879,84 @@ fn handle_companion_request(
                         error.to_string(),
                     ))
                 })
+        }
+    }
+}
+
+fn run_companion_activation(
+    args: &CompanionServeArgs,
+    pane: &str,
+) -> Option<DisplayActivationResponse> {
+    let command = args.activation_command.as_deref()?;
+    let timeout = std::time::Duration::from_millis(args.activation_timeout_ms.max(1));
+    let mut child = match std::process::Command::new("sh")
+        .arg("-c")
+        .arg(command)
+        .env("FOREMAN_SOURCE_ID", &args.source_id)
+        .env("FOREMAN_PANE_ID", pane)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) => {
+            return Some(DisplayActivationResponse {
+                attempted: true,
+                ok: false,
+                message: Some(format!("failed to run activation command: {error}")),
+            })
+        }
+    };
+
+    let started = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => {
+                let _ = child.wait_with_output();
+                return Some(DisplayActivationResponse {
+                    attempted: true,
+                    ok: true,
+                    message: None,
+                });
+            }
+            Ok(Some(status)) => {
+                let stderr = child
+                    .wait_with_output()
+                    .map(|output| String::from_utf8_lossy(&output.stderr).trim().to_string())
+                    .unwrap_or_default();
+                let message = if stderr.is_empty() {
+                    format!("activation command exited with status {status}")
+                } else {
+                    format!("activation command exited with status {status}: {stderr}")
+                };
+                return Some(DisplayActivationResponse {
+                    attempted: true,
+                    ok: false,
+                    message: Some(message),
+                });
+            }
+            Ok(None) if started.elapsed() >= timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Some(DisplayActivationResponse {
+                    attempted: true,
+                    ok: false,
+                    message: Some(format!(
+                        "activation command timed out after {}ms",
+                        args.activation_timeout_ms.max(1)
+                    )),
+                });
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(10)),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Some(DisplayActivationResponse {
+                    attempted: true,
+                    ok: false,
+                    message: Some(format!("failed to wait for activation command: {error}")),
+                });
+            }
         }
     }
 }
@@ -3043,8 +3208,8 @@ pub(crate) fn bootstrap_state(
 #[cfg(test)]
 mod tests {
     use super::{
-        extension_cards_response_for_pane_with_collector, prepare_runtime_bootstrap, run, Cli,
-        RunOutcome,
+        extension_cards_response_for_pane_with_collector, prepare_runtime_bootstrap, run,
+        run_companion_activation, Cli, CompanionServeArgs, RunOutcome,
     };
     use crate::app::{
         inventory, AppState, HarnessKind, OperatorAlertSource, PaneBuilder, PaneId,
@@ -3057,6 +3222,85 @@ mod tests {
     use clap::Parser;
     use std::path::PathBuf;
     use tempfile::tempdir;
+
+    #[test]
+    fn companion_activation_reports_success_and_sets_env() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let marker = temp_dir.path().join("activation.txt");
+        let args = CompanionServeArgs {
+            bind: "127.0.0.1:0".to_string(),
+            token: None,
+            source_id: "workstation".to_string(),
+            activation_command: Some(format!(
+                "printf '%s:%s\\n' \"$FOREMAN_SOURCE_ID\" \"$FOREMAN_PANE_ID\" > {}",
+                marker.display()
+            )),
+            activation_timeout_ms: 10_000,
+            allow_send: false,
+            all_panes: false,
+            max_requests: None,
+            ready_file: None,
+            json: false,
+        };
+
+        let response = run_companion_activation(&args, "%42").expect("activation attempted");
+
+        assert!(response.ok);
+        assert_eq!(
+            std::fs::read_to_string(marker).unwrap(),
+            "workstation:%42\n"
+        );
+    }
+
+    #[test]
+    fn companion_activation_failure_is_reported_as_warning() {
+        let args = CompanionServeArgs {
+            bind: "127.0.0.1:0".to_string(),
+            token: None,
+            source_id: "workstation".to_string(),
+            activation_command: Some("exit 7".to_string()),
+            activation_timeout_ms: 10_000,
+            allow_send: false,
+            all_panes: false,
+            max_requests: None,
+            ready_file: None,
+            json: false,
+        };
+
+        let response = run_companion_activation(&args, "%42").expect("activation attempted");
+
+        assert!(response.attempted);
+        assert!(!response.ok);
+        assert!(response
+            .message
+            .expect("failure should include message")
+            .contains("status"));
+    }
+
+    #[test]
+    fn companion_activation_timeout_is_reported_as_warning() {
+        let args = CompanionServeArgs {
+            bind: "127.0.0.1:0".to_string(),
+            token: None,
+            source_id: "workstation".to_string(),
+            activation_command: Some("sleep 1".to_string()),
+            activation_timeout_ms: 25,
+            allow_send: false,
+            all_panes: false,
+            max_requests: None,
+            ready_file: None,
+            json: false,
+        };
+
+        let response = run_companion_activation(&args, "%42").expect("activation attempted");
+
+        assert!(response.attempted);
+        assert!(!response.ok);
+        assert!(response
+            .message
+            .expect("timeout should include message")
+            .contains("timed out"));
+    }
 
     #[test]
     fn run_prints_resolved_config_path() {
