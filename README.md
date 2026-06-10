@@ -15,7 +15,7 @@ packages that same control plane as `Foreman.app` for a global hotkey,
 Spotlight/Raycast launch, quick search, preview, compose/send, and pane focus
 from outside the terminal.
 
-Current crate version: `1.4.0`
+Current crate version: `1.5.0`
 
 Use Foreman when you have more than one agent session running and need a control
 surface. If you only need to inspect an ordinary tmux tree, tmux itself is the
@@ -349,21 +349,18 @@ CI calls `mise run ci`, which maps to the fast check gate. See
 [Workflow Guide](docs/workflows.md) for HK lifecycle, validation layers, `.ai/`
 policy, and release evidence.
 
-## Release plan for `1.4.0`
+## Release plan for `1.5.0`
 
-The extension-provider platform, linked repositories, selected-pane macOS
-loading, deterministic macOS demo, and HK provider example are a minor release.
-The planned release version is `1.4.0`.
+The multi-source/source-companion work is a minor release. It adds source-aware
+local + remote SSH aggregation, companion/snapshot transports, `connect-ssh`,
+trusted reverse focus/send, display activation, and macOS overlay source parity.
+The planned release version is `1.5.0`.
 
 Before tagging:
 
 ```bash
-python3 - <<'PY'
-import tomllib
-from pathlib import Path
-assert tomllib.loads(Path("Cargo.toml").read_text())["package"]["version"] == "1.4.0"
-PY
-rg -n 'Current crate version: `1.4.0`|## 1.4.0' README.md CHANGELOG.md
+python3 -c 'import tomllib; from pathlib import Path; assert tomllib.loads(Path("Cargo.toml").read_text())["package"]["version"] == "1.5.0"'
+rg -n 'Current crate version: `1.5.0`|## 1.5.0' README.md CHANGELOG.md
 mise run check
 mise run verify
 ```
@@ -373,11 +370,11 @@ After the version-bump PR is squash-merged:
 ```bash
 git checkout main
 git pull --ff-only origin main
-git tag -a v1.4.0 -m "Release 1.4.0"
-git push origin v1.4.0
+git tag -a v1.5.0 -m "Release 1.5.0"
+git push origin v1.5.0
 gh run list --workflow Release --limit 3
 gh run watch <run-id> --exit-status
-gh release view v1.4.0
+gh release view v1.5.0
 ```
 
 The release workflow rejects tags that do not match `Cargo.toml`, rebuilds the
