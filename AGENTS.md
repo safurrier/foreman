@@ -172,9 +172,10 @@ Claude, Codex, and Pi E2Es with `mise run verify-native`.
   about; operators should not need to remember that "global overview" only
   exists in the native app.
 
-- **DO** validate source companion reverse tunnels with a real JSON-line
-  companion request. **NOT** probe readiness by opening and immediately closing
-  the forwarded TCP port. **BECAUSE** a half-open/empty probe can consume or
+- **DO** validate source companion reverse tunnels with `foreman companion
+  probe` or another real JSON-line companion request. **NOT** add ad hoc
+  remote Python/socket probes or open-and-close TCP readiness checks. **BECAUSE**
+  Foreman should stay Rust-native, and half-open/empty probes can consume or
   stall the companion server's first single-threaded request and make a working
   `ssh -R` tunnel look broken with `Connection refused` later.
 

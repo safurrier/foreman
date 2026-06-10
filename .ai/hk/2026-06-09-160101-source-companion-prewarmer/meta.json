@@ -1,11 +1,11 @@
 {
   "attached_artifacts": [],
   "branch": "feature/source-companion-prewarmer",
-  "diff_hash": "sha256:ba0ba878ddc5a070335cc563334485d8517eb7ad4d6807dc942658c8a4f6af0d",
+  "diff_hash": "sha256:c566e93120cb5c086c6bc0038302846cfb844a896f8811b576f0b3aa2038a121",
   "dirty": true,
-  "event_count": 81,
-  "event_seq": 91,
-  "evidence_count": 51,
+  "event_count": 88,
+  "event_seq": 99,
+  "evidence_count": 55,
   "evidence_ids": [
     "ev_20260609_161901_680582",
     "ev_20260609_161931_087982",
@@ -57,10 +57,14 @@
     "ev_20260610_115157_489886",
     "ev_20260610_115218_495343",
     "ev_20260610_120643_276590",
-    "ev_20260610_121045_504584"
+    "ev_20260610_121045_504584",
+    "ev_20260610_125534_103774",
+    "ev_20260610_125535_291109",
+    "ev_20260610_125543_447094",
+    "ev_20260610_130356_274363"
   ],
   "file_hashes": {
-    "README.md": "sha256:ee2eb6d2991c9023eccad6dc7451e6bc0932932d59f4121f06121dfd530807e5",
+    "README.md": "sha256:083dc2769990fbea5d1a526aa2ca2df46f01de23d3a60f95a3318c1f3606e9b4",
     "artifacts/README.md": "sha256:c4bad9d4652f296a7e4dcf175fe1dd0c66a99ec0b74941cd45c499e84792436c"
   },
   "files": [
@@ -68,9 +72,9 @@
     "meta.json",
     "artifacts/README.md"
   ],
-  "generated_at": "2026-06-10T19:15:40.795862+00:00",
+  "generated_at": "2026-06-10T20:09:02.767522+00:00",
   "generated_by": "hk export --format handoff-dir",
-  "git_sha": "1d07a04",
+  "git_sha": "91c1f15",
   "output_path": ".ai/hk/2026-06-09-160101-source-companion-prewarmer",
   "ready": true,
   "ready_status": "ready",

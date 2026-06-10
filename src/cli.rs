@@ -57,6 +57,10 @@ const CLI_AFTER_HELP: &str = "First-time setup:\n  foreman --setup --user --proj
 const LINKS_ABOUT: &str = "Inspect and manage explicit pane-to-repository links.";
 const LINKS_LONG_ABOUT: &str = "Repository links let Foreman associate a tmux pane with a git repository different from the pane's current working directory.\n\nUse when: an agent is running from notes, Obsidian, scratch space, or a launcher directory, but PR/HK/provider state belongs to a code repo elsewhere.\nDon't use when: the pane is already running from the repository Foreman should inspect.\n\nForeman still displays the pane's real working directory as Workspace, but uses the linked repository for PR lookup, HK cards, and extension providers. Links are persisted beside Foreman's config and guarded by the pane working-directory fingerprint to avoid stale tmux pane-id reuse.";
 const LINKS_AFTER_HELP: &str = "Agent workflow:\n  1. Identify the pane id. If you are inside the target tmux pane, run: echo \"$TMUX_PANE\"\n  2. If you are outside the pane, inspect candidates with: foreman agents --json\n  3. Identify the intended code repo with: git -C <candidate-path> rev-parse --show-toplevel\n  4. Link the pane to that repo: foreman links add --pane %82 --repo ~/git_repositories/foreman --json\n  5. Verify Foreman uses the linked target: foreman agents --json --extensions\n\nExamples:\n  foreman links list --json\n  foreman links add --pane %82 --repo ~/git_repositories/foreman --json\n  foreman links remove --pane %82 --json";
+const COMPANION_AFTER_HELP: &str = "Examples:\n  foreman companion serve --bind 127.0.0.1:4040 --source-id workstation --token $FOREMAN_COMPANION_TOKEN --json\n  foreman companion probe --endpoint 127.0.0.1:4040 --token $FOREMAN_COMPANION_TOKEN --json\n  foreman companion connect-ssh remote-dev.example --source-id workstation --label Workstation --remote-foreman /usr/local/bin/foreman --allow-send --replace --json";
+const COMPANION_SERVE_AFTER_HELP: &str = "Examples:\n  foreman companion serve --bind 127.0.0.1:4040 --source-id workstation --token $FOREMAN_COMPANION_TOKEN --json\n  foreman companion serve --bind 127.0.0.1:4040 --source-id workstation --token $FOREMAN_COMPANION_TOKEN --allow-send --activation-command ~/.config/foreman/focus-terminal-tab.sh --json\n\nNotes:\n  --allow-send requires --token. Bind to loopback unless the endpoint is protected by another trusted transport.";
+const COMPANION_PROBE_AFTER_HELP: &str = "Examples:\n  foreman companion probe --endpoint 127.0.0.1:4040 --token $FOREMAN_COMPANION_TOKEN --json\n  ssh remote-dev.example 'foreman companion probe --endpoint 127.0.0.1:4040 --token $FOREMAN_COMPANION_TOKEN --json'\n\nUse this instead of empty TCP open/close readiness probes; it sends a real Foreman companion request.";
+const COMPANION_CONNECT_SSH_AFTER_HELP: &str = "Examples:\n  foreman companion connect-ssh remote-dev.example --source-id workstation --label Workstation --remote-foreman /usr/local/bin/foreman --replace --json\n  foreman companion connect-ssh remote-dev.example --source-id workstation --label Workstation --remote-foreman /usr/local/bin/foreman --allow-send --activation-command ~/.config/foreman/focus-terminal-tab.sh --replace --json\n\nNotes:\n  The command stays running to supervise the local companion server and SSH reverse tunnel.\n  --replace makes remote source configuration idempotent for reruns.\n  --allow-send auto-generates and wires a token unless --token is supplied.";
 
 #[derive(Debug, Parser, Clone)]
 #[command(
@@ -348,6 +352,7 @@ pub enum CliCommand {
         command: SourcesCommand,
     },
     /// Run a local source companion server for live reverse-tunnel transports.
+    #[command(after_help = COMPANION_AFTER_HELP)]
     Companion {
         #[command(subcommand)]
         command: CompanionCommand,
@@ -456,10 +461,13 @@ pub enum SourcesAddCommand {
 #[derive(Debug, Subcommand, Clone, PartialEq, Eq)]
 pub enum CompanionCommand {
     /// Serve source inventory/actions on a local TCP endpoint.
+    #[command(after_help = COMPANION_SERVE_AFTER_HELP)]
     Serve(CompanionServeArgs),
     /// Probe a source companion endpoint with Foreman's native JSON-line client.
+    #[command(after_help = COMPANION_PROBE_AFTER_HELP)]
     Probe(CompanionProbeArgs),
     /// Connect this host to a remote SSH host through a supervised reverse tunnel.
+    #[command(after_help = COMPANION_CONNECT_SSH_AFTER_HELP)]
     ConnectSsh(CompanionConnectSshArgs),
 }
 
@@ -564,76 +572,170 @@ pub struct SourcesRegisterArgs {
 
 #[derive(Debug, Args, Clone, PartialEq, Eq)]
 pub struct CompanionServeArgs {
-    #[arg(long, default_value = "127.0.0.1:0")]
+    #[arg(
+        long,
+        default_value = "127.0.0.1:0",
+        help = "Loopback TCP address for the companion server to bind. Use :0 to pick a free port."
+    )]
     pub bind: String,
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Shared bearer token required by companion clients. Required when --allow-send is set."
+    )]
     pub token: Option<String>,
-    #[arg(long, default_value = "local")]
+    #[arg(
+        long,
+        default_value = "local",
+        help = "Source id reported by this companion, e.g. workstation."
+    )]
     pub source_id: String,
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Shell command to run after a successful focus action on this host."
+    )]
     pub activation_command: Option<String>,
-    #[arg(long, default_value_t = 2_000)]
+    #[arg(
+        long,
+        default_value_t = 2_000,
+        help = "Maximum time to wait for --activation-command before returning a non-fatal warning."
+    )]
     pub activation_timeout_ms: u64,
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Permit trusted clients to send input to local tmux panes. Requires --token."
+    )]
     pub allow_send: bool,
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Include non-agent panes in companion inventory responses."
+    )]
     pub all_panes: bool,
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Exit after serving this many requests. Useful for tests and probes."
+    )]
     pub max_requests: Option<u64>,
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Write the bound endpoint to this file once the companion is ready."
+    )]
     pub ready_file: Option<PathBuf>,
-    #[arg(long)]
+    #[arg(long, help = "Print machine-readable JSON status.")]
     pub json: bool,
 }
 
 #[derive(Debug, Args, Clone, PartialEq, Eq)]
 pub struct CompanionProbeArgs {
-    #[arg(long)]
+    #[arg(long, help = "Companion endpoint to probe, e.g. 127.0.0.1:4040.")]
     pub endpoint: String,
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Shared companion token, when the companion requires one."
+    )]
     pub token: Option<String>,
-    #[arg(long, default_value_t = 2_000)]
+    #[arg(
+        long,
+        default_value_t = 2_000,
+        help = "Probe connect/read/write timeout in milliseconds."
+    )]
     pub timeout_ms: u64,
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Ask the companion to include non-agent panes in the probe inventory."
+    )]
     pub all_panes: bool,
-    #[arg(long)]
+    #[arg(long, help = "Print machine-readable JSON status.")]
     pub json: bool,
 }
 
 #[derive(Debug, Args, Clone, PartialEq, Eq)]
 pub struct CompanionConnectSshArgs {
+    #[arg(help = "Remote SSH host to connect to, e.g. remote-dev.example.")]
     pub host: String,
-    #[arg(long, default_value = "workstation")]
+    #[arg(
+        long,
+        default_value = "workstation",
+        help = "Source id to configure on the remote host for this local companion."
+    )]
     pub source_id: String,
-    #[arg(long, default_value = "Workstation")]
+    #[arg(
+        long,
+        default_value = "Workstation",
+        help = "Human label to show for this source in Foreman UIs."
+    )]
     pub label: String,
-    #[arg(long, default_value_t = 4040)]
+    #[arg(
+        long,
+        default_value_t = 4040,
+        help = "Remote loopback port where ssh -R exposes the local companion."
+    )]
     pub remote_port: u16,
-    #[arg(long, default_value = "127.0.0.1")]
+    #[arg(
+        long,
+        default_value = "127.0.0.1",
+        help = "Remote bind host for the reverse tunnel. Must be loopback."
+    )]
     pub remote_bind_host: String,
-    #[arg(long, default_value = "127.0.0.1:0")]
+    #[arg(
+        long,
+        default_value = "127.0.0.1:0",
+        help = "Local loopback address for the companion server. Use :0 to pick a free port."
+    )]
     pub local_bind: String,
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Permit the remote source to send input back to local tmux panes. A token is generated when --token is omitted."
+    )]
     pub allow_send: bool,
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Shared companion token. Omit to generate one automatically."
+    )]
     pub token: Option<String>,
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Local shell command to run after a remote-triggered focus action succeeds."
+    )]
     pub activation_command: Option<String>,
-    #[arg(long, default_value_t = 2_000)]
+    #[arg(
+        long,
+        default_value_t = 2_000,
+        help = "Maximum time to wait for --activation-command before returning a non-fatal warning."
+    )]
     pub activation_timeout_ms: u64,
-    #[arg(long, default_value = "foreman")]
+    #[arg(
+        long,
+        default_value = "foreman",
+        help = "Foreman executable on the remote SSH host."
+    )]
     pub remote_foreman: String,
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Remote Foreman config file to mutate/probe instead of the default config."
+    )]
     pub remote_config_file: Option<PathBuf>,
-    #[arg(long, default_value = "ssh")]
+    #[arg(
+        long,
+        default_value = "ssh",
+        help = "SSH executable or wrapper to use."
+    )]
     pub ssh: String,
-    #[arg(long = "extra-ssh-arg")]
+    #[arg(
+        long = "extra-ssh-arg",
+        help = "Additional argument passed to ssh. Repeat for multiple args."
+    )]
     pub extra_ssh_args: Vec<String>,
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Replace an existing remote source with the same id. Makes reruns idempotent."
+    )]
     pub replace: bool,
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Open and supervise the tunnel without mutating remote Foreman source config."
+    )]
     pub no_remote_config: bool,
-    #[arg(long)]
+    #[arg(long, help = "Print machine-readable readiness JSON to stdout.")]
     pub json: bool,
 }
 
@@ -1721,7 +1823,7 @@ fn serve_companion(
         })?;
     }
     if args.json {
-        eprintln!(
+        println!(
             "{}",
             serde_json::json!({
                 "schemaVersion": crate::services::control_api::CONTROL_API_SCHEMA_VERSION,

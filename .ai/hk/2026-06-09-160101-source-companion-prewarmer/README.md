@@ -40,7 +40,8 @@ Historical hand-authored slice plans live under `.ai/plans/`; new Harness Toolki
   - Spec: updated: Spec/docs updated or verified.; refs: docs/decisions/0004-source-companion-relay.md, docs/operator-guide.md
 
 ## Learning
-- None recorded.
+- Agent-friendly CLI review for source companion commands: keep  examples idempotent with , prefer  over remote language probes, and print JSON readiness to stdout for foreground machine consumers. Root AGENTS.md now captures the Rust-native companion-probe gotcha.
+- Agent-friendly CLI review for source companion commands: keep connect-ssh examples idempotent with --replace, prefer foreman companion probe over remote language probes, and print JSON readiness to stdout for foreground machine consumers. Root AGENTS.md captures the Rust-native companion-probe gotcha.
 
 ## Gaps
 - None recorded.
@@ -97,6 +98,10 @@ Historical hand-authored slice plans live under `.ai/plans/`; new Harness Toolki
 - `mise run check`: pass (exit 0) — validates: Quality gate after Foreman-native companion probe and macOS overlay validation — `<local HK state not exported>`
 - `mise run check`: pass (exit 0) — validates: Fast gate after Foreman-native remote companion probe — `<local HK state not exported>`
 - `mise run validate-macos-overlay-change`: pass (exit 0) — validates: macOS overlay required lane validates source-aware Control API and native app parity — `<local HK state not exported>`
+- `cargo test --lib companion --quiet`: pass (exit 0) — validates: Focused companion CLI tests after agent-friendly CLI pass — `<local HK state not exported>`
+- `uv run python /Users/alex.furrier/.pi/agent/skills/context-engineering-context-docs/scripts/docs_verify.py .`: pass (exit 0) — validates: Docs/context verification after AGENTS.md context-engineering update — `<local HK state not exported>`
+- `mise run check`: pass (exit 0) — validates: Fast gate after agent-friendly CLI and context-engineering updates — `<local HK state not exported>`
+- `bash -lc 'READY=$(mktemp); ./target/debug/foreman companion serve --bind 127.0.0.1:0 --token [REDACTED] --max-requests 1 --ready-file "$READY" --json > /tmp/foreman-serve-stdout.jsonl 2>/tmp/foreman-serve-stderr.log & PID=$!; for i in $(seq 1 100); do [ -s "$READY" ] && break; sleep 0.05; done; EP=$(cat "$READY"); ./target/debug/foreman companion probe --endpoint "$EP" --token [REDACTED] --json > /tmp/foreman-probe-out.json; wait $PID; grep -q companion.serve.ready /tmp/foreman-serve-stdout.jsonl; grep -q companion.probe /tmp/foreman-probe-out.json; rm -f "$READY"'`: pass (exit 0) — validates: Foreground companion serve emits JSON readiness on stdout and companion probe succeeds — `<local HK state not exported>`
 
 ## Readiness
 - context: info — context recorded
@@ -122,3 +127,4 @@ Historical hand-authored slice plans live under `.ai/plans/`; new Harness Toolki
 - subagent / codex-review: Codex review findings addressed: allow-send now requires token and docs wire token; ::1 no longer accepted until IPv6 formatting is supported; connect-ssh validates SSH-ish inputs; child guard added for cleanup on unwind; readiness JSON goes to stdout with configured label; .pi/state ignored and removed. Remaining deferred: robust SIGTERM trap and Foreman-native probe replacing remote python3. paths: .ai/validation/source-aggregation/source-companion-phase6-smoke.md, .ai/validation/ux/foreman-ux-diagnostic.gif, .ai/validation/ux/foreman-ux-flash.png, +23 more. [accepted]
 - subagent / reviewer-fresh-context [codex-review]: Fresh reviewer checked the Foreman-native companion probe diff. No blockers. Confirmed  is wired to CompanionClient, connect-ssh now probes through remote Foreman instead of embedded Python, smoke harness uses the remote Foreman probe, docs match, and local probe/cargo checks passed in review. paths: docs/operator-guide.md, scripts/source_companion_live_smoke.py, src/cli.rs, +1 more. [accepted]
 - subagent / codex-review [codex-review]: Earlier codex/architecture review covered these PR paths; actionable findings were addressed before the final companion-probe patch. No additional changes were made to these paths in the Foreman-native probe follow-up. paths: scripts/smoke-source-snapshot-remote.sh, src/lib.rs, src/services/control_api.rs. [accepted]
+- subagent / agent-friendly-cli [codex-review]: Agent-friendly CLI review found no blockers. Addressed two small recommendations: foreground companion serve now writes JSON readiness to stdout for machine consumers, and connect-ssh help examples include --replace for idempotent reruns. Existing positives: non-interactive flags, concrete per-subcommand examples, actionable errors, JSON outputs, and Foreman-native companion probe guidance. paths: AGENTS.md, src/cli.rs, scripts/source_companion_live_smoke.py, +1 more. [accepted]
