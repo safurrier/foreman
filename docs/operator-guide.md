@@ -337,11 +337,10 @@ foreman companion connect-ssh remote-dev.example \
 ```
 
 `connect-ssh` starts a local companion server, opens a reverse SSH tunnel,
-probes the tunnel with a real companion JSON-line request, and configures the
-remote host with a companion source. The remote host must have `python3` for the
-current probe helper. With `--json`, `connect-ssh` writes a readiness event to
-stdout and then keeps supervising until interrupted. The split commands remain
-useful for manual debugging:
+probes the tunnel through the remote `foreman companion probe` command, and
+configures the remote host with a companion source. With `--json`, `connect-ssh`
+writes a readiness event to stdout and then keeps supervising until interrupted.
+The split commands remain useful for manual debugging:
 
 ```bash
 # On the source host:
@@ -370,11 +369,11 @@ foreman sources add companion workstation \
   --json
 ```
 
-When validating a tunnel, probe it with a valid companion JSON-line request or
-run a Foreman command through the configured companion source. Avoid checking
-readiness by opening and immediately closing the companion port; that can consume
-or stall the first single-threaded companion request and make the tunnel look
-broken when it is not.
+When validating a tunnel, probe it with `foreman companion probe` or run a
+Foreman command through the configured companion source. Avoid checking readiness
+by opening and immediately closing the companion port; that can consume or stall
+the first single-threaded companion request and make the tunnel look broken when
+it is not.
 
 Companion-side display activation is best-effort: tmux focus remains successful
 when the activation command exits nonzero or times out, and the action response

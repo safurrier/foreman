@@ -376,21 +376,17 @@ def reverse_actions(args: argparse.Namespace, artifact_dir: Path) -> dict[str, A
             text=True,
         )
         deadline = time.time() + 20
-        probe_code = (
-            "import json,socket; "
-            f"s=socket.create_connection(('127.0.0.1',{remote_port}), 2); "
-            "req={'protocolVersion':1,'requestId':'probe','token':'smoke-token','action':'agents','allPanes':False}; "
-            "s.sendall((json.dumps(req)+'\\n').encode()); "
-            "data=s.recv(4096); "
-            "assert b'\"ok\":true' in data or b'\"ok\": true' in data, data; "
-            "s.close()"
-        )
+        probe: subprocess.CompletedProcess[str] | None = None
         while time.time() < deadline:
             if tunnel.poll() is not None:
                 out, err = tunnel.communicate(timeout=1)
                 raise RuntimeError(f"reverse tunnel exited early\nSTDOUT:\n{out}\nSTDERR:\n{err}")
             probe = subprocess.run(
-                ["ssh", args.remote_host, f"python3 -c {shlex.quote(probe_code)}"],
+                [
+                    "ssh",
+                    args.remote_host,
+                    f"{shlex.quote(args.remote_foreman)} companion probe --endpoint {shlex.quote('127.0.0.1:' + str(remote_port))} --token smoke-token --json",
+                ],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -400,8 +396,9 @@ def reverse_actions(args: argparse.Namespace, artifact_dir: Path) -> dict[str, A
                 break
             time.sleep(0.5)
         else:
+            stderr = probe.stderr if probe is not None else "<not run>"
             raise TimeoutError(
-                f"reverse tunnel remote port {remote_port} did not pass companion probe; last stderr={probe.stderr!r}"
+                f"reverse tunnel remote port {remote_port} did not pass companion probe; last stderr={stderr!r}"
             )
         run(["ssh", args.remote_host, f"mkdir -p {shlex.quote(remote_dir)}"], timeout=60)
         local_config = artifact_dir / "remote-companion.toml"

@@ -1,4 +1,3 @@
-use crate::source_companion::SOURCE_COMPANION_PROTOCOL_VERSION;
 use crate::sources::SourceId;
 use serde_json::Value;
 use std::ffi::OsStr;
@@ -187,7 +186,10 @@ fn probe_remote_companion(
     let started = Instant::now();
     let mut last_error = String::new();
     while started.elapsed() <= Duration::from_secs(10) {
-        match run_remote_shell(config, &remote_probe_command(remote_endpoint, token)) {
+        match run_remote_shell(
+            config,
+            &remote_probe_command(config, remote_endpoint, token),
+        ) {
             Ok(_) => return Ok(()),
             Err(error) => {
                 last_error = error;
@@ -201,32 +203,13 @@ fn probe_remote_companion(
     ))
 }
 
-fn remote_probe_command(remote_endpoint: &str, token: &str) -> String {
-    let (host, port) = remote_endpoint
-        .rsplit_once(':')
-        .unwrap_or(("127.0.0.1", remote_endpoint));
-    let script = format!(
-        r#"import json, socket, sys
-req = {{"protocolVersion": {protocol}, "requestId": "connect-ssh-probe", "token": {token}, "action": "agents", "allPanes": False}}
-s = socket.create_connection(({host}, {port}), timeout=2)
-s.settimeout(2)
-s.sendall(json.dumps(req).encode() + b"\n")
-line = b""
-while not line.endswith(b"\n"):
-    chunk = s.recv(65536)
-    if not chunk:
-        break
-    line += chunk
-resp = json.loads(line.decode())
-if not resp.get("ok"):
-    raise SystemExit(resp.get("errorMessage") or resp.get("errorCode") or "probe failed")
-"#,
-        protocol = SOURCE_COMPANION_PROTOCOL_VERSION,
-        token = serde_json::to_string(token).unwrap_or_else(|_| "null".to_string()),
-        host = serde_json::to_string(host).unwrap_or_else(|_| "\"127.0.0.1\"".to_string()),
-        port = port,
-    );
-    format!("python3 -c {}", shell_quote(&script))
+fn remote_probe_command(config: &ConnectSshConfig, remote_endpoint: &str, token: &str) -> String {
+    format!(
+        "{} companion probe --endpoint {} --token {} --timeout-ms 2000 --json",
+        remote_foreman_prefix(config),
+        shell_quote(remote_endpoint),
+        shell_quote(token)
+    )
 }
 
 fn configure_remote_source(
@@ -550,5 +533,13 @@ mod tests {
     fn validates_loopback_remote_bind() {
         assert!(validate_loopback("127.0.0.1").is_ok());
         assert!(validate_loopback("0.0.0.0").is_err());
+    }
+
+    #[test]
+    fn remote_probe_uses_foreman_native_probe() {
+        assert_eq!(
+            remote_probe_command(&config(), "127.0.0.1:4040", "tok en"),
+            "'foreman' --config-file '/tmp/foreman config.toml' companion probe --endpoint '127.0.0.1:4040' --token 'tok en' --timeout-ms 2000 --json"
+        );
     }
 }

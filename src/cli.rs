@@ -33,7 +33,8 @@ use crate::services::ui_preferences::{
     apply_preferences_to_runtime, load_ui_preferences, reset_ui_preferences, PersistedUiPreferences,
 };
 use crate::source_companion::{
-    CompanionAction, CompanionRequest, CompanionResponse, SOURCE_COMPANION_PROTOCOL_VERSION,
+    CompanionAction, CompanionClient, CompanionRequest, CompanionResponse,
+    SOURCE_COMPANION_PROTOCOL_VERSION,
 };
 use crate::source_companion_connect::{connect_ssh, ConnectSshConfig};
 use crate::source_snapshots::{
@@ -456,6 +457,8 @@ pub enum SourcesAddCommand {
 pub enum CompanionCommand {
     /// Serve source inventory/actions on a local TCP endpoint.
     Serve(CompanionServeArgs),
+    /// Probe a source companion endpoint with Foreman's native JSON-line client.
+    Probe(CompanionProbeArgs),
     /// Connect this host to a remote SSH host through a supervised reverse tunnel.
     ConnectSsh(CompanionConnectSshArgs),
 }
@@ -579,6 +582,20 @@ pub struct CompanionServeArgs {
     pub max_requests: Option<u64>,
     #[arg(long)]
     pub ready_file: Option<PathBuf>,
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Clone, PartialEq, Eq)]
+pub struct CompanionProbeArgs {
+    #[arg(long)]
+    pub endpoint: String,
+    #[arg(long)]
+    pub token: Option<String>,
+    #[arg(long, default_value_t = 2_000)]
+    pub timeout_ms: u64,
+    #[arg(long)]
+    pub all_panes: bool,
     #[arg(long)]
     pub json: bool,
 }
@@ -1615,8 +1632,35 @@ fn handle_companion_command(
 ) -> Result<RunOutcome, RunError> {
     match command {
         CompanionCommand::Serve(args) => serve_companion(cli, paths, args),
+        CompanionCommand::Probe(args) => probe_companion(args),
         CompanionCommand::ConnectSsh(args) => connect_ssh_command(cli, args),
     }
+}
+
+fn probe_companion(args: &CompanionProbeArgs) -> Result<RunOutcome, RunError> {
+    let client = CompanionClient::new(&args.endpoint, args.timeout_ms, args.token.clone());
+    let response = client
+        .request(CompanionAction::Agents, None, None, args.all_panes)
+        .map_err(|error| RunError::Usage(format!("companion probe failed: {error}")))?;
+    let entry_count = response
+        .agents
+        .as_ref()
+        .map(|agents| agents.entries.len())
+        .unwrap_or_default();
+    let value = serde_json::json!({
+        "schemaVersion": crate::services::control_api::CONTROL_API_SCHEMA_VERSION,
+        "ok": true,
+        "action": "companion.probe",
+        "endpoint": args.endpoint,
+        "entryCount": entry_count,
+    });
+    source_action_response(value, args.json, || {
+        println!(
+            "Companion probe succeeded for {} with {entry_count} entr{}",
+            args.endpoint,
+            if entry_count == 1 { "y" } else { "ies" }
+        )
+    })
 }
 
 fn connect_ssh_command(cli: &Cli, args: &CompanionConnectSshArgs) -> Result<RunOutcome, RunError> {
