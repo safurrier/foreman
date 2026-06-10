@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.5.0 - 2026-06-10
+
+### Added
+
+- Added multi-source Foreman inventory with source-scoped pane identity for local
+  and remote SSH-backed sources.
+- Added source snapshots and prewarming so remote/source visibility can survive
+  live companion outages with freshness diagnostics.
+- Added the source companion JSON-line transport, including `foreman companion
+  serve`, `foreman companion probe`, and live companion-backed sources.
+- Added `foreman companion connect-ssh <host>` to start a local companion,
+  open an SSH reverse tunnel, configure the remote source, and supervise the
+  bridge.
+- Added trusted reverse focus/send support for companion sources, gated by
+  explicit send trust and companion tokens.
+- Added source-local display activation for remote-triggered focus actions.
+
+### Changed
+
+- Updated the tmux popup and runtime refresh loop to keep all-source views
+  responsive with local/cached rows first and idle-deferred remote merges.
+- Updated the macOS overlay to decode source-aware control API fields, route
+  remote focus/send actions through `--source`, and render source provenance.
+- Updated source-companion validation to use isolated tmux sockets and Foreman's
+  native `companion probe` instead of ad hoc remote socket probes.
+
+### Fixed
+
+- Fixed reverse-tunnel validation that could poison the companion server by
+  opening and closing the forwarded TCP port without sending a request.
+- Fixed remote source action routing so focus/send/extension lookups use
+  source-scoped pane identity instead of bare tmux pane ids.
+- Fixed send-capable companion setup so `--allow-send` requires token-backed
+  trust.
+
 ## 1.4.0 - 2026-05-16
 
 ### Added
