@@ -100,24 +100,21 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             state.pull_request_cache.insert(workspace_path, lookup);
             reconcile_pull_request_detail(state);
         }
-        Action::SetExtensionCards {
-            workspace_path,
-            cards,
-        } => {
-            state.extension_cards_cache.insert(workspace_path, cards);
+        Action::SetExtensionCards { cache_key, cards } => {
+            state.extension_cards_cache.insert(cache_key, cards);
         }
         Action::SetExtensionRefreshing {
-            workspace_path,
+            cache_key,
             refreshing,
         } => {
             if refreshing {
-                state.extension_refreshing_workspace = Some(workspace_path);
+                state.extension_refreshing_key = Some(cache_key);
             } else if state
-                .extension_refreshing_workspace
+                .extension_refreshing_key
                 .as_ref()
-                .is_some_and(|current| current == &workspace_path)
+                .is_some_and(|current| current == &cache_key)
             {
-                state.extension_refreshing_workspace = None;
+                state.extension_refreshing_key = None;
             }
         }
         Action::SetRuntimeDiagnostics(diagnostics) => {
@@ -1810,11 +1807,14 @@ mod tests {
     fn extension_cards_are_cached_for_selected_workspace() {
         let mut state = AppState::with_inventory(sample_inventory());
         state.selection = Some(SelectionTarget::Pane("alpha:claude".into()));
+        let cache_key = state
+            .selected_extension_cache_key()
+            .expect("selected extension key");
 
         reduce(
             &mut state,
             Action::SetExtensionRefreshing {
-                workspace_path: PathBuf::from("/tmp/alpha"),
+                cache_key: cache_key.clone(),
                 refreshing: true,
             },
         );
@@ -1823,7 +1823,7 @@ mod tests {
         reduce(
             &mut state,
             Action::SetExtensionCards {
-                workspace_path: PathBuf::from("/tmp/alpha"),
+                cache_key: cache_key.clone(),
                 cards: vec![ControlExtensionCard {
                     id: "hk".to_string(),
                     title: "Harness Kit".to_string(),
@@ -1838,7 +1838,7 @@ mod tests {
         reduce(
             &mut state,
             Action::SetExtensionRefreshing {
-                workspace_path: PathBuf::from("/tmp/alpha"),
+                cache_key,
                 refreshing: false,
             },
         );
@@ -1849,6 +1849,73 @@ mod tests {
         assert_eq!(cards.len(), 1);
         assert_eq!(cards[0].id, "hk");
         assert!(!state.selected_extension_refreshing());
+    }
+
+    #[test]
+    fn extension_cards_are_scoped_to_selected_actionable_pane() {
+        let mut state = AppState::with_inventory(inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:agents")
+                .pane(
+                    PaneBuilder::agent("alpha:pi", HarnessKind::Pi)
+                        .working_dir("/tmp/alpha")
+                        .status(AgentStatus::Working),
+                )
+                .pane(
+                    PaneBuilder::agent("alpha:claude", HarnessKind::ClaudeCode)
+                        .working_dir("/tmp/alpha")
+                        .status(AgentStatus::Working),
+                ),
+        )]));
+        state.selection = Some(SelectionTarget::Pane("alpha:pi".into()));
+        let pi_key = state
+            .selected_extension_cache_key()
+            .expect("pi selected extension key");
+        reduce(
+            &mut state,
+            Action::SetExtensionCards {
+                cache_key: pi_key,
+                cards: vec![ControlExtensionCard {
+                    id: "pi-subagents".to_string(),
+                    title: "Pi subagents".to_string(),
+                    status: "working".to_string(),
+                    status_label: "WORKING".to_string(),
+                    summary: "1 active subagent".to_string(),
+                    rows: Vec::new(),
+                    actions: Vec::new(),
+                }],
+            },
+        );
+
+        state.selection = Some(SelectionTarget::Pane("alpha:claude".into()));
+        assert!(
+            state.selected_extension_cards().is_none(),
+            "same-workspace non-Pi pane must not reuse Pi pane cards"
+        );
+
+        let claude_key = state
+            .selected_extension_cache_key()
+            .expect("claude selected extension key");
+        reduce(
+            &mut state,
+            Action::SetExtensionRefreshing {
+                cache_key: claude_key.clone(),
+                refreshing: true,
+            },
+        );
+        assert!(state.selected_extension_refreshing());
+        state.selection = Some(SelectionTarget::Pane("alpha:pi".into()));
+        assert!(
+            !state.selected_extension_refreshing(),
+            "refreshing state is also pane-scoped within a workspace"
+        );
+
+        reduce(
+            &mut state,
+            Action::SetExtensionRefreshing {
+                cache_key: claude_key,
+                refreshing: false,
+            },
+        );
     }
 
     #[test]

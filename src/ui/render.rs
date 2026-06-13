@@ -2260,8 +2260,11 @@ mod tests {
     #[test]
     fn render_preview_surfaces_extension_cards_for_selected_workspace() {
         let mut state = sample_state();
+        let cache_key = state
+            .selected_extension_cache_key()
+            .expect("selected extension cache key");
         state.extension_cards_cache.insert(
-            PathBuf::from("/tmp/alpha"),
+            cache_key,
             vec![ControlExtensionCard {
                 id: "hk".to_string(),
                 title: "Harness Kit".to_string(),

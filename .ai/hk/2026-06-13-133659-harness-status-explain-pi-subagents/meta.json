@@ -1,0 +1,45 @@
+{
+  "attached_artifacts": [],
+  "branch": "feat/harness-status-explain-pi-subagents",
+  "diff_hash": "sha256:086330ee6ca68b4c9204855f76fe7739f076d7c15f6ee6083871f2e2f88c32b0",
+  "dirty": true,
+  "event_count": 22,
+  "event_seq": 24,
+  "evidence_count": 14,
+  "evidence_ids": [
+    "ev_20260613_133949_753668",
+    "ev_20260613_140716_003723",
+    "ev_20260613_140716_003719",
+    "ev_20260613_140716_003726",
+    "ev_20260613_140755_530531",
+    "ev_20260613_140755_543803",
+    "ev_20260613_140755_534463",
+    "ev_20260613_140755_548083",
+    "ev_20260613_140716_003720",
+    "ev_20260613_140901_510424",
+    "ev_20260613_140901_510713",
+    "ev_20260613_141536_119119",
+    "ev_20260613_141619_204343",
+    "ev_20260613_142420_372830"
+  ],
+  "file_hashes": {
+    "README.md": "sha256:c87454feced10d738acbb84bc37fefaf31b76cbf90645ea72949cc589548ea63",
+    "artifacts/README.md": "sha256:c4bad9d4652f296a7e4dcf175fe1dd0c66a99ec0b74941cd45c499e84792436c"
+  },
+  "files": [
+    "README.md",
+    "meta.json",
+    "artifacts/README.md"
+  ],
+  "generated_at": "2026-06-13T21:24:40.862907+00:00",
+  "generated_by": "hk export --format handoff-dir",
+  "git_sha": "9ce0eff",
+  "output_path": ".ai/hk/2026-06-13-133659-harness-status-explain-pi-subagents",
+  "ready": true,
+  "ready_status": "ready",
+  "schema_version": 1,
+  "sync_status": "synced",
+  "target_root": ".",
+  "target_scope": ".",
+  "work_id": "2026-06-13-133659-harness-status-explain-pi-subagents"
+}

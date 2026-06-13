@@ -3,6 +3,7 @@ pub mod extensions;
 pub mod linked_repositories;
 pub mod logging;
 pub mod notifications;
+pub mod pi_subagents;
 pub mod pull_requests;
 pub mod startup_cache;
 pub mod system_stats;

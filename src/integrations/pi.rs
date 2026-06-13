@@ -1,5 +1,8 @@
 use super::native;
-use super::{matches_any, status_from_hints, CompatibilityObservation, StatusHints};
+use super::{
+    matches_any, status_from_hints, status_from_hints_explanation, CompatibilityExplanation,
+    CompatibilityObservation, StatusHints,
+};
 use crate::app::{AgentStatus, HarnessKind, Inventory};
 
 const RECOGNITION_TOKENS: &[&str] = &["\npi ", "pi loop", "pi agent", "pi-coding-agent"];
@@ -49,6 +52,12 @@ pub(crate) fn recognizes_runtime_identity(observation: CompatibilityObservation<
 
 pub(crate) fn compatibility_status(observation: CompatibilityObservation<'_>) -> AgentStatus {
     status_from_hints(observation, STATUS_HINTS)
+}
+
+pub(crate) fn compatibility_explanation(
+    observation: CompatibilityObservation<'_>,
+) -> CompatibilityExplanation {
+    status_from_hints_explanation(observation, STATUS_HINTS)
 }
 
 pub fn apply_native_signals<S: PiNativeSignalSource>(

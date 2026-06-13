@@ -2,8 +2,9 @@ use crate::adapters::tmux::{
     InventoryLoadMetrics, InventoryLoadPolicy, SystemTmuxBackend, TmuxAdapter,
 };
 use crate::app::{
-    action_for_command, map_key_event, reduce, Action, AppState, DraftEdit, Effect, OperatorAlert,
-    OperatorAlertLevel, OperatorAlertSource, PaneId, PaneKey,
+    action_for_command, map_key_event, reduce, Action, AppState, DraftEdit, Effect,
+    ExtensionCardsCacheKey, OperatorAlert, OperatorAlertLevel, OperatorAlertSource, PaneId,
+    PaneKey,
 };
 use crate::cli::PreparedBootstrap;
 use crate::doctor::{
@@ -111,7 +112,7 @@ struct DashboardRuntime {
     system_stats: SystemStatsService<SysinfoSystemStatsBackend>,
     last_pull_request_lookup: BTreeMap<PathBuf, Instant>,
     pending_pull_request_lookup: Option<PendingPullRequestLookup>,
-    last_extension_lookup: BTreeMap<PathBuf, Instant>,
+    last_extension_lookup: BTreeMap<ExtensionCardsCacheKey, Instant>,
     pending_extension_lookup: Option<PendingExtensionLookup>,
     offscreen_capture_cursor: usize,
     inventory_refresh: InventoryRefreshWorker,
@@ -132,7 +133,7 @@ struct PendingPullRequestLookup {
 
 #[derive(Debug, Clone)]
 struct PendingExtensionLookup {
-    workspace_path: PathBuf,
+    cache_key: ExtensionCardsCacheKey,
     due_at: Instant,
 }
 
@@ -170,14 +171,17 @@ struct ExtensionLookupWorker {
 }
 
 enum ExtensionLookupCommand {
-    Lookup(ExtensionLookupRequest),
+    Lookup(Box<ExtensionLookupRequest>),
     Shutdown,
 }
 
 struct ExtensionLookupRequest {
     generation: u64,
     workspace_path: PathBuf,
+    cache_key: ExtensionCardsCacheKey,
     pane_key: Option<PaneKey>,
+    pane_harness: Option<crate::app::HarnessKind>,
+    pane_working_dir: Option<PathBuf>,
     config_file: PathBuf,
     trigger: &'static str,
 }
@@ -185,6 +189,7 @@ struct ExtensionLookupRequest {
 struct ExtensionLookupResult {
     generation: u64,
     workspace_path: PathBuf,
+    cache_key: ExtensionCardsCacheKey,
     trigger: &'static str,
     elapsed_ms: u128,
     cards: Vec<ControlExtensionCard>,
@@ -1191,29 +1196,46 @@ impl DashboardRuntime {
             self.clear_pending_extension_lookup()?;
             return Ok(());
         };
+        let Some(cache_key) = self.state.selected_extension_cache_key() else {
+            self.clear_pending_extension_lookup()?;
+            return Ok(());
+        };
 
-        if !self.extension_lookup_due(&workspace_path, force) {
+        if !self.extension_lookup_due(&cache_key, force) {
             return Ok(());
         }
 
-        let pane_key = self.state.selected_actionable_pane_key();
-        self.request_extension_lookup(workspace_path, pane_key, trigger)
+        let pane = self.state.selected_actionable_pane();
+        let pane_key = pane.map(crate::app::Pane::key);
+        let pane_harness = pane.and_then(|pane| pane.agent.as_ref().map(|agent| agent.harness));
+        let pane_working_dir = pane.and_then(|pane| pane.working_dir.clone());
+        self.request_extension_lookup(
+            workspace_path,
+            cache_key,
+            pane_key,
+            pane_harness,
+            pane_working_dir,
+            trigger,
+        )
     }
 
     fn request_extension_lookup(
         &mut self,
         workspace_path: PathBuf,
+        cache_key: ExtensionCardsCacheKey,
         pane_key: Option<PaneKey>,
+        pane_harness: Option<crate::app::HarnessKind>,
+        pane_working_dir: Option<PathBuf>,
         trigger: &'static str,
     ) -> Result<(), RuntimeError> {
         if self.extension_lookup.in_flight_generation.is_some() {
             self.replace_pending_extension_lookup(PendingExtensionLookup {
-                workspace_path: workspace_path.clone(),
+                cache_key: cache_key.clone(),
                 due_at: Instant::now()
                     + Duration::from_millis(SELECTION_EXTENSION_LOOKUP_DEBOUNCE_MS),
             })?;
             self.apply_runtime_action(Action::SetExtensionRefreshing {
-                workspace_path,
+                cache_key,
                 refreshing: true,
             })?;
             return Ok(());
@@ -1223,23 +1245,28 @@ impl DashboardRuntime {
         self.extension_lookup.next_generation += 1;
         self.extension_lookup.in_flight_generation = Some(generation);
         self.apply_runtime_action(Action::SetExtensionRefreshing {
-            workspace_path: workspace_path.clone(),
+            cache_key: cache_key.clone(),
             refreshing: true,
         })?;
         let send_result = self
             .extension_lookup
             .request_tx
-            .send(ExtensionLookupCommand::Lookup(ExtensionLookupRequest {
-                generation,
-                workspace_path: workspace_path.clone(),
-                pane_key,
-                config_file: self.runtime.config_file.clone(),
-                trigger,
-            }));
+            .send(ExtensionLookupCommand::Lookup(Box::new(
+                ExtensionLookupRequest {
+                    generation,
+                    workspace_path: workspace_path.clone(),
+                    cache_key: cache_key.clone(),
+                    pane_key,
+                    pane_harness,
+                    pane_working_dir,
+                    config_file: self.runtime.config_file.clone(),
+                    trigger,
+                },
+            )));
         if let Err(error) = send_result {
             self.extension_lookup.in_flight_generation = None;
             self.apply_runtime_action(Action::SetExtensionRefreshing {
-                workspace_path,
+                cache_key,
                 refreshing: false,
             })?;
             return Err(io::Error::new(io::ErrorKind::BrokenPipe, error.to_string()).into());
@@ -1271,13 +1298,14 @@ impl DashboardRuntime {
         self.extension_lookup.in_flight_generation = None;
         let ExtensionLookupResult {
             workspace_path,
+            cache_key,
             trigger,
             elapsed_ms,
             cards,
             ..
         } = result;
         self.last_extension_lookup
-            .insert(workspace_path.clone(), Instant::now());
+            .insert(cache_key.clone(), Instant::now());
         self.logger.log_timing(
             "extension_lookup",
             &format!(
@@ -1287,13 +1315,10 @@ impl DashboardRuntime {
             ),
         )?;
         self.apply_runtime_action(Action::SetExtensionRefreshing {
-            workspace_path: workspace_path.clone(),
+            cache_key: cache_key.clone(),
             refreshing: false,
         })?;
-        self.apply_runtime_action(Action::SetExtensionCards {
-            workspace_path,
-            cards,
-        })?;
+        self.apply_runtime_action(Action::SetExtensionCards { cache_key, cards })?;
         Ok(())
     }
 
@@ -1597,22 +1622,27 @@ impl DashboardRuntime {
             return;
         }
         let current_workspace = self.state.selected_workspace_path();
-        if current_workspace == previous_workspace {
+        let current_cache_key = self.state.selected_extension_cache_key();
+        if current_workspace == previous_workspace
+            && current_cache_key
+                .as_ref()
+                .is_some_and(|cache_key| self.state.extension_cards_cache.contains_key(cache_key))
+        {
             return;
         }
 
-        let Some(workspace_path) = current_workspace else {
+        let Some(cache_key) = current_cache_key else {
             self.pending_extension_lookup = None;
             return;
         };
 
-        if !self.extension_lookup_due(&workspace_path, false) {
+        if !self.extension_lookup_due(&cache_key, false) {
             self.pending_extension_lookup = None;
             return;
         }
 
         self.pending_extension_lookup = Some(PendingExtensionLookup {
-            workspace_path,
+            cache_key,
             due_at: Instant::now() + Duration::from_millis(SELECTION_EXTENSION_LOOKUP_DEBOUNCE_MS),
         });
     }
@@ -1626,14 +1656,14 @@ impl DashboardRuntime {
             return Ok(());
         }
 
-        let Some(selected_workspace) = self.state.selected_workspace_path() else {
+        let Some(selected_cache_key) = self.state.selected_extension_cache_key() else {
             self.clear_pending_extension_lookup()?;
             return Ok(());
         };
 
-        if selected_workspace != pending.workspace_path {
+        if selected_cache_key != pending.cache_key {
             self.clear_pending_extension_lookup()?;
-            self.schedule_selected_extension_refresh(Some(pending.workspace_path));
+            self.schedule_selected_extension_refresh(Some(pending.cache_key.workspace_path));
             return Ok(());
         }
 
@@ -1681,30 +1711,30 @@ impl DashboardRuntime {
         pending: PendingExtensionLookup,
     ) -> Result<(), RuntimeError> {
         if let Some(previous) = self.pending_extension_lookup.replace(pending) {
-            self.clear_extension_refreshing_for(previous.workspace_path)?;
+            self.clear_extension_refreshing_for(previous.cache_key)?;
         }
         Ok(())
     }
 
     fn clear_pending_extension_lookup(&mut self) -> Result<(), RuntimeError> {
         if let Some(pending) = self.pending_extension_lookup.take() {
-            self.clear_extension_refreshing_for(pending.workspace_path)?;
+            self.clear_extension_refreshing_for(pending.cache_key)?;
         }
         Ok(())
     }
 
     fn clear_extension_refreshing_for(
         &mut self,
-        workspace_path: PathBuf,
+        cache_key: ExtensionCardsCacheKey,
     ) -> Result<(), RuntimeError> {
         if self
             .state
-            .extension_refreshing_workspace
+            .extension_refreshing_key
             .as_ref()
-            .is_some_and(|refreshing| refreshing == &workspace_path)
+            .is_some_and(|refreshing| refreshing == &cache_key)
         {
             self.apply_runtime_action(Action::SetExtensionRefreshing {
-                workspace_path,
+                cache_key,
                 refreshing: false,
             })?;
         }
@@ -1722,16 +1752,13 @@ impl DashboardRuntime {
                 .is_none_or(|last_lookup| last_lookup.elapsed() >= poll_interval)
     }
 
-    fn extension_lookup_due(&self, workspace_path: &PathBuf, force: bool) -> bool {
+    fn extension_lookup_due(&self, cache_key: &ExtensionCardsCacheKey, force: bool) -> bool {
         let poll_interval = Duration::from_millis(self.runtime.extension_poll_interval_ms.max(1));
         force
-            || !self
-                .state
-                .extension_cards_cache
-                .contains_key(workspace_path)
+            || !self.state.extension_cards_cache.contains_key(cache_key)
             || self
                 .last_extension_lookup
-                .get(workspace_path)
+                .get(cache_key)
                 .is_none_or(|last_lookup| last_lookup.elapsed() >= poll_interval)
     }
 
@@ -2049,7 +2076,7 @@ fn spawn_extension_lookup_worker() -> ExtensionLookupWorker {
                 match command {
                     ExtensionLookupCommand::Lookup(request) => {
                         let lookup_started = Instant::now();
-                        let cards = match request.pane_key.as_ref() {
+                        let mut cards = match request.pane_key.as_ref() {
                             Some(pane_key) if !pane_key.is_local() => {
                                 remote_extension_cards(&request.config_file, pane_key)
                                     .unwrap_or_default()
@@ -2060,9 +2087,20 @@ fn spawn_extension_lookup_worker() -> ExtensionLookupWorker {
                             .remove(&request.workspace_path)
                             .unwrap_or_default(),
                         };
+                        if request
+                            .pane_key
+                            .as_ref()
+                            .is_none_or(|pane_key| pane_key.is_local())
+                        {
+                            cards.extend(crate::services::pi_subagents::collect_pi_subagent_cards(
+                                request.pane_harness,
+                                request.pane_working_dir.as_deref(),
+                            ));
+                        }
                         let _ = result_tx.send(ExtensionLookupResult {
                             generation: request.generation,
                             workspace_path: request.workspace_path,
+                            cache_key: request.cache_key,
                             trigger: request.trigger,
                             elapsed_ms: lookup_started.elapsed().as_millis(),
                             cards,
