@@ -585,6 +585,25 @@ hook writes append-only native events and derives the compatible per-pane signal
 file from that event history, with explicit active-run and timestamp fields in
 new signal payloads.
 
+Doctor/runtime diagnostics label Pi signal provenance as:
+
+- `active-accounted`: the signal includes active-run metadata, so overlapping
+  parent/child Pi runs can stay working until every run finishes.
+- `legacy`: the signal came from bare start/end status without active-run
+  metadata; rerun setup so subagent children cannot collapse the pane to idle
+  early.
+- `missing` or `stale-invalid`: Foreman could not read a usable native signal
+  for that pane.
+
+When fresh `pi-subagents` structured async status files are present for the
+same workspace, Foreman treats them as Pi-native activity evidence. Active
+subagent runs can keep or promote the parent Pi pane to `working`, while native
+`error` states keep precedence and structured subagent attention can promote the
+parent pane to `needs attention`. The same typed activity evidence also powers
+the read-only Pi subagents card, which explains active runs, current tool/path,
+and `needs_attention` state from `status.json`; Foreman never scrapes terminal
+text for this behavior.
+
 Override the native signal path with:
 
 ```toml

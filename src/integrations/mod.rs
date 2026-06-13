@@ -8,6 +8,7 @@ mod native_events;
 mod opencode;
 mod pi;
 mod pi_hook;
+pub(crate) mod pi_subagents;
 
 use crate::app::{AgentSnapshot, AgentStatus, HarnessKind, IntegrationMode, Inventory};
 use crate::config::IntegrationPreference;
@@ -80,6 +81,43 @@ pub(crate) struct StatusHints {
     pub error: &'static [&'static str],
     pub working: &'static [&'static str],
     pub idle: &'static [&'static str],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompatibilityExplanation {
+    pub status: AgentStatus,
+    pub category: &'static str,
+    pub matched: Option<String>,
+    pub scope: &'static str,
+}
+
+impl CompatibilityExplanation {
+    fn unknown(scope: &'static str) -> Self {
+        Self {
+            status: AgentStatus::Unknown,
+            category: "unknown",
+            matched: None,
+            scope,
+        }
+    }
+
+    pub fn evidence_label(&self) -> String {
+        match self.matched.as_deref() {
+            Some(matched) => format!(
+                "compatibility_status={} rule={}:{} scope={}",
+                status_evidence_slug(self.status),
+                self.category,
+                matched,
+                self.scope
+            ),
+            None => format!(
+                "compatibility_status={} rule={} scope={}",
+                status_evidence_slug(self.status),
+                self.category,
+                self.scope
+            ),
+        }
+    }
 }
 
 pub fn compatibility_snapshot(observation: CompatibilityObservation<'_>) -> Option<AgentSnapshot> {
@@ -281,11 +319,31 @@ pub fn compatibility_status(
     }
 }
 
+pub fn compatibility_explanation(
+    harness: HarnessKind,
+    observation: CompatibilityObservation<'_>,
+) -> CompatibilityExplanation {
+    match harness {
+        HarnessKind::ClaudeCode => claude::compatibility_explanation(observation),
+        HarnessKind::CodexCli => codex::compatibility_explanation(observation),
+        HarnessKind::Pi => pi::compatibility_explanation(observation),
+        HarnessKind::GeminiCli => status_from_hints_explanation(observation, gemini::STATUS_HINTS),
+        HarnessKind::OpenCode => status_from_hints_explanation(observation, opencode::STATUS_HINTS),
+    }
+}
+
 pub(crate) fn status_from_hints(
     observation: CompatibilityObservation<'_>,
     hints: StatusHints,
 ) -> AgentStatus {
-    status_from_text(&observation.haystack(), hints)
+    status_from_hints_explanation(observation, hints).status
+}
+
+pub(crate) fn status_from_hints_explanation(
+    observation: CompatibilityObservation<'_>,
+    hints: StatusHints,
+) -> CompatibilityExplanation {
+    status_from_text_explanation(&observation.haystack(), hints, "pane-haystack")
 }
 
 pub(crate) fn status_from_recent_preview_lines(
@@ -293,6 +351,14 @@ pub(crate) fn status_from_recent_preview_lines(
     hints: StatusHints,
     max_lines: usize,
 ) -> AgentStatus {
+    status_from_recent_preview_lines_explanation(observation, hints, max_lines).status
+}
+
+pub(crate) fn status_from_recent_preview_lines_explanation(
+    observation: CompatibilityObservation<'_>,
+    hints: StatusHints,
+    max_lines: usize,
+) -> CompatibilityExplanation {
     for line in observation
         .preview
         .lines()
@@ -301,9 +367,10 @@ pub(crate) fn status_from_recent_preview_lines(
         .filter(|line| !line.is_empty())
         .take(max_lines)
     {
-        let status = status_from_text(&line.to_ascii_lowercase(), hints);
-        if status != AgentStatus::Unknown {
-            return status;
+        let explanation =
+            status_from_text_explanation(&line.to_ascii_lowercase(), hints, "recent-preview-line");
+        if explanation.status != AgentStatus::Unknown {
+            return explanation;
         }
     }
 
@@ -325,27 +392,31 @@ pub(crate) fn status_from_recent_preview_lines(
         tail
     )
     .to_ascii_lowercase();
-    status_from_text(&haystack, hints)
+    status_from_text_explanation(&haystack, hints, "recent-pane-haystack")
 }
 
-fn status_from_text(haystack: &str, hints: StatusHints) -> AgentStatus {
-    if contains_any(haystack, hints.attention) {
-        return AgentStatus::NeedsAttention;
+fn status_from_text_explanation(
+    haystack: &str,
+    hints: StatusHints,
+    scope: &'static str,
+) -> CompatibilityExplanation {
+    for (status, category, needles) in [
+        (AgentStatus::NeedsAttention, "attention", hints.attention),
+        (AgentStatus::Error, "error", hints.error),
+        (AgentStatus::Working, "working", hints.working),
+        (AgentStatus::Idle, "idle", hints.idle),
+    ] {
+        if let Some(matched) = first_match(haystack, needles) {
+            return CompatibilityExplanation {
+                status,
+                category,
+                matched: Some(matched.to_string()),
+                scope,
+            };
+        }
     }
 
-    if contains_any(haystack, hints.error) {
-        return AgentStatus::Error;
-    }
-
-    if contains_any(haystack, hints.working) {
-        return AgentStatus::Working;
-    }
-
-    if contains_any(haystack, hints.idle) {
-        return AgentStatus::Idle;
-    }
-
-    AgentStatus::Unknown
+    CompatibilityExplanation::unknown(scope)
 }
 
 fn contains_any<T>(haystack: &str, needles: impl IntoIterator<Item = T>) -> bool
@@ -355,6 +426,23 @@ where
     needles
         .into_iter()
         .any(|needle| haystack.contains(&needle.as_ref().to_ascii_lowercase()))
+}
+
+fn first_match<'a>(haystack: &str, needles: &'a [&'a str]) -> Option<&'a str> {
+    needles
+        .iter()
+        .copied()
+        .find(|needle| haystack.contains(&needle.to_ascii_lowercase()))
+}
+
+fn status_evidence_slug(status: AgentStatus) -> &'static str {
+    match status {
+        AgentStatus::Working => "working",
+        AgentStatus::NeedsAttention => "needs-attention",
+        AgentStatus::Idle => "idle",
+        AgentStatus::Error => "error",
+        AgentStatus::Unknown => "unknown",
+    }
 }
 
 fn debounce_snapshot(previous: &AgentSnapshot, current: &mut AgentSnapshot) {
@@ -462,8 +550,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        compatibility_snapshot, compatibility_status, recognize_harness, stabilize_inventory,
-        CompatibilityObservation,
+        compatibility_explanation, compatibility_snapshot, compatibility_status, recognize_harness,
+        stabilize_inventory, CompatibilityObservation,
     };
     use crate::app::{
         inventory, AgentStatus, HarnessKind, IntegrationMode, Inventory, PaneBuilder,
@@ -667,6 +755,27 @@ mod tests {
         ))
         .expect("snapshot should exist");
         assert_eq!(opencode.status, AgentStatus::Error);
+    }
+
+    #[test]
+    fn compatibility_explanation_reports_matched_rule_and_scope() {
+        let explanation = compatibility_explanation(
+            HarnessKind::ClaudeCode,
+            observation(
+                Some("claude"),
+                "claude",
+                "Old traceback\n────────────────────────\n-- INSERT -- bypass permissions on",
+            ),
+        );
+
+        assert_eq!(explanation.status, AgentStatus::Idle);
+        assert_eq!(explanation.category, "idle");
+        assert_eq!(explanation.matched.as_deref(), Some("-- insert --"));
+        assert_eq!(explanation.scope, "recent-preview-line");
+        assert_eq!(
+            explanation.evidence_label(),
+            "compatibility_status=idle rule=idle:-- insert -- scope=recent-preview-line"
+        );
     }
 
     #[test]

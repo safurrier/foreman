@@ -236,6 +236,21 @@ impl From<PaneId> for PaneKey {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ExtensionCardsCacheKey {
+    pub workspace_path: PathBuf,
+    pub pane_key: Option<PaneKey>,
+}
+
+impl ExtensionCardsCacheKey {
+    pub fn new(workspace_path: PathBuf, pane_key: Option<PaneKey>) -> Self {
+        Self {
+            workspace_path,
+            pane_key,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Mode {
     #[default]
@@ -1423,8 +1438,8 @@ pub struct AppState {
     pub pull_request_detail_manual: bool,
     pub pull_request_auto_open_dismissed: BTreeSet<PathBuf>,
     pub pull_request_refreshing_workspace: Option<PathBuf>,
-    pub extension_cards_cache: BTreeMap<PathBuf, Vec<ControlExtensionCard>>,
-    pub extension_refreshing_workspace: Option<PathBuf>,
+    pub extension_cards_cache: BTreeMap<ExtensionCardsCacheKey, Vec<ControlExtensionCard>>,
+    pub extension_refreshing_key: Option<ExtensionCardsCacheKey>,
     pub notifications: NotificationState,
     pub input_draft: TextDraft,
     pub modal: Option<ModalState>,
@@ -1478,7 +1493,7 @@ impl Default for AppState {
             pull_request_auto_open_dismissed: BTreeSet::new(),
             pull_request_refreshing_workspace: None,
             extension_cards_cache: BTreeMap::new(),
-            extension_refreshing_workspace: None,
+            extension_refreshing_key: None,
             notifications: NotificationState::default(),
             input_draft: TextDraft::default(),
             modal: None,
@@ -1935,20 +1950,26 @@ impl AppState {
         self.pull_request_cache.get(&workspace_path)
     }
 
-    pub fn selected_extension_cards(&self) -> Option<&[ControlExtensionCard]> {
+    pub fn selected_extension_cache_key(&self) -> Option<ExtensionCardsCacheKey> {
         let workspace_path = self.selected_workspace_path()?;
+        Some(ExtensionCardsCacheKey {
+            workspace_path,
+            pane_key: self.selected_actionable_pane_key(),
+        })
+    }
+
+    pub fn selected_extension_cards(&self) -> Option<&[ControlExtensionCard]> {
+        let cache_key = self.selected_extension_cache_key()?;
         self.extension_cards_cache
-            .get(&workspace_path)
+            .get(&cache_key)
             .map(Vec::as_slice)
     }
 
     pub fn selected_extension_refreshing(&self) -> bool {
-        self.selected_workspace_path()
+        self.selected_extension_cache_key()
             .as_ref()
-            .zip(self.extension_refreshing_workspace.as_ref())
-            .is_some_and(|(selected_workspace, refreshing_workspace)| {
-                selected_workspace == refreshing_workspace
-            })
+            .zip(self.extension_refreshing_key.as_ref())
+            .is_some_and(|(selected_key, refreshing_key)| selected_key == refreshing_key)
     }
 
     pub fn selected_pull_request_refreshing(&self) -> bool {
