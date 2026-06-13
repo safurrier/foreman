@@ -8,6 +8,7 @@ mod native_events;
 mod opencode;
 mod pi;
 mod pi_hook;
+pub(crate) mod pi_subagents;
 
 use crate::app::{AgentSnapshot, AgentStatus, HarnessKind, IntegrationMode, Inventory};
 use crate::config::IntegrationPreference;

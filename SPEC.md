@@ -553,6 +553,12 @@ mise run ci
 
 - Given a supported harness with native integration available, when the dashboard discovers that agent, it uses native mode as the authoritative source of status.
 - Given a Claude, Codex, or Pi hook bridge runs inside a tmux pane, when it writes a native signal, Foreman matches that signal to the same pane ID and promotes the pane from compatibility to native mode.
+- Given a Pi pane has fresh structured `pi-subagents` activity for the same
+  workspace, when the parent pane would otherwise appear idle or unknown,
+  Foreman treats that child-task activity as Pi-native evidence and keeps or
+  promotes the parent pane to working. Structured subagent attention can promote
+  the parent pane to needs-attention, while stale or wrong-workspace subagent
+  files do not affect status.
 - Given native integration is not available and the harness is still visible in tmux, the dashboard falls back to compatibility mode instead of dropping the pane entirely.
 - Given config forces compatibility mode for Claude, Codex, or Pi, native signal data does not override compatibility status for that run.
 

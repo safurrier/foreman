@@ -1,56 +1,10 @@
 use crate::app::HarnessKind;
+use crate::integrations::pi_subagents::{
+    activity_for_workspace, is_active_work_state, run_needs_attention, state_counts, AsyncStatus,
+};
 use crate::services::extensions::{ControlExtensionCard, ControlExtensionRow};
-use serde::Deserialize;
 use std::collections::BTreeMap;
-use std::fs;
-use std::path::{Path, PathBuf};
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AsyncStatus {
-    run_id: String,
-    state: String,
-    #[serde(default)]
-    activity_state: Option<String>,
-    #[serde(default)]
-    current_tool: Option<String>,
-    #[serde(default)]
-    current_path: Option<String>,
-    #[serde(default)]
-    turn_count: Option<u64>,
-    #[serde(default)]
-    tool_count: Option<u64>,
-    #[serde(default)]
-    cwd: Option<PathBuf>,
-    #[serde(default)]
-    steps: Vec<AsyncStepStatus>,
-    #[serde(default)]
-    nested_children: Vec<NestedRunSummary>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AsyncStepStatus {
-    agent: String,
-    status: String,
-    #[serde(default)]
-    activity_state: Option<String>,
-    #[serde(default)]
-    current_tool: Option<String>,
-    #[serde(default)]
-    current_path: Option<String>,
-    #[serde(default)]
-    children: Vec<NestedRunSummary>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct NestedRunSummary {
-    #[serde(default)]
-    state: Option<String>,
-    #[serde(default)]
-    activity_state: Option<String>,
-}
+use std::path::Path;
 
 pub fn collect_pi_subagent_cards(
     harness: Option<HarnessKind>,
@@ -63,51 +17,14 @@ pub fn collect_pi_subagent_cards(
         return Vec::new();
     };
 
-    let runs = active_runs_for_workspace(&default_async_dir(), working_dir);
-    if runs.is_empty() {
-        return Vec::new();
-    }
-
-    vec![card_for_runs(&runs)]
-}
-
-fn active_runs_for_workspace(async_dir: &Path, working_dir: &Path) -> Vec<AsyncStatus> {
-    let Ok(entries) = fs::read_dir(async_dir) else {
+    let Some(activity) = activity_for_workspace(working_dir) else {
         return Vec::new();
     };
-    let mut runs = entries
-        .filter_map(Result::ok)
-        .filter_map(|entry| read_status_file(&entry.path().join("status.json")))
-        .filter(|status| is_active_state(&status.state))
-        .filter(|status| {
-            status
-                .cwd
-                .as_deref()
-                .is_some_and(|cwd| workspace_matches(cwd, working_dir))
-        })
-        .collect::<Vec<_>>();
-    runs.sort_by(|left, right| left.run_id.cmp(&right.run_id));
-    runs
-}
-
-fn read_status_file(path: &Path) -> Option<AsyncStatus> {
-    let contents = fs::read_to_string(path).ok()?;
-    serde_json::from_str(&contents).ok()
-}
-
-fn is_active_state(state: &str) -> bool {
-    matches!(state, "queued" | "running" | "failed" | "paused")
-}
-
-fn workspace_matches(run_cwd: &Path, working_dir: &Path) -> bool {
-    run_cwd == working_dir || run_cwd.starts_with(working_dir) || working_dir.starts_with(run_cwd)
+    vec![card_for_runs(&activity.runs)]
 }
 
 fn card_for_runs(runs: &[AsyncStatus]) -> ControlExtensionCard {
-    let mut counts = BTreeMap::<&str, usize>::new();
-    for run in runs {
-        *counts.entry(run.state.as_str()).or_default() += 1;
-    }
+    let counts = state_counts(runs);
     let needs_attention = runs.iter().any(run_needs_attention);
     let status = if needs_attention {
         "needs-attention"
@@ -188,7 +105,7 @@ fn current_activity(run: &AsyncStatus) -> String {
         .nested_children
         .iter()
         .chain(run.steps.iter().flat_map(|step| step.children.iter()))
-        .filter(|child| child.state.as_deref().is_some_and(is_active_state))
+        .filter(|child| child.state.as_deref().is_some_and(is_active_work_state))
         .count();
     if nested > 0 {
         return format!("{nested} nested active");
@@ -219,96 +136,10 @@ fn row_status(run: &AsyncStatus) -> String {
     }
 }
 
-fn run_needs_attention(run: &AsyncStatus) -> bool {
-    run.activity_state.as_deref() == Some("needs_attention")
-        || run
-            .steps
-            .iter()
-            .any(|step| step.activity_state.as_deref() == Some("needs_attention"))
-        || run
-            .nested_children
-            .iter()
-            .chain(run.steps.iter().flat_map(|step| step.children.iter()))
-            .any(|child| child.activity_state.as_deref() == Some("needs_attention"))
-}
-
-fn default_async_dir() -> PathBuf {
-    std::env::temp_dir()
-        .join(format!("pi-subagents-{}", temp_scope_id()))
-        .join("async-subagent-runs")
-}
-
-#[cfg(unix)]
-fn temp_scope_id() -> String {
-    unsafe extern "C" {
-        fn getuid() -> u32;
-    }
-    format!("uid-{}", unsafe { getuid() })
-}
-
-#[cfg(not(unix))]
-fn temp_scope_id() -> String {
-    for key in ["USERNAME", "USER", "LOGNAME"] {
-        if let Ok(value) = std::env::var(key) {
-            let sanitized = sanitize_temp_scope_segment(&value);
-            if !sanitized.is_empty() {
-                return format!("user-{sanitized}");
-            }
-        }
-    }
-    "shared".to_string()
-}
-
-#[cfg(not(unix))]
-fn sanitize_temp_scope_segment(value: &str) -> String {
-    value
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-') {
-                ch
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>()
-        .trim_matches('-')
-        .to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
-
-    #[test]
-    fn active_runs_are_filtered_by_workspace() {
-        let temp = tempdir().expect("temp dir");
-        let matching = temp.path().join("matching");
-        let other = temp.path().join("other");
-        fs::create_dir_all(&matching).expect("matching dir");
-        fs::create_dir_all(&other).expect("other dir");
-        write_status(
-            temp.path(),
-            "run-a",
-            &format!(
-                r#"{{"runId":"run-a","state":"running","cwd":"{}","currentTool":"Edit"}}"#,
-                matching.display()
-            ),
-        );
-        write_status(
-            temp.path(),
-            "run-b",
-            &format!(
-                r#"{{"runId":"run-b","state":"running","cwd":"{}"}}"#,
-                other.display()
-            ),
-        );
-
-        let runs = active_runs_for_workspace(temp.path(), &matching);
-
-        assert_eq!(runs.len(), 1);
-        assert_eq!(runs[0].run_id, "run-a");
-    }
+    use crate::integrations::pi_subagents::AsyncStepStatus;
 
     #[test]
     fn card_marks_attention_when_any_step_needs_attention() {
@@ -321,6 +152,7 @@ mod tests {
             turn_count: Some(2),
             tool_count: Some(4),
             cwd: None,
+            observed_unix_millis: None,
             steps: vec![AsyncStepStatus {
                 agent: "reviewer".to_string(),
                 status: "running".to_string(),
@@ -336,11 +168,5 @@ mod tests {
 
         assert_eq!(card.status, "needs-attention");
         assert_eq!(card.rows[1].value, "reviewer: Bash");
-    }
-
-    fn write_status(root: &Path, run_id: &str, json: &str) {
-        let dir = root.join(run_id);
-        fs::create_dir_all(&dir).expect("run dir");
-        fs::write(dir.join("status.json"), json).expect("status");
     }
 }
