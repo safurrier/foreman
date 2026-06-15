@@ -2,7 +2,7 @@ use super::{status_from_hints, CompatibilityObservation, StatusHints};
 use crate::app::AgentStatus;
 
 const RECOGNITION_TOKENS: &[&str] = &["opencode"];
-const STATUS_HINTS: StatusHints = StatusHints {
+pub(crate) const STATUS_HINTS: StatusHints = StatusHints {
     attention: &[
         "waiting for your input",
         "needs attention",

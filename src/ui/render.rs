@@ -1698,6 +1698,18 @@ fn selected_target_summary_lines(
         )],
         theme,
     ));
+    if let Some(active_run_count) = pane
+        .agent
+        .as_ref()
+        .and_then(|agent| agent.active_run_count)
+        .filter(|count| *count > 0)
+    {
+        lines.push(detail_value_line(
+            "Active runs",
+            vec![Span::styled(active_run_count.to_string(), theme.attention)],
+            theme,
+        ));
+    }
     lines.push(detail_value_line(
         "Preview source",
         vec![Span::styled(
@@ -2260,8 +2272,11 @@ mod tests {
     #[test]
     fn render_preview_surfaces_extension_cards_for_selected_workspace() {
         let mut state = sample_state();
+        let cache_key = state
+            .selected_extension_cache_key()
+            .expect("selected extension cache key");
         state.extension_cards_cache.insert(
-            PathBuf::from("/tmp/alpha"),
+            cache_key,
             vec![ControlExtensionCard {
                 id: "hk".to_string(),
                 title: "Harness Kit".to_string(),

@@ -1,5 +1,8 @@
 use super::native;
-use super::{status_from_hints, CompatibilityObservation, StatusHints};
+use super::{
+    status_from_hints, status_from_hints_explanation, CompatibilityExplanation,
+    CompatibilityObservation, StatusHints,
+};
 use crate::app::{AgentStatus, HarnessKind, Inventory};
 
 const RECOGNITION_TOKENS: &[&str] = &["codex", "codex cli"];
@@ -42,6 +45,12 @@ pub(crate) fn recognition_tokens() -> &'static [&'static str] {
 
 pub(crate) fn compatibility_status(observation: CompatibilityObservation<'_>) -> AgentStatus {
     status_from_hints(observation, STATUS_HINTS)
+}
+
+pub(crate) fn compatibility_explanation(
+    observation: CompatibilityObservation<'_>,
+) -> CompatibilityExplanation {
+    status_from_hints_explanation(observation, STATUS_HINTS)
 }
 
 pub fn apply_native_signals<S: CodexNativeSignalSource>(

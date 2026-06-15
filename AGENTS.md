@@ -55,6 +55,12 @@ Claude, Codex, and Pi E2Es with `mise run verify-native`.
   **BECAUSE** HK is now the lifecycle source of truth while `.ai/plans/**` is
   historical.
 
+- **DO** call scripted synthetic validation `agent_sim`, smoke, or rollout
+  checks. **NOT** call it dogfood unless it runs real worker prompts/subagents
+  in the style of Harness Kit's `hk-pr-sized-dogfood` replay harness.
+  **BECAUSE** dogfood is reserved for real AI/human-like replay studies, while
+  deterministic scripted fixtures are agent simulation.
+
 - **DO** commit structured `.ai/hk/`, legacy `.ai/plans/`, and `.ai/validation/`
   paths that the workflow depends on. **NOT** commit `.ai/handoffs/`,
   `.ai/research/`, HK artifact payloads, or plan-local artifact scratch unless

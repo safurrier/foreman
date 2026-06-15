@@ -2385,7 +2385,11 @@ where
     })?;
     let workspace = pane.working_dir.clone();
     let linked_repository = state.linked_repository_for_pane(pane).cloned();
-    let cards = collect(&target_path);
+    let mut cards = collect(&target_path);
+    cards.extend(crate::services::pi_subagents::collect_pi_subagent_cards(
+        pane.agent.as_ref().map(|agent| agent.harness),
+        pane.working_dir.as_deref(),
+    ));
     Ok(serde_json::json!({
         "schemaVersion": crate::services::control_api::CONTROL_API_SCHEMA_VERSION,
         "ok": true,
@@ -2429,6 +2433,15 @@ fn attach_extensions_to_response(response: &mut crate::services::control_api::Ag
         if let Some(cards) = cache.get(&path).filter(|cards| !cards.is_empty()) {
             attach_extension_cards(entry, cards.clone());
         }
+        entry
+            .extension_cards
+            .extend(crate::services::pi_subagents::collect_pi_subagent_cards(
+                entry
+                    .harness
+                    .as_deref()
+                    .and_then(|harness| (harness == "pi").then_some(crate::app::HarnessKind::Pi)),
+                entry.working_dir.as_deref().map(std::path::Path::new),
+            ));
     }
 }
 

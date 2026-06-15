@@ -6,7 +6,8 @@ use crate::config::{
 };
 use crate::integrations::{
     apply_configured_claude_signals, apply_configured_codex_signals, apply_configured_pi_signals,
-    ClaudeNativeOverlaySummary, CodexNativeOverlaySummary, PiNativeOverlaySummary,
+    compatibility_explanation, ClaudeNativeOverlaySummary, CodexNativeOverlaySummary,
+    CompatibilityObservation, PiNativeOverlaySummary,
 };
 use crate::services::startup_cache::{load_startup_cache, StartupCacheLoadResult};
 use crate::services::ui_preferences::load_ui_preferences;
@@ -1258,19 +1259,21 @@ fn provider_runtime_findings(
         }
         findings.push(finding);
     } else if applied > 0 {
-        findings.push(
-            DoctorFinding::new(
-                format!("{}-native-signals-live", provider.filter_label()),
-                DoctorSeverity::Ok,
-                DoctorArea::Runtime,
-                format!(
-                    "Native signals are active for {} visible {} pane(s).",
-                    applied,
-                    provider.label()
-                ),
-            )
-            .with_provider(provider),
-        );
+        let mut finding = DoctorFinding::new(
+            format!("{}-native-signals-live", provider.filter_label()),
+            DoctorSeverity::Ok,
+            DoctorArea::Runtime,
+            format!(
+                "Native signals are active for {} visible {} pane(s).",
+                applied,
+                provider.label()
+            ),
+        )
+        .with_provider(provider);
+        if provider == HarnessKind::Pi {
+            append_pi_native_provenance_evidence(runtime, &affected_panes, &mut finding);
+        }
+        findings.push(finding);
     }
 
     let mut repo_roots = BTreeMap::<PathBuf, usize>::new();
@@ -1283,6 +1286,13 @@ fn provider_runtime_findings(
             .as_ref()
             .is_some_and(|agent| agent.integration_mode == IntegrationMode::Compatibility)
         {
+            if let Some(agent) = pane.agent.as_ref() {
+                findings.push(compatibility_explanation_finding(
+                    provider,
+                    pane,
+                    agent.status,
+                ));
+            }
             if let Some(signature) = hook_error_signature(&pane.preview) {
                 findings.push(
                     DoctorFinding::new(
@@ -1311,6 +1321,98 @@ fn provider_runtime_findings(
     }
 
     findings
+}
+
+fn compatibility_explanation_finding(
+    provider: HarnessKind,
+    pane: &Pane,
+    status: crate::app::AgentStatus,
+) -> DoctorFinding {
+    let explanation = compatibility_explanation(
+        provider,
+        CompatibilityObservation::new(
+            pane.current_command.as_deref(),
+            pane.runtime_command.as_deref(),
+            &pane.title,
+            &pane.preview,
+        ),
+    );
+    let mut finding = DoctorFinding::new(
+        format!("{}-compatibility-explanation", provider.filter_label()),
+        DoctorSeverity::Info,
+        DoctorArea::Runtime,
+        format!(
+            "{} pane is using compatibility status {}.",
+            provider.label(),
+            status.label()
+        ),
+    )
+    .with_provider(provider)
+    .with_pane_id(pane.id.as_str());
+    finding.push_evidence(explanation.evidence_label());
+    finding
+}
+
+fn append_pi_native_provenance_evidence(
+    runtime: &RuntimeConfig,
+    panes: &[&Pane],
+    finding: &mut DoctorFinding,
+) {
+    let Some(native_dir) = provider_native_dir(runtime, HarnessKind::Pi) else {
+        return;
+    };
+    for pane in panes.iter().filter(|pane| {
+        pane.agent
+            .as_ref()
+            .is_some_and(|agent| agent.integration_mode == IntegrationMode::Native)
+    }) {
+        finding.push_evidence(format!(
+            "pane={} pi_signal_provenance={}",
+            pane.id.as_str(),
+            pi_native_signal_provenance(native_dir, pane.id.as_str()).label()
+        ));
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PiNativeSignalProvenance {
+    Missing,
+    Legacy,
+    ActiveAccounted,
+    Invalid,
+}
+
+impl PiNativeSignalProvenance {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Missing => "missing",
+            Self::Legacy => "legacy",
+            Self::ActiveAccounted => "active-accounted",
+            Self::Invalid => "stale-invalid",
+        }
+    }
+}
+
+fn pi_native_signal_provenance(native_dir: &Path, pane_id: &str) -> PiNativeSignalProvenance {
+    let path = native_dir.join(format!("{pane_id}.json"));
+    let Ok(contents) = fs::read_to_string(path) else {
+        return PiNativeSignalProvenance::Missing;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&contents) else {
+        return PiNativeSignalProvenance::Invalid;
+    };
+    if value.get("status").is_none() {
+        return PiNativeSignalProvenance::Invalid;
+    }
+    if value.get("active_run_count").is_some()
+        || value.get("activeRunCount").is_some()
+        || value.get("last_activity_unix_millis").is_some()
+        || value.get("lastActivityUnixMillis").is_some()
+    {
+        PiNativeSignalProvenance::ActiveAccounted
+    } else {
+        PiNativeSignalProvenance::Legacy
+    }
 }
 
 fn runtime_pane_evidence(pane: &Pane) -> String {
@@ -2824,6 +2926,62 @@ mod tests {
         assert!(findings
             .iter()
             .any(|finding| finding.id == "codex-no-native-signals"));
+        let explanation = findings
+            .iter()
+            .find(|finding| finding.id == "codex-compatibility-explanation")
+            .expect("compatibility explanation should be surfaced");
+        assert!(explanation.evidence.iter().any(|evidence| evidence
+            .contains("compatibility_status=error rule=error:error scope=pane-haystack")));
+    }
+
+    #[test]
+    fn runtime_findings_report_pi_native_signal_provenance() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let runtime = sample_runtime(
+            &temp_dir.path().join("config.toml"),
+            &temp_dir.path().join("logs"),
+        );
+        let native_dir = crate::config::default_pi_native_dir(&runtime.log_dir);
+        std::fs::create_dir_all(&native_dir).expect("native dir should exist");
+        std::fs::write(
+            native_dir.join("%7.json"),
+            r#"{"status":"working","activity_score":120,"active_run_count":2}"#,
+        )
+        .expect("native signal should exist");
+        let inventory = inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("alpha:agents").pane(
+                PaneBuilder::agent("%7", HarnessKind::Pi)
+                    .status(AgentStatus::Working)
+                    .integration_mode(IntegrationMode::Native)
+                    .working_dir(temp_dir.path()),
+            ),
+        )]);
+        let claude_summary = crate::integrations::ClaudeNativeOverlaySummary::default();
+        let codex_summary = crate::integrations::CodexNativeOverlaySummary::default();
+        let pi_summary = crate::integrations::PiNativeOverlaySummary {
+            applied: 1,
+            fallback_to_compatibility: 0,
+            warnings: Vec::new(),
+        };
+        let context = RuntimeDoctorContext {
+            runtime: &runtime,
+            config_exists: true,
+            inventory: &inventory,
+            claude_native: &claude_summary,
+            codex_native: &codex_summary,
+            pi_native: &pi_summary,
+        };
+
+        let findings = runtime_findings(&context);
+
+        let live = findings
+            .iter()
+            .find(|finding| finding.id == "pi-native-signals-live")
+            .expect("live pi native finding should exist");
+        assert!(live
+            .evidence
+            .iter()
+            .any(|evidence| evidence == "pane=%7 pi_signal_provenance=active-accounted"));
     }
 
     #[test]

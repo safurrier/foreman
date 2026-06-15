@@ -1,7 +1,7 @@
 use crate::app::command::Command;
 use crate::app::state::{
-    AppState, FlashNavigateKind, Focus, Inventory, Mode, OperatorAlert, PaneId, SelectionTarget,
-    SessionId, SortMode, WindowId,
+    AppState, ExtensionCardsCacheKey, FlashNavigateKind, Focus, Inventory, Mode, OperatorAlert,
+    PaneId, SelectionTarget, SessionId, SortMode, WindowId,
 };
 use crate::doctor::DoctorFinding;
 use crate::services::extensions::ControlExtensionCard;
@@ -39,11 +39,11 @@ pub enum Action {
         refreshing: bool,
     },
     SetExtensionCards {
-        workspace_path: PathBuf,
+        cache_key: ExtensionCardsCacheKey,
         cards: Vec<ControlExtensionCard>,
     },
     SetExtensionRefreshing {
-        workspace_path: PathBuf,
+        cache_key: ExtensionCardsCacheKey,
         refreshing: bool,
     },
     SetRuntimeDiagnostics(Vec<DoctorFinding>),

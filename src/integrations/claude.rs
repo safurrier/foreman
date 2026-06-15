@@ -1,5 +1,8 @@
 use super::native;
-use super::{status_from_recent_preview_lines, CompatibilityObservation, StatusHints};
+use super::{
+    status_from_recent_preview_lines, status_from_recent_preview_lines_explanation,
+    CompatibilityExplanation, CompatibilityObservation, StatusHints,
+};
 use crate::app::{AgentStatus, HarnessKind, Inventory};
 
 const RECOGNITION_TOKENS: &[&str] = &["claude", "claude code"];
@@ -53,6 +56,12 @@ pub(crate) fn recognition_tokens() -> &'static [&'static str] {
 
 pub(crate) fn compatibility_status(observation: CompatibilityObservation<'_>) -> AgentStatus {
     status_from_recent_preview_lines(observation, STATUS_HINTS, RECENT_STATUS_LINES)
+}
+
+pub(crate) fn compatibility_explanation(
+    observation: CompatibilityObservation<'_>,
+) -> CompatibilityExplanation {
+    status_from_recent_preview_lines_explanation(observation, STATUS_HINTS, RECENT_STATUS_LINES)
 }
 
 pub fn apply_native_signals<S: ClaudeNativeSignalSource>(
