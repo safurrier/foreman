@@ -202,7 +202,7 @@ fn is_fresh(observed_unix_millis: Option<u64>, now_unix_millis: u64, max_age_ms:
 }
 
 pub(crate) fn workspace_matches(run_cwd: &Path, working_dir: &Path) -> bool {
-    run_cwd == working_dir || run_cwd.starts_with(working_dir) || working_dir.starts_with(run_cwd)
+    run_cwd == working_dir || run_cwd.starts_with(working_dir)
 }
 
 pub(crate) fn run_needs_attention(run: &AsyncStatus) -> bool {
@@ -313,6 +313,15 @@ mod tests {
         assert_eq!(activity.active_run_count, 1);
         assert_eq!(activity.failed_count, 0);
         assert_eq!(activity.runs[0].run_id, "run-a");
+    }
+
+    #[test]
+    fn workspace_matching_is_one_way_from_parent_pane_to_child_run() {
+        let repo = Path::new("/repo");
+        let module = Path::new("/repo/module");
+
+        assert!(workspace_matches(module, repo));
+        assert!(!workspace_matches(repo, module));
     }
 
     #[test]

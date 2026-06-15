@@ -595,14 +595,16 @@ Doctor/runtime diagnostics label Pi signal provenance as:
 - `missing` or `stale-invalid`: Foreman could not read a usable native signal
   for that pane.
 
-When fresh `pi-subagents` structured async status files are present for the
-same workspace, Foreman treats them as Pi-native activity evidence. Active
-subagent runs can keep or promote the parent Pi pane to `working`, while native
-`error` states keep precedence and structured subagent attention can promote the
-parent pane to `needs attention`. The same typed activity evidence also powers
-the read-only Pi subagents card, which explains active runs, current tool/path,
-and `needs_attention` state from `status.json`; Foreman never scrapes terminal
-text for this behavior.
+When fresh `pi-subagents` structured async status files are present under the
+selected Pi pane's workspace, Foreman treats them as Pi-native activity
+evidence. A parent pane at a repo root can inherit subagent activity from a
+nested module directory, but a module pane does not inherit unrelated repo-root
+subagent activity. Active subagent runs can keep or promote the parent Pi pane
+to `working`, while native `error` states keep precedence and structured
+subagent attention can promote the parent pane to `needs attention`. The same
+typed activity evidence also powers the read-only Pi subagents card, which
+explains active runs, current tool/path, and `needs_attention` state from
+`status.json`; Foreman never scrapes terminal text for this behavior.
 
 Override the native signal path with:
 
