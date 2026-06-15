@@ -32,6 +32,7 @@ Each skill follows this structure:
 | `macos-app-design` | Vendored native macOS app checklist/reference from `petekp/agent-skills` |
 | `foreman-swift-overlay-ux` | Foreman-specific UX review workflow for the Swift macOS overlay |
 | `foreman-swift-overlay-validation` | Foreman-specific validation workflow for overlay fixtures, fake Foreman, and screenshots |
+| `foreman-agent-sim-validation` | Repo-local scripted agent simulation scenarios for deterministic Foreman behavior rollouts |
 
 ## Adding a Skill
 
