@@ -102,7 +102,7 @@ fn pi_subagents_card(payload: &Value) -> &Value {
 }
 
 #[test]
-fn dogfood_pi_subagent_activity_promotes_parent_without_leaking_to_nested_pane() {
+fn agent_sim_pi_subagent_activity_promotes_parent_without_leaking_to_nested_pane() {
     let fixture = TmuxFixture::new();
     let temp = tempfile::tempdir().expect("temp dir should exist");
     let repo = temp.path().join("repo");
@@ -110,15 +110,17 @@ fn dogfood_pi_subagent_activity_promotes_parent_without_leaking_to_nested_pane()
     fs::create_dir_all(&module).expect("workspace dirs should exist");
 
     let parent_pane =
-        fixture.new_session("pi-parent", &fake_pi_command(&repo, "π - dogfood parent"));
-    let module_pane =
-        fixture.new_session("pi-module", &fake_pi_command(&module, "π - dogfood module"));
+        fixture.new_session("pi-parent", &fake_pi_command(&repo, "π - agent-sim parent"));
+    let module_pane = fixture.new_session(
+        "pi-module",
+        &fake_pi_command(&module, "π - agent-sim module"),
+    );
     fixture.wait_for_capture(&parent_pane, "");
     fixture.wait_for_capture(&module_pane, "");
 
     let async_root = pi_subagent_async_dir();
     let run_prefix = format!(
-        "foreman-dogfood-{}",
+        "foreman-agent-sim-{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("time should be monotonic enough")
