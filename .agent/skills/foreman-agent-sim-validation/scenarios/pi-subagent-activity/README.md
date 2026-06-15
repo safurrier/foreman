@@ -13,6 +13,8 @@ without launching real long-running agents.
   directories.
 - A nested module Pi pane does not inherit unrelated repo-root subagent runs.
 - Foreman reports native Pi status through `foreman agents --json`.
+- Structured `needs_attention` subagent activity promotes the parent pane and
+  extension card to attention.
 - Foreman exposes a read-only `pi-subagents` extension card through
   `foreman extensions --json`.
 

@@ -44,6 +44,25 @@ fn current_uid() -> u32 {
 }
 
 fn write_subagent_status(root: &Path, run_id: &str, cwd: &Path, current_tool: &str) -> PathBuf {
+    write_subagent_status_with_activity(root, run_id, cwd, current_tool, "active")
+}
+
+fn write_attention_subagent_status(
+    root: &Path,
+    run_id: &str,
+    cwd: &Path,
+    current_tool: &str,
+) -> PathBuf {
+    write_subagent_status_with_activity(root, run_id, cwd, current_tool, "needs_attention")
+}
+
+fn write_subagent_status_with_activity(
+    root: &Path,
+    run_id: &str,
+    cwd: &Path,
+    current_tool: &str,
+    activity_state: &str,
+) -> PathBuf {
     let cwd = cwd
         .canonicalize()
         .expect("subagent cwd should canonicalize like tmux pane paths");
@@ -55,7 +74,7 @@ fn write_subagent_status(root: &Path, run_id: &str, cwd: &Path, current_tool: &s
         serde_json::to_string_pretty(&json!({
             "runId": run_id,
             "state": "running",
-            "activityState": "active",
+            "activityState": activity_state,
             "currentTool": current_tool,
             "currentPath": cwd.join("src/lib.rs"),
             "cwd": cwd,
@@ -171,6 +190,52 @@ fn agent_sim_pi_subagent_activity_promotes_parent_without_leaking_to_nested_pane
     ]);
     let module_subagents = pi_subagents_card(&module_cards);
     assert_eq!(module_subagents["summary"], "1 running");
+}
+
+#[test]
+fn agent_sim_pi_subagent_attention_promotes_parent_and_card() {
+    let fixture = TmuxFixture::new();
+    let temp = tempfile::tempdir().expect("temp dir should exist");
+    let repo = temp.path().join("repo");
+    fs::create_dir_all(&repo).expect("workspace dir should exist");
+
+    let pane = fixture.new_session(
+        "pi-attention",
+        &fake_pi_command(&repo, "π - agent-sim attention"),
+    );
+    fixture.wait_for_capture(&pane, "");
+
+    let async_root = pi_subagent_async_dir();
+    let run_id = format!(
+        "foreman-agent-sim-attention-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time should be monotonic enough")
+            .as_millis()
+    );
+    let status = write_attention_subagent_status(&async_root, &run_id, &repo, "Bash");
+    let _cleanup = StatusCleanup::new(vec![status]);
+
+    let socket = fixture.socket_path().to_str().expect("socket path utf-8");
+    let agents = run_foreman_json(&["--tmux-socket", socket, "agents", "--json", "--all-panes"]);
+    let entry = entry_for_pane(&agents, &pane);
+    assert_eq!(entry["harness"], "pi");
+    assert_eq!(entry["integrationMode"], "native");
+    assert_eq!(entry["status"], "needs-attention");
+    assert_eq!(entry["activeRunCount"], 1);
+
+    let cards = run_foreman_json(&[
+        "--tmux-socket",
+        socket,
+        "extensions",
+        "--pane",
+        pane.as_str(),
+        "--json",
+    ]);
+    let subagents = pi_subagents_card(&cards);
+    assert_eq!(subagents["status"], "needs-attention");
+    assert_eq!(subagents["statusLabel"], "NEEDS ATTENTION");
+    assert_eq!(subagents["summary"], "1 running");
 }
 
 struct StatusCleanup {
