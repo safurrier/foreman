@@ -41,16 +41,20 @@ pub(crate) fn recognizes(observation: CompatibilityObservation<'_>) -> bool {
 }
 
 pub(crate) fn recognizes_runtime_identity(observation: CompatibilityObservation<'_>) -> bool {
-    let current_command = observation
-        .current_command
-        .and_then(|command| command.split_whitespace().next())
-        .map(command_basename);
+    let current_command = observation.current_command.and_then(first_command_basename);
+    let runtime_command = observation.runtime_command.and_then(first_command_basename);
 
-    if current_command.is_some_and(|command| command == "pi") {
+    if current_command.is_some_and(|command| command == "pi")
+        || runtime_command.is_some_and(|command| command == "pi")
+    {
         return true;
     }
 
-    observation.title.contains('π') && !current_command.is_some_and(is_shell_or_editor_command)
+    let stale_title_candidate = current_command
+        .into_iter()
+        .chain(runtime_command)
+        .any(is_shell_or_editor_command);
+    observation.title.contains('π') && !stale_title_candidate
 }
 
 pub(crate) fn compatibility_status(observation: CompatibilityObservation<'_>) -> AgentStatus {
@@ -101,8 +105,11 @@ pub(crate) fn compatibility_fallback_summary(
     )
 }
 
-fn command_basename(command: &str) -> &str {
-    command.rsplit('/').next().unwrap_or(command)
+fn first_command_basename(command: &str) -> Option<&str> {
+    command
+        .split_whitespace()
+        .next()
+        .map(|command| command.rsplit('/').next().unwrap_or(command))
 }
 
 fn is_shell_or_editor_command(command: &str) -> bool {
@@ -259,6 +266,18 @@ mod tests {
             "π - old",
             ""
         )));
+        assert!(!recognizes_runtime_identity(CompatibilityObservation::new(
+            None,
+            Some("zsh"),
+            "π - old",
+            "",
+        )));
+        assert!(!recognizes_runtime_identity(CompatibilityObservation::new(
+            Some("node"),
+            Some("nvim"),
+            "π - old",
+            "",
+        )));
         assert!(recognizes_runtime_identity(observation(
             Some("pi"),
             "π - live",
@@ -289,6 +308,57 @@ mod tests {
             compatibility_status(observation(Some("pi"), "shell", "Pi ready")),
             AgentStatus::Idle
         );
+    }
+
+    #[test]
+    fn runtime_identity_recognizes_tmux_runtime_command_during_transient_title() {
+        assert!(recognizes_runtime_identity(CompatibilityObservation::new(
+            Some("node"),
+            Some("pi"),
+            "transient terminal title",
+            "",
+        )));
+        assert!(recognizes_runtime_identity(CompatibilityObservation::new(
+            Some("node"),
+            Some("/usr/local/bin/pi --model test"),
+            "transient terminal title",
+            "",
+        )));
+    }
+
+    #[test]
+    fn native_signal_classifies_pi_runtime_with_transient_title() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        std::fs::write(
+            temp_dir.path().join("%30.json"),
+            r#"{"status":"working","activity_score":120}"#,
+        )
+        .expect("signal file should exist");
+
+        let mut inventory = inventory([SessionBuilder::new("alpha").window(
+            WindowBuilder::new("agent-window").pane(
+                PaneBuilder::new("%30")
+                    .title("transient terminal title")
+                    .current_command("node")
+                    .runtime_command("pi"),
+            ),
+        )]);
+
+        let summary = apply_native_signals(
+            &mut inventory,
+            &FilePiNativeSignalSource::new(temp_dir.path().to_path_buf()),
+        );
+
+        let agent = inventory
+            .pane(&crate::app::PaneKey::from("%30"))
+            .expect("pane should exist")
+            .agent
+            .as_ref()
+            .expect("native Pi signal should classify the pane as an agent");
+        assert_eq!(agent.harness, HarnessKind::Pi);
+        assert_eq!(agent.integration_mode, IntegrationMode::Native);
+        assert_eq!(agent.status, AgentStatus::Working);
+        assert_eq!(summary.applied, 1);
     }
 
     #[test]
