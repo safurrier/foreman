@@ -29,7 +29,7 @@ doctor_receipt_file=""
 if ! command -v foreman >/dev/null 2>&1; then
   doctor_status=unavailable
   doctor_exit=127
-  printf '%s\n' 'foreman agent resume: foreman is not installed; install it or run .agents/setup' >&2
+  printf '%s\n' "foreman agent resume: foreman is not installed; run 'cd $ROOT && mise run install-local', then rerun $ROOT/.agents/setup" >&2
 else
   (cd "$ROOT" && foreman --doctor --doctor-json --repo "$ROOT") >"$DOCTOR_FILE"
   doctor_exit=$?
@@ -37,18 +37,19 @@ else
   if ! python3 -m json.tool "$DOCTOR_FILE" >/dev/null 2>&1; then
     doctor_status=failed
     doctor_exit=1
-    printf '%s\n' 'foreman agent resume: doctor did not emit valid JSON; inspect stderr and rerun .agents/setup if repair is needed' >&2
+    printf '%s\n' "foreman agent resume: doctor did not emit valid JSON; inspect stderr and rerun $ROOT/.agents/setup if repair is needed" >&2
   elif [ "$doctor_exit" -ne 0 ]; then
     doctor_status=failed
-    printf '%s\n' 'foreman agent resume: doctor failed; inspect the receipt and rerun .agents/setup if repair is needed' >&2
+    printf '%s\n' "foreman agent resume: doctor failed; inspect the receipt and rerun $ROOT/.agents/setup if repair is needed" >&2
   fi
 fi
 
 hk_available=0
 if command -v hk >/dev/null 2>&1; then
   hk_available=1
-  (cd "$ROOT" && hk status --target "$ROOT" --json) >"$HK_FILE" 2>/dev/null || \
-    printf '%s\n' 'foreman agent resume: hk status was unavailable' >&2
+  if ! (cd "$ROOT" && hk status --target "$ROOT" --json) >"$HK_FILE"; then
+    printf '%s\n' 'foreman agent resume: hk status was unavailable; its diagnostic is above' >&2
+  fi
 else
   rm -f "$HK_FILE"
   HK_FILE=""

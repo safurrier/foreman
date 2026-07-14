@@ -13,14 +13,14 @@ setup_exit=0
 if ! command -v mise >/dev/null 2>&1; then
   setup_status=failed
   setup_exit=127
-  printf '%s\n' 'foreman agent setup: mise is not installed; install mise, then rerun .agents/setup' >&2
+  printf '%s\n' "foreman agent setup: mise is not installed; install mise, then rerun $ROOT/.agents/setup" >&2
 else
   printf '%s\n' 'foreman agent setup: running mise run setup' >&2
   (cd "$ROOT" && mise run setup) >&2
   setup_exit=$?
   if [ "$setup_exit" -ne 0 ]; then
     setup_status=failed
-    printf '%s\n' 'foreman agent setup: mise run setup failed; fix the diagnostic above, then rerun .agents/setup' >&2
+    printf '%s\n' "foreman agent setup: mise run setup failed; fix the diagnostic above, then rerun $ROOT/.agents/setup" >&2
   fi
 fi
 
@@ -31,7 +31,7 @@ if [ "$setup_status" = passed ]; then
   if ! command -v foreman >/dev/null 2>&1; then
     doctor_status=failed
     doctor_exit=127
-    printf '%s\n' 'foreman agent setup: foreman is not installed; install it, then rerun .agents/setup' >&2
+    printf '%s\n' "foreman agent setup: foreman is not installed; run 'cd $ROOT && mise run install-local', then rerun $ROOT/.agents/setup" >&2
   else
     printf '%s\n' 'foreman agent setup: running strict Foreman doctor' >&2
     (cd "$ROOT" && foreman --doctor --doctor-json --doctor-strict --repo "$ROOT") >"$DOCTOR_FILE"
@@ -40,12 +40,12 @@ if [ "$setup_status" = passed ]; then
     if ! python3 -m json.tool "$DOCTOR_FILE" >/dev/null 2>&1; then
       doctor_status=failed
       doctor_exit=1
-      printf '%s\n' 'foreman agent setup: doctor did not emit valid JSON; inspect stderr and rerun .agents/setup' >&2
+      printf '%s\n' "foreman agent setup: doctor did not emit valid JSON; inspect stderr and rerun $ROOT/.agents/setup" >&2
     elif [ "$doctor_exit" -eq 0 ]; then
       doctor_status=passed
     else
       doctor_status=blocked
-      printf '%s\n' 'foreman agent setup: strict doctor blocked readiness; inspect the receipt and rerun .agents/setup after fixing findings' >&2
+      printf '%s\n' "foreman agent setup: strict doctor blocked readiness; inspect the receipt and rerun $ROOT/.agents/setup after fixing findings" >&2
     fi
   fi
 fi

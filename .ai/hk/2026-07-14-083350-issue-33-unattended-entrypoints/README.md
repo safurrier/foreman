@@ -1,0 +1,65 @@
+# HK export: `2026-07-14-083350-issue-33-unattended-entrypoints`
+
+This directory is a generated review/handoff package from the Harness Kit ledger. Do not hand-edit it; update HK with `hk plan`, `hk decide`, `hk validate`, `hk review add`, and `hk sync`, then regenerate.
+
+## Freshness
+Validate this export against local HK state with:
+
+```bash
+hk export --format handoff-dir --output .ai/hk/2026-07-14-083350-issue-33-unattended-entrypoints --target . --check
+```
+
+Historical hand-authored slice plans live under `.ai/plans/`; new Harness Toolkit repo work should use HK and generated `.ai/hk/` exports.
+
+## Handoff
+
+## Summary
+- Work: `2026-07-14-083350-issue-33-unattended-entrypoints`
+- Branch: `feature/issue-33-unattended-entrypoints`
+
+## Context
+- Issue #33 entrypoints are thin orchestration: receipt JSON preserves the canonical doctor report, while log paths follow FOREMAN_LOG_DIR/XDG_STATE_HOME/default resolution without parsing log content.
+
+## Plan
+- Add versioned non-interactive .agents/setup and read-only .agents/resume entrypoints without duplicating setup, doctor, HK, or logging ownership. TDD with isolated command fakes and fixture checkouts covering setup success/repeat/failure/strict-doctor blocking plus resume clean/dirty/detached/missing optional tools. Document schema, commands, and exit semantics in the agent-facing workflow surface. Validate focused behavioral tests and shell lint, then run mise run check once stable; obtain required independent review, fix P0-P2 findings, sync, ready, and export a compact HK handoff before draft PR. Skill ledger: APPLY workflow hk-plan and supervised-dev-dev-kickoff; APPLY quality bash-core, testing-core, writing-core, avoiding-ai-antipatterns, architecture-polish-review; SKIP Swift overlay skills (no overlay paths), ratatui (no TUI code), spec-sync (no product invariant change expected). Worker preflight selected openai-codex/gpt-5.6-terra:medium after exact model listing and live WORKER_MODEL_OK probe. Runaway guard: 7200000ms, 96+16 turns, tools 240/320 block all, attention 300000ms.
+
+## Decisions and spec reflection
+- Use one JSON-only renderer so setup and resume share schema encoding while setup/doctor/HK/logging ownership stays with canonical commands.
+  - Spec: not-needed: Spec/docs update not needed.
+
+## Learning
+- None recorded.
+
+## Gaps
+- Bounded follow-up is blocked by exact-model policy: original implementation worker was openai-codex/gpt-5.6-terra:medium with maxRuntimeMs=7200000, turn budget 96+16, tool budget 240/320 block-all, control attention=300000ms. On 2026-07-14, exact `pi --list-models openai-codex/gpt-5.6-terra` returned no matching model, so no follow-up worker was launched and no provider/model/budget substitution was made. Resume this deterministic session after that exact model is available; fix the recorded P1/P2 review findings, rerun invalidated focused checks and one review pass, then finish HK sync/ready/handoff and open the required draft PR.
+- mise run check was attempted twice after the receipt changes. Both runs passed fmt, clippy, cargo check, and the newly wired 7-test Python suite. Run 1 failed only runtime_dashboard::interactive_binary_popup_focus_action_exits_after_success (tmux alternate-screen timing). Run 2 failed extensions::explicit_provider_env_overrides_repo_provider_with_same_id (2 vs 1), then six extensions tests poisoned on that failure. These unchanged Rust tests are outside issue #33; no unrelated test behavior was modified.
+
+## Validation evidence
+- `/usr/bin/python3 tests/agent_entrypoints_test.py`: pass (exit 0) — validates: Isolated fake-command behavioral tests prove unattended setup convergence/failures and read-only resume status variants without touching the live environment. — `<local HK state not exported>`
+- `mise run check`: fail (exit 1) — attempted to validate: Final fast gate validates Rust checks plus the stable repository after adding unattended entrypoints and isolated behavioral coverage. — `<local HK state not exported>`
+- `shellcheck --shell=bash .agents/setup .agents/resume`: pass (exit 0) — validates: ShellCheck validates strict Bash entrypoint syntax and portability diagnostics. — `<local HK state not exported>`
+- `bash -lc '/usr/bin/python3 tests/agent_entrypoints_test.py && shellcheck --shell=bash .agents/setup .agents/resume'`: pass (exit 0) — validates: Final committed entrypoint content passes isolated command-fake behavior coverage and ShellCheck. — `<local HK state not exported>`
+- `mise run check`: fail (exit 101) — attempted to validate: Run Foreman's required stable pre-PR gate after focused unattended-entrypoint tests and ShellCheck pass; the earlier trust refusal did not execute the gate. — `<local HK state not exported>`
+- `cargo test sources::tests::aggregator_queries_sources_in_parallel --all-features`: fail (exit 101) — attempted to validate: The sole fast-gate failure was an unrelated timing-sensitive source aggregation test; its isolated rerun passes without branch changes. — `<local HK state not exported>`
+- `mise run check`: fail (exit 101) — attempted to validate: Required stable pre-PR gate after rebase and focused entrypoint tests — `<local HK state not exported>`
+- `bash -lc 'uv run python tests/agent_entrypoints_test.py && bash -n .agents/setup .agents/resume && shellcheck --shell=bash .agents/setup .agents/resume && uv run python -m py_compile .agents/entrypoint-report.py tests/agent_entrypoints_test.py && git diff --check'`: pass (exit 0) — validates: Review follow-up: isolated behavioral coverage proves portable structured receipts, canonical log discovery, visible schema errors, actionable diagnostics, read-only resume, and HK stderr preservation. — `<local HK state not exported>`
+- `mise run check`: fail (exit 101) — attempted to validate: Final canonical check ran the new Python behavioral suite successfully, then failed only in unchanged runtime_dashboard::interactive_binary_popup_focus_action_exits_after_success tmux timing/alternate-screen assertion. — `<local HK state not exported>`
+
+## Readiness
+- context: info — context recorded
+- plan: pass — plan recorded
+- decision: pass — decision and spec reflection recorded
+- validation: pass — validation evidence with rationale recorded
+- review: fail — review must be independent: preferred independent AI/tool reviewer; minimum fresh-context subagent; implementation-agent self-review does not count
+- profile-check:fast-gate: fail — missing required profile check `fast-gate` (matched .ai/hk/2026-07-14-072828-ghostty-display-identity/README.md, .ai/hk/2026-07-14-072828-ghostty-display-identity/artifacts/README.md, .mise/tasks/check, +21 more); run the matching native command from `hk checks --changed`, record it with `hk validate --check fast-gate --why '...' -- <command>`, or `hk dangerously-skip validation --label fast-gate --reason ... --mitigation ...`
+- profile-check:heavy-gate: fail — missing required profile check `heavy-gate` (matched Cargo.lock, Cargo.toml); run the matching native command from `hk checks --changed`, record it with `hk validate --check heavy-gate --why '...' -- <command>`, or `hk dangerously-skip validation --label heavy-gate --reason ... --mitigation ...`
+- profile-check:macos-overlay-required-lane: fail — missing required profile check `macos-overlay-required-lane` (matched src/services/control_api.rs); run the matching native command from `hk checks --changed`, record it with `hk validate --check macos-overlay-required-lane --why '...' -- <command>`, or `hk dangerously-skip validation --label macos-overlay-required-lane --reason ... --mitigation ...`
+- profile-review:codex-review: fail — missing required profile review `codex-review` (matched .mise/tasks/check, .mise/tasks/smoke-ghostty-display, Cargo.lock, +14 more); run `hk review prompt codex-review` and record with `hk review add --review codex-review --backend subagent --reviewer reviewer-fresh-context --summary '...'`, or `hk dangerously-skip review --label codex-review --reason ... --mitigation ...`
+
+## Review
+- subagent / reviewer-fresh-context-gpt-5.6-sol [codex-review]: Issue #33 review requested changes: P1 portable command paths, P1 canonical log resolution, P1 typed/validated receipt schema, and P2 actionable diagnostics. Artifact: .pi-subagents/artifacts/ac0316ba-7c56-4709-8b3b-d67e774e94a7_reviewer_output.md paths: .agents/entrypoint-report.py, .agents/resume, .agents/setup, +30 more. [changes-requested]
+- subagent / reviewer-fresh-context-gpt-5.6-sol [architecture-polish-review]: B- architecture polish review; no P0, three P1 and one P2 must be fixed before acceptance. Artifact: .pi-subagents/artifacts/ac0316ba-7c56-4709-8b3b-d67e774e94a7_reviewer_output.md paths: .agents/entrypoint-report.py, .agents/resume, .agents/setup, +30 more. [changes-requested]
+
+## Sync exclusions
+- .pi-subagents: Runner-provided prompts, transcripts, and required child output are local orchestration artifacts, not repository source.
+- .pi-subagents: Runner-provided prompts, transcripts, and required child output are local orchestration artifacts, not repository source.

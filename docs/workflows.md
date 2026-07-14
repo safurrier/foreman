@@ -178,7 +178,7 @@ existing setup and doctor commands. It exits zero only when both stages pass;
 on failure it returns the failing setup or strict-doctor exit code after still
 emitting its receipt. The receipt schema is `foreman.agent.setup-receipt`,
 version `1`, with `ready`, per-stage `setup` and `doctor` status/exit codes, the
-unmodified doctor `report`, doctor-derived `warnings`/`errors`, canonical
+validated doctor `report`, doctor-derived `warnings`/`errors`, canonical
 `commands`, and `logs` (`directory` plus an optional `latest` path).
 
 `.agents/resume` is read-only: it does not invoke setup, doctor fixes, HK
@@ -193,7 +193,22 @@ Resume exits nonzero only when Foreman doctor cannot be collected (including a
 missing `foreman` command); findings reported by the non-strict doctor remain in
 the JSON report for the caller to decide. Both entrypoints report the existing
 log location from Foreman's `FOREMAN_LOG_DIR`, `XDG_STATE_HOME`, or default
-state-directory contract; they do not create or parse logs.
+state-directory contract; relative overrides resolve from the repository root,
+matching the doctor invocation. They do not create or parse logs.
+
+Receipt `commands` are structured objects with `argv` (an argument array) and
+`cwd` (the repository root), so consumers must execute them directly rather
+than through a shell. This preserves paths containing spaces or quotes. Both
+`warnings` and `errors` are arrays of the same message object:
+`{status, stage, code, message, next_command, finding}`. `status` is `warning`
+or `error`; `next_command` and `finding` are optional (`null`) and otherwise use
+the command object and a validated canonical doctor finding. Doctor reports
+must have the known `{repo_path, findings, fixes}` envelope; malformed but valid
+JSON is surfaced as a `doctor-schema-invalid` error with `doctor.report: null`,
+not converted into an empty finding list. Doctor finding severities are the
+canonical `ok`, `info`, `warn`, or `error` values. Missing Foreman diagnostics
+recommend `mise run install-local` from the repository root before retrying
+setup.
 
 Use `--repo /path/to/repo` when you need to diagnose or set up a different
 checkout. `--setup` is intentionally conservative. It can initialize Foreman

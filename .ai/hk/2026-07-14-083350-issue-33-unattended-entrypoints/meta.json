@@ -1,0 +1,40 @@
+{
+  "attached_artifacts": [],
+  "branch": "feature/issue-33-unattended-entrypoints",
+  "diff_hash": "sha256:ffdb545160a3c2e51c23a977a5795845cfc93e63b694a010fac453fdd3dfe3d5",
+  "dirty": true,
+  "event_count": 18,
+  "event_seq": 20,
+  "evidence_count": 9,
+  "evidence_ids": [
+    "ev_20260714_084045_051624",
+    "ev_20260714_084100_999012",
+    "ev_20260714_084130_683909",
+    "ev_20260714_084224_293721",
+    "ev_20260714_084423_688820",
+    "ev_20260714_084515_802662",
+    "ev_20260714_132927_072420",
+    "ev_20260714_140946_342869",
+    "ev_20260714_140957_552521"
+  ],
+  "file_hashes": {
+    "README.md": "sha256:4d99d3472b31a4978af5e797b97c7a6dfb9b913320023bd13aad10cf48f72ce2",
+    "artifacts/README.md": "sha256:c4bad9d4652f296a7e4dcf175fe1dd0c66a99ec0b74941cd45c499e84792436c"
+  },
+  "files": [
+    "README.md",
+    "meta.json",
+    "artifacts/README.md"
+  ],
+  "generated_at": "2026-07-14T21:10:32.947004+00:00",
+  "generated_by": "hk export --format handoff-dir",
+  "git_sha": "9eaa7b9",
+  "output_path": ".ai/hk/2026-07-14-083350-issue-33-unattended-entrypoints",
+  "ready": false,
+  "ready_status": "not-ready",
+  "schema_version": 1,
+  "sync_status": "synced",
+  "target_root": ".",
+  "target_scope": ".",
+  "work_id": "2026-07-14-083350-issue-33-unattended-entrypoints"
+}
