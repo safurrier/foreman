@@ -36,6 +36,31 @@ jobs:
             apps/*/test-results/
           if-no-files-found: ignore
 
+  agent-entrypoints-real:
+    name: Real Agent Entrypoints
+    runs-on: ubuntu-latest
+    needs: check
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install mise
+        uses: jdx/mise-action@v4
+        with:
+          install: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Setup
+        run: mise run setup
+
+      - name: Install Harness Kit
+        # v0.3.0, pinned so CI cannot change if the tag moves.
+        run: uv tool install 'git+https://github.com/safurrier/harness-toolkit.git@c4bde2dbe1600a4aea7239ed40a500fb175ab182'
+
+      - name: Verify real agent entrypoints
+        run: mise run verify-agent-entrypoints
+
   verify:
     name: Full Validation
     runs-on: ubuntu-latest

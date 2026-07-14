@@ -219,6 +219,14 @@ values. Missing Foreman diagnostics
 recommend `mise run install-local` from the repository root before retrying
 setup.
 
+Run `mise run verify-agent-entrypoints` for the real-tool integration gate. It
+builds Foreman, creates a disposable clone with isolated config/state, invokes
+real mise setup twice, starts a real HK work item, verifies real doctor and
+resume receipts, proves setup convergence and read-only resume through Git
+status snapshots, and removes the clone on success. CI installs Harness Kit
+`v0.3.0` at commit `c4bde2dbe1600a4aea7239ed40a500fb175ab182` and runs this as
+the dedicated **Real Agent Entrypoints** job.
+
 Use `--repo /path/to/repo` when you need to diagnose or set up a different
 checkout. `--setup` is intentionally conservative. It can initialize Foreman
 config, merge Claude and Codex hook wiring, scaffold the Pi extension, and you

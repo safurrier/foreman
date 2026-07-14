@@ -113,8 +113,10 @@ of reconstructing setup and readiness from prose:
 ```
 
 Both commands reserve stdout for one versioned JSON document and send human
-diagnostics to stderr. See the [workflow guide](docs/workflows.md#unattended-agent-entrypoints)
-for schemas, exit behavior, and path-resolution rules.
+diagnostics to stderr. Run `mise run verify-agent-entrypoints` to exercise them
+against real mise, Foreman, Git, and HK binaries in an isolated disposable clone.
+See the [workflow guide](docs/workflows.md#unattended-agent-entrypoints) for
+schemas, exit behavior, and path-resolution rules.
 
 ## Native macOS app
 

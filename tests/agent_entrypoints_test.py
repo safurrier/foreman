@@ -391,6 +391,8 @@ exit "${FAKE_HK_EXIT:-0}"
             "[workflow guide](docs/workflows.md#unattended-agent-entrypoints)",
             readme,
         )
+        for text in (agents, readme, (ROOT / "docs" / "workflows.md").read_text()):
+            self.assertIn("mise run verify-agent-entrypoints", text)
 
     def test_hk_success_and_failure_preserve_stderr(self) -> None:
         successful = self.entrypoint(

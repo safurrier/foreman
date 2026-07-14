@@ -24,6 +24,8 @@ runtime/release-sensitive changes.
 
 **Unattended checkout setup/status**: `.agents/setup` and `.agents/resume`.
 
+**Real unattended entrypoint E2E**: `mise run verify-agent-entrypoints`.
+
 **Fast gate**: `mise run check`.
 
 **Heavy gate**: `mise run verify`.
