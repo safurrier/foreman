@@ -160,6 +160,41 @@ Setup workflow notes:
 - Setup is safe to rerun. It should converge files instead of creating drift.
 - Setup does not fix already-running panes. Restart the affected agent panes after changing hook wiring.
 
+### Unattended agent entrypoints
+
+Repository-local agents can use the executable entrypoints without assuming a
+working directory:
+
+```bash
+/path/to/foreman/.agents/setup
+/path/to/foreman/.agents/resume
+```
+
+`.agents/setup` is a thin, non-interactive wrapper around `mise run setup` and
+then `foreman --doctor --doctor-json --doctor-strict --repo <repo-root>`. It
+writes setup progress and diagnostics to stderr, and exactly one JSON receipt to
+stdout. It is safe to rerun because it delegates setup convergence to the
+existing setup and doctor commands. It exits zero only when both stages pass;
+on failure it returns the failing setup or strict-doctor exit code after still
+emitting its receipt. The receipt schema is `foreman.agent.setup-receipt`,
+version `1`, with `ready`, per-stage `setup` and `doctor` status/exit codes, the
+unmodified doctor `report`, doctor-derived `warnings`/`errors`, canonical
+`commands`, and `logs` (`directory` plus an optional `latest` path).
+
+`.agents/resume` is read-only: it does not invoke setup, doctor fixes, HK
+lifecycle writes, runtime startup, or git checkout operations. It reports the
+current branch/detached/dirty state, runs the report-only doctor JSON command,
+and, when installed, runs `hk status --target <repo-root> --json`. It emits one
+`foreman.agent.resume-report` version `1` JSON document on stdout; stderr is
+reserved for diagnostics. Its report contains `repo`, `doctor`, optional-tool
+availability/status, doctor-derived `warnings`/`errors`, canonical `commands`,
+and `logs`. Missing optional HK or `latest.log` are warnings, not failures.
+Resume exits nonzero only when Foreman doctor cannot be collected (including a
+missing `foreman` command); findings reported by the non-strict doctor remain in
+the JSON report for the caller to decide. Both entrypoints report the existing
+log location from Foreman's `FOREMAN_LOG_DIR`, `XDG_STATE_HOME`, or default
+state-directory contract; they do not create or parse logs.
+
 Use `--repo /path/to/repo` when you need to diagnose or set up a different
 checkout. `--setup` is intentionally conservative. It can initialize Foreman
 config, merge Claude and Codex hook wiring, scaffold the Pi extension, and you
