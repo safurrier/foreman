@@ -376,6 +376,22 @@ exit "${FAKE_HK_EXIT:-0}"
             )
         )
 
+    def test_agent_and_human_docs_route_to_machine_entrypoints(self) -> None:
+        agents = (ROOT / "AGENTS.md").read_text()
+        readme = (ROOT / "README.md").read_text()
+        docs_agents = (ROOT / "docs" / "AGENTS.md").read_text()
+        docs_index = (ROOT / "docs" / "README.md").read_text()
+
+        for entrypoint in (".agents/setup", ".agents/resume"):
+            self.assertIn(entrypoint, agents)
+            self.assertIn(entrypoint, readme)
+        self.assertIn("[`workflows.md`](workflows.md)", docs_agents)
+        self.assertIn("[Workflow Guide](workflows.md)", docs_index)
+        self.assertIn(
+            "[workflow guide](docs/workflows.md#unattended-agent-entrypoints)",
+            readme,
+        )
+
     def test_hk_success_and_failure_preserve_stderr(self) -> None:
         successful = self.entrypoint(
             "resume", hk=True, FAKE_HK_JSON='{"active_work":"fixture"}'

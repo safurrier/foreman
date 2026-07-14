@@ -183,9 +183,10 @@ validated doctor `report`, doctor-derived `warnings`/`errors`, canonical
 `commands`, and `logs` (`directory` plus an optional `latest` path).
 
 `.agents/resume` is read-only: it does not invoke setup, doctor fixes, HK
-lifecycle writes, runtime startup, or git checkout operations. It reports the
-repository-state availability plus current branch/detached/dirty state, runs the report-only doctor JSON command,
-and, when installed, runs `hk status --target <repo-root> --json`. It emits one
+lifecycle writes, runtime startup, or git checkout operations. It reports
+repository-state availability plus current branch/detached/dirty state, runs
+the report-only doctor JSON command, and, when installed, runs
+`hk status --target <repo-root> --json`. It emits one
 `foreman.agent.resume-report` version `1` JSON document on stdout; stderr is
 reserved for diagnostics. Its report contains `repo`, `doctor`, optional-tool
 availability/status, doctor-derived `warnings`/`errors`, canonical `commands`,
@@ -194,8 +195,9 @@ Resume exits nonzero when Foreman doctor cannot be collected, its JSON violates
 the known schema, or `foreman` is missing; findings reported by the non-strict
 doctor remain in the JSON report for the caller to decide. Missing or unusable
 Git metadata is a structured `repo-state-unavailable` warning and sets
-`repo.status` instead of pretending the checkout is clean. Both entrypoints report the existing
-log location from Foreman's `FOREMAN_LOG_DIR`, `XDG_STATE_HOME`, or default
+`repo.status` instead of pretending the checkout is clean. Both entrypoints
+report the existing log location from Foreman's `FOREMAN_LOG_DIR`,
+`XDG_STATE_HOME`, or default
 state-directory contract; relative overrides resolve from the repository root,
 matching the doctor invocation. They do not create or parse logs.
 
