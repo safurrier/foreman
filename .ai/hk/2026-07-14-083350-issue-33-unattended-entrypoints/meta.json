@@ -3,9 +3,9 @@
   "branch": "feature/issue-33-unattended-entrypoints",
   "diff_hash": "sha256:3bde094eb37ddb1ac3c25b32bf53945d6b51e602532c09036430f2a4d41eab5d",
   "dirty": false,
-  "event_count": 31,
-  "event_seq": 37,
-  "evidence_count": 12,
+  "event_count": 32,
+  "event_seq": 39,
+  "evidence_count": 13,
   "evidence_ids": [
     "ev_20260714_084045_051624",
     "ev_20260714_084100_999012",
@@ -18,10 +18,11 @@
     "ev_20260714_140957_552521",
     "ev_20260714_143854_982509",
     "ev_20260714_143855_265059",
-    "ev_20260714_152820_524240"
+    "ev_20260714_152820_524240",
+    "ev_20260714_154357_233454"
   ],
   "file_hashes": {
-    "README.md": "sha256:7359a049b90e20f2540e0edfd420d13227baf96287e2b6a233c823eac1230712",
+    "README.md": "sha256:17495956231fabe132ccfa26946d1dd160a5b3e75ebcd6e71711f10b524ffa32",
     "artifacts/README.md": "sha256:c4bad9d4652f296a7e4dcf175fe1dd0c66a99ec0b74941cd45c499e84792436c"
   },
   "files": [
@@ -29,9 +30,9 @@
     "meta.json",
     "artifacts/README.md"
   ],
-  "generated_at": "2026-07-14T22:28:56.859163+00:00",
+  "generated_at": "2026-07-14T22:44:32.439638+00:00",
   "generated_by": "hk export --format handoff-dir",
-  "git_sha": "aea8482",
+  "git_sha": "dc4bb50",
   "output_path": ".ai/hk/2026-07-14-083350-issue-33-unattended-entrypoints",
   "ready": true,
   "ready_status": "ready-with-dangerous-skips",
