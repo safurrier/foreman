@@ -238,6 +238,14 @@ local-only, or the overlap case fails to defer and later apply the remote merge.
 Use this script directly when iterating on event-loop scheduling, popup source
 refresh, PR/extension lookup cadence, or tmux inventory work.
 
+For the opt-in exact Ghostty display-registration check, run it from the Ghostty terminal Foreman may briefly rename and focus:
+
+```bash
+FOREMAN_GHOSTTY_DISPLAY_SMOKE=1 mise run smoke-ghostty-display
+```
+
+The smoke captures the current terminal's official stable UUID, changes its title, and focuses that same UUID through Foreman's normal focus path. It creates a named isolated tmux server and passes that name to every tmux command; it never inspects or mutates the default tmux server. Leave it skipped when no suitable Ghostty terminal/TCC session is safely available and record the skip alongside deterministic provider tests.
+
 For opt-in live workstation/remote-host source companion checks, prefer the
 Python harness:
 

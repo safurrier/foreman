@@ -37,6 +37,11 @@ use crate::source_companion::{
     SOURCE_COMPANION_PROTOCOL_VERSION,
 };
 use crate::source_companion_connect::{connect_ssh, ConnectSshConfig};
+use crate::source_display::{
+    activate_registered_display_or_fallback, capture_and_register, display_health, DisplayIdentity,
+    DisplayProviderKind, SourceDisplayRegistry, SystemActivationCommandRunner,
+    SystemDisplayProvider,
+};
 use crate::source_snapshots::{
     SourceRegistrationEnvelope, SourceSnapshotEnvelope, SourceSnapshotStore,
 };
@@ -434,6 +439,11 @@ pub enum SourcesCommand {
     Prewarm(SourcesPrewarmArgs),
     /// Write a source companion registration/heartbeat file.
     Register(SourcesRegisterArgs),
+    /// Capture and manage machine-local terminal display identity.
+    Display {
+        #[command(subcommand)]
+        command: SourcesDisplayCommand,
+    },
     /// Remove a configured source.
     Remove {
         source_id: String,
@@ -446,6 +456,67 @@ pub enum SourcesCommand {
         #[arg(long, help = "Print a JSON health report.")]
         json: bool,
     },
+}
+
+#[derive(Debug, Subcommand, Clone, PartialEq, Eq)]
+pub enum SourcesDisplayCommand {
+    /// Capture the currently focused provider display and register it for a source.
+    Capture(SourcesDisplayCaptureArgs),
+    /// Register an exact provider display identity supplied by the caller.
+    Register(SourcesDisplayRegisterArgs),
+    /// List all local display registrations, or inspect one source.
+    List {
+        source_id: Option<String>,
+        #[arg(long, help = "Print display registrations as JSON.")]
+        json: bool,
+    },
+    /// Probe whether a source's registered exact display still exists.
+    Doctor {
+        source_id: String,
+        #[arg(long, help = "Print display health as JSON.")]
+        json: bool,
+    },
+    /// Remove a display registration only when its ownership handle matches.
+    Unregister(SourcesDisplayUnregisterArgs),
+}
+
+#[derive(Debug, Args, Clone, PartialEq, Eq)]
+pub struct SourcesDisplayCaptureArgs {
+    pub source_id: String,
+    #[arg(long, value_enum, default_value_t = DisplayProviderKind::Ghostty)]
+    pub provider: DisplayProviderKind,
+    #[arg(long, help = "Print the captured registration as JSON.")]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Clone, PartialEq, Eq)]
+pub struct SourcesDisplayRegisterArgs {
+    pub source_id: String,
+    #[arg(long, value_enum, default_value_t = DisplayProviderKind::Ghostty)]
+    pub provider: DisplayProviderKind,
+    #[arg(
+        long,
+        value_name = "UUID",
+        help = "Exact stable Ghostty terminal UUID."
+    )]
+    pub terminal_uuid: String,
+    #[arg(long, help = "Optional stable Ghostty tab ID for diagnostics.")]
+    pub tab_id: Option<String>,
+    #[arg(long, help = "Optional stable Ghostty window ID for diagnostics.")]
+    pub window_id: Option<String>,
+    #[arg(long, help = "Optional current terminal title for diagnostics only.")]
+    pub diagnostic_title: Option<String>,
+    #[arg(long, help = "Print the saved registration as JSON.")]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Clone, PartialEq, Eq)]
+pub struct SourcesDisplayUnregisterArgs {
+    pub source_id: String,
+    #[arg(long, help = "Opaque ownership handle returned by capture/register.")]
+    pub handle: String,
+    #[arg(long, help = "Print the removal result as JSON.")]
+    pub json: bool,
 }
 
 #[derive(Debug, Subcommand, Clone, PartialEq, Eq)]
@@ -1257,6 +1328,10 @@ fn run_source_action(
         .sources
         .get(&source_id)
         .ok_or_else(|| RunError::Usage(format!("unknown source {}", source_id.as_str())))?;
+    let fallback_command = source_config
+        .jump()
+        .and_then(|jump| jump.activation_command.as_deref())
+        .map(str::to_string);
     let source = build_source_provider(
         cli,
         paths,
@@ -1272,6 +1347,18 @@ fn run_source_action(
     }
     .map_err(|error| RunError::Usage(error.message))?;
     response.wrap_source(&descriptor);
+    if send_text.is_none() {
+        response.companion_display_activation = response.display_activation.take();
+        response.display_activation = activate_registered_display_or_fallback(
+            &SourceDisplayRegistry::for_paths(paths),
+            &SystemDisplayProvider::default(),
+            &SystemActivationCommandRunner::login_shell(),
+            &source_id,
+            pane,
+            fallback_command.as_deref(),
+            std::time::Duration::MAX,
+        );
+    }
     Ok(response)
 }
 
@@ -1419,11 +1506,25 @@ fn handle_sources_command(
     let mut config = load_config(&paths.config_file)?;
     match command {
         SourcesCommand::List { json } => {
+            let display_registry = SourceDisplayRegistry::for_paths(paths);
+            let display_provider = SystemDisplayProvider::default();
             let sources: Vec<_> = config
                 .sources
                 .enabled_sources()
                 .into_iter()
-                .map(|(id, source_config)| SourceDescriptor::new(&id, &source_config))
+                .map(|(id, source_config)| {
+                    let descriptor = SourceDescriptor::new(&id, &source_config);
+                    let display = display_health(&display_registry, &display_provider, &id, false);
+                    serde_json::json!({
+                        "id": descriptor.id,
+                        "label": descriptor.label,
+                        "kind": descriptor.kind,
+                        "enabled": descriptor.enabled,
+                        "displayLabel": descriptor.display_label,
+                        "showLabel": descriptor.show_label,
+                        "displayRegistration": display,
+                    })
+                })
                 .collect();
             let value = serde_json::json!({
                 "schemaVersion": crate::services::control_api::CONTROL_API_SCHEMA_VERSION,
@@ -1603,6 +1704,7 @@ fn handle_sources_command(
                 println!("Wrote source registration for {}", args.source_id)
             })
         }
+        SourcesCommand::Display { command } => handle_sources_display_command(paths, command),
         SourcesCommand::Remove { source_id, json } => {
             if source_id == crate::sources::LOCAL_SOURCE_ID {
                 return Err(RunError::Usage(
@@ -1631,6 +1733,12 @@ fn handle_sources_command(
                 .ok_or_else(|| RunError::Usage(format!("unknown source {}", source_id.as_str())))?;
             let tmux_endpoint = source_tmux_endpoint_summary(&source_config);
             let source_metadata = source_metadata_summary(&source_id, &source_config);
+            let display = display_health(
+                &SourceDisplayRegistry::for_paths(paths),
+                &SystemDisplayProvider::default(),
+                &source_id,
+                true,
+            );
             let provider = build_source_provider(
                 &Cli::parse_from(["foreman", "agents"]),
                 paths,
@@ -1663,6 +1771,7 @@ fn handle_sources_command(
                 "durationMs": duration_ms,
                 "tmuxEndpoint": tmux_endpoint,
                 "metadata": source_metadata,
+                "display": display,
                 "diagnostics": diagnostics,
             });
             source_action_response(value, *json, || {
@@ -1671,6 +1780,161 @@ fn handle_sources_command(
                     source_id.as_str(),
                     if ok { "ok" } else { "failed" }
                 )
+            })
+        }
+    }
+}
+
+fn handle_sources_display_command(
+    paths: &crate::config::AppPaths,
+    command: &SourcesDisplayCommand,
+) -> Result<RunOutcome, RunError> {
+    let registry = SourceDisplayRegistry::for_paths(paths);
+    let provider = SystemDisplayProvider::default();
+    match command {
+        SourcesDisplayCommand::Capture(args) => {
+            SourceId::validate(&args.source_id).map_err(RunError::Usage)?;
+            let source_id = SourceId::new(args.source_id.clone());
+            let registration =
+                capture_and_register(&registry, &provider, &source_id, args.provider)
+                    .map_err(|error| RunError::Usage(error.to_string()))?;
+            let value = serde_json::json!({
+                "schemaVersion": crate::services::control_api::CONTROL_API_SCHEMA_VERSION,
+                "ok": true,
+                "action": "sources.display.capture",
+                "path": registry.path(),
+                "registration": registration,
+            });
+            source_action_response(value, args.json, || {
+                println!(
+                    "Captured {} display for source {}; ownership handle: {}",
+                    args.provider, args.source_id, registration.ownership_handle
+                )
+            })
+        }
+        SourcesDisplayCommand::Register(args) => {
+            SourceId::validate(&args.source_id).map_err(RunError::Usage)?;
+            let source_id = SourceId::new(args.source_id.clone());
+            let registration = registry
+                .register(
+                    &source_id,
+                    args.provider,
+                    DisplayIdentity {
+                        terminal_uuid: args.terminal_uuid.clone(),
+                        tab_id: args.tab_id.clone(),
+                        window_id: args.window_id.clone(),
+                        diagnostic_title: args.diagnostic_title.clone(),
+                    },
+                    crate::sources::unix_ms_now(),
+                )
+                .map_err(|error| RunError::Usage(error.to_string()))?;
+            let value = serde_json::json!({
+                "schemaVersion": crate::services::control_api::CONTROL_API_SCHEMA_VERSION,
+                "ok": true,
+                "action": "sources.display.register",
+                "path": registry.path(),
+                "registration": registration,
+            });
+            source_action_response(value, args.json, || {
+                println!(
+                    "Registered {} display for source {}; ownership handle: {}",
+                    args.provider, args.source_id, registration.ownership_handle
+                )
+            })
+        }
+        SourcesDisplayCommand::List { source_id, json } => {
+            if let Some(source_id) = source_id {
+                SourceId::validate(source_id).map_err(RunError::Usage)?;
+            }
+            let registrations = registry
+                .list()
+                .map_err(|error| RunError::Usage(error.to_string()))?
+                .into_iter()
+                .filter(|registration| {
+                    source_id
+                        .as_deref()
+                        .is_none_or(|requested| registration.source_id == requested)
+                })
+                .collect::<Vec<_>>();
+            let value = serde_json::json!({
+                "schemaVersion": crate::services::control_api::CONTROL_API_SCHEMA_VERSION,
+                "ok": true,
+                "action": "sources.display.list",
+                "path": registry.path(),
+                "registrations": registrations,
+            });
+            source_action_response(value, *json, || {
+                if registrations.is_empty() {
+                    println!("No local source display registrations.");
+                } else {
+                    for registration in &registrations {
+                        println!(
+                            "{}: {} terminal {} (handle {})",
+                            registration.source_id,
+                            registration.provider,
+                            registration.identity.terminal_uuid,
+                            registration.ownership_handle
+                        );
+                    }
+                }
+            })
+        }
+        SourcesDisplayCommand::Doctor { source_id, json } => {
+            SourceId::validate(source_id).map_err(RunError::Usage)?;
+            let source_id = SourceId::new(source_id.clone());
+            let health = display_health(&registry, &provider, &source_id, true);
+            let ok = health.status == "ok" || health.status == "not-registered";
+            let value = serde_json::json!({
+                "schemaVersion": crate::services::control_api::CONTROL_API_SCHEMA_VERSION,
+                "ok": ok,
+                "action": "sources.display.doctor",
+                "path": registry.path(),
+                "display": health,
+            });
+            source_action_response(value, *json, || {
+                println!(
+                    "Source {} display: {} ({})",
+                    source_id, health.status, health.code
+                )
+            })
+        }
+        SourcesDisplayCommand::Unregister(args) => {
+            SourceId::validate(&args.source_id).map_err(RunError::Usage)?;
+            let source_id = SourceId::new(args.source_id.clone());
+            let (removed, code, message) = match registry.unregister(&source_id, &args.handle) {
+                Ok(removed) => (
+                    removed,
+                    if removed {
+                        "source.display.unregistered".to_string()
+                    } else {
+                        "source.display.not-registered".to_string()
+                    },
+                    None,
+                ),
+                Err(error) if error.code == "source.display.ownership-mismatch" => {
+                    (false, error.code, Some(error.message))
+                }
+                Err(error) => return Err(RunError::Usage(error.to_string())),
+            };
+            let value = serde_json::json!({
+                "schemaVersion": crate::services::control_api::CONTROL_API_SCHEMA_VERSION,
+                "ok": removed,
+                "action": "sources.display.unregister",
+                "sourceId": args.source_id,
+                "removed": removed,
+                "code": code,
+                "message": message,
+                "path": registry.path(),
+            });
+            source_action_response(value, args.json, || {
+                if removed {
+                    println!("Unregistered display for source {}", args.source_id);
+                } else {
+                    println!(
+                        "Display registration for source {} was not removed: {}",
+                        args.source_id, code
+                    );
+                }
             })
         }
     }
@@ -1802,6 +2066,7 @@ fn serve_companion(
     paths: &crate::config::AppPaths,
     args: &CompanionServeArgs,
 ) -> Result<RunOutcome, RunError> {
+    SourceId::validate(&args.source_id).map_err(RunError::Usage)?;
     if args.allow_send && args.token.is_none() {
         return Err(RunError::Usage(
             "companion serve --allow-send requires --token".to_string(),
@@ -1952,7 +2217,7 @@ fn handle_companion_request(
                 .focus_pane(&pane_id)
                 .map(|_| {
                     let mut response = focus_response(pane);
-                    response.display_activation = run_companion_activation(args, pane);
+                    response.display_activation = run_companion_activation(paths, args, pane);
                     CompanionResponse::action(request.request_id.clone(), response)
                 })
                 .map_err(|error| {
@@ -2030,81 +2295,19 @@ fn handle_companion_request(
 }
 
 fn run_companion_activation(
+    paths: &crate::config::AppPaths,
     args: &CompanionServeArgs,
     pane: &str,
 ) -> Option<DisplayActivationResponse> {
-    let command = args.activation_command.as_deref()?;
-    let timeout = std::time::Duration::from_millis(args.activation_timeout_ms.max(1));
-    let mut child = match std::process::Command::new("sh")
-        .arg("-c")
-        .arg(command)
-        .env("FOREMAN_SOURCE_ID", &args.source_id)
-        .env("FOREMAN_PANE_ID", pane)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(error) => {
-            return Some(DisplayActivationResponse {
-                attempted: true,
-                ok: false,
-                message: Some(format!("failed to run activation command: {error}")),
-            })
-        }
-    };
-
-    let started = std::time::Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) if status.success() => {
-                let _ = child.wait_with_output();
-                return Some(DisplayActivationResponse {
-                    attempted: true,
-                    ok: true,
-                    message: None,
-                });
-            }
-            Ok(Some(status)) => {
-                let stderr = child
-                    .wait_with_output()
-                    .map(|output| String::from_utf8_lossy(&output.stderr).trim().to_string())
-                    .unwrap_or_default();
-                let message = if stderr.is_empty() {
-                    format!("activation command exited with status {status}")
-                } else {
-                    format!("activation command exited with status {status}: {stderr}")
-                };
-                return Some(DisplayActivationResponse {
-                    attempted: true,
-                    ok: false,
-                    message: Some(message),
-                });
-            }
-            Ok(None) if started.elapsed() >= timeout => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Some(DisplayActivationResponse {
-                    attempted: true,
-                    ok: false,
-                    message: Some(format!(
-                        "activation command timed out after {}ms",
-                        args.activation_timeout_ms.max(1)
-                    )),
-                });
-            }
-            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(10)),
-            Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Some(DisplayActivationResponse {
-                    attempted: true,
-                    ok: false,
-                    message: Some(format!("failed to wait for activation command: {error}")),
-                });
-            }
-        }
-    }
+    activate_registered_display_or_fallback(
+        &SourceDisplayRegistry::for_paths(paths),
+        &SystemDisplayProvider::default(),
+        &SystemActivationCommandRunner::non_login_shell(),
+        &SourceId::new(args.source_id.clone()),
+        pane,
+        args.activation_command.as_deref(),
+        std::time::Duration::from_millis(args.activation_timeout_ms.max(1)),
+    )
 }
 
 fn source_tmux_endpoint_summary(source_config: &SourceConfig) -> serde_json::Value {
@@ -3378,7 +3581,7 @@ mod tests {
     use crate::services::startup_cache::write_startup_cache;
     use crate::services::ui_preferences::{save_ui_preferences, PersistedUiPreferences};
     use crate::ui::theme::ThemeName;
-    use clap::Parser;
+    use clap::{CommandFactory, Parser};
     use std::path::PathBuf;
     use tempfile::tempdir;
 
@@ -3402,7 +3605,13 @@ mod tests {
             json: false,
         };
 
-        let response = run_companion_activation(&args, "%42").expect("activation attempted");
+        let paths = resolve_paths(
+            Some(&temp_dir.path().join("config.toml")),
+            Some(&temp_dir.path().join("logs")),
+        )
+        .unwrap();
+        let response =
+            run_companion_activation(&paths, &args, "%42").expect("activation attempted");
 
         assert!(response.ok);
         assert_eq!(
@@ -3413,6 +3622,7 @@ mod tests {
 
     #[test]
     fn companion_activation_failure_is_reported_as_warning() {
+        let temp_dir = tempdir().expect("temp dir should exist");
         let args = CompanionServeArgs {
             bind: "127.0.0.1:0".to_string(),
             token: None,
@@ -3425,8 +3635,14 @@ mod tests {
             ready_file: None,
             json: false,
         };
+        let paths = resolve_paths(
+            Some(&temp_dir.path().join("config.toml")),
+            Some(&temp_dir.path().join("logs")),
+        )
+        .unwrap();
 
-        let response = run_companion_activation(&args, "%42").expect("activation attempted");
+        let response =
+            run_companion_activation(&paths, &args, "%42").expect("activation attempted");
 
         assert!(response.attempted);
         assert!(!response.ok);
@@ -3438,6 +3654,7 @@ mod tests {
 
     #[test]
     fn companion_activation_timeout_is_reported_as_warning() {
+        let temp_dir = tempdir().expect("temp dir should exist");
         let args = CompanionServeArgs {
             bind: "127.0.0.1:0".to_string(),
             token: None,
@@ -3450,8 +3667,14 @@ mod tests {
             ready_file: None,
             json: false,
         };
+        let paths = resolve_paths(
+            Some(&temp_dir.path().join("config.toml")),
+            Some(&temp_dir.path().join("logs")),
+        )
+        .unwrap();
 
-        let response = run_companion_activation(&args, "%42").expect("activation attempted");
+        let response =
+            run_companion_activation(&paths, &args, "%42").expect("activation attempted");
 
         assert!(response.attempted);
         assert!(!response.ok);
@@ -3459,6 +3682,168 @@ mod tests {
             .message
             .expect("timeout should include message")
             .contains("timed out"));
+    }
+
+    #[test]
+    fn display_cli_register_list_doctor_and_owned_unregister_return_json() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let config = temp_dir.path().join("config.toml");
+        let logs = temp_dir.path().join("state").join("logs");
+        let config_arg = config.to_str().unwrap();
+        let logs_arg = logs.to_str().unwrap();
+
+        let register = Cli::parse_from([
+            "foreman",
+            "--config-file",
+            config_arg,
+            "--log-dir",
+            logs_arg,
+            "sources",
+            "display",
+            "register",
+            "remote-dev",
+            "--provider",
+            "ghostty",
+            "--terminal-uuid",
+            "terminal-exact",
+            "--tab-id",
+            "tab-exact",
+            "--window-id",
+            "window-exact",
+            "--diagnostic-title",
+            "duplicate title",
+            "--json",
+        ]);
+        let RunOutcome::ControlJson(registered) = run(register).unwrap() else {
+            panic!("expected registration JSON")
+        };
+        assert_eq!(
+            registered["registration"]["identity"]["terminalUuid"],
+            "terminal-exact"
+        );
+        let handle = registered["registration"]["ownershipHandle"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let list = Cli::parse_from([
+            "foreman",
+            "--config-file",
+            config_arg,
+            "--log-dir",
+            logs_arg,
+            "sources",
+            "display",
+            "list",
+            "remote-dev",
+            "--json",
+        ]);
+        let RunOutcome::ControlJson(listed) = run(list).unwrap() else {
+            panic!("expected list JSON")
+        };
+        assert_eq!(listed["registrations"].as_array().unwrap().len(), 1);
+
+        let source_list = Cli::parse_from([
+            "foreman",
+            "--config-file",
+            config_arg,
+            "--log-dir",
+            logs_arg,
+            "sources",
+            "list",
+            "--json",
+        ]);
+        let RunOutcome::ControlJson(source_list) = run(source_list).unwrap() else {
+            panic!("expected source list JSON")
+        };
+        assert_eq!(
+            source_list["sources"][0]["displayRegistration"]["code"],
+            "source.display.not-registered"
+        );
+
+        let wrong = Cli::parse_from([
+            "foreman",
+            "--config-file",
+            config_arg,
+            "--log-dir",
+            logs_arg,
+            "sources",
+            "display",
+            "unregister",
+            "remote-dev",
+            "--handle",
+            "stale-owner",
+            "--json",
+        ]);
+        let RunOutcome::ControlJson(wrong_result) = run(wrong).unwrap() else {
+            panic!("expected unregister JSON")
+        };
+        assert_eq!(wrong_result["ok"], false);
+        assert_eq!(wrong_result["code"], "source.display.ownership-mismatch");
+
+        let unregister = Cli::parse_from([
+            "foreman",
+            "--config-file",
+            config_arg,
+            "--log-dir",
+            logs_arg,
+            "sources",
+            "display",
+            "unregister",
+            "remote-dev",
+            "--handle",
+            &handle,
+            "--json",
+        ]);
+        let RunOutcome::ControlJson(unregistered) = run(unregister).unwrap() else {
+            panic!("expected unregister JSON")
+        };
+        assert_eq!(unregistered["ok"], true);
+        assert_eq!(unregistered["removed"], true);
+
+        let doctor = Cli::parse_from([
+            "foreman",
+            "--config-file",
+            config_arg,
+            "--log-dir",
+            logs_arg,
+            "sources",
+            "display",
+            "doctor",
+            "remote-dev",
+            "--json",
+        ]);
+        let RunOutcome::ControlJson(doctor_result) = run(doctor).unwrap() else {
+            panic!("expected doctor JSON")
+        };
+        assert_eq!(doctor_result["display"]["status"], "not-registered");
+        assert_eq!(
+            doctor_result["display"]["code"],
+            "source.display.not-registered"
+        );
+
+        let unsupported = Cli::try_parse_from([
+            "foreman",
+            "sources",
+            "display",
+            "capture",
+            "remote-dev",
+            "--provider",
+            "wezterm",
+            "--json",
+        ]);
+        assert!(unsupported.is_err());
+
+        let mut command = Cli::command();
+        let sources = command
+            .find_subcommand_mut("sources")
+            .expect("sources is discoverable");
+        let display = sources
+            .find_subcommand_mut("display")
+            .expect("display is discoverable");
+        assert!(display.find_subcommand_mut("capture").is_some());
+        assert!(display.find_subcommand_mut("doctor").is_some());
+        assert!(display.find_subcommand_mut("unregister").is_some());
     }
 
     #[test]

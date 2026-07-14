@@ -48,6 +48,7 @@ testable as the app grows.
 | Ratatui renderer | Render header, sidebar, preview, input, footer, help, search/modal overlays, inline flash labels, and loading states from pure state using semantic theme tokens, built-in palette themes, compact harness marks, and no-color-safe glyph fallbacks |
 | tmux adapter | Discover sessions/windows/panes, capture pane output, focus panes, send input, rename windows, create windows, and kill panes. It can target the default tmux server, a socket path, or a named `tmux -L` server. |
 | Source aggregator | Query local and configured remote tmux-backed sources, normalize source-scoped identities, enforce per-source deadlines/stale diagnostics, and return one aggregate inventory for every Foreman surface. |
+| Source display registry | Persist one machine-local exact display identity per source with ownership-guarded replacement/removal, and route capture, health, and activation through typed provider adapters. |
 | Harness integrations | Detect supported harness families, translate compatibility signals for Claude, Codex, Pi, Gemini CLI, and OpenCode, and overlay native signals for Claude, Codex, and Pi when available |
 | Pull request service | Resolve pull request metadata for the selected workspace, and own browser-open and clipboard-copy seams with graceful degradation |
 | Notification service | Apply pure suppression and cooldown policy, build dispatcher order from typed config, dispatch best-effort notifications with backend fallback, and surface observable decisions |
@@ -175,8 +176,11 @@ testable as the app grows.
   heuristics until a better native seam exists.
 - Compatibility heuristics are allowed to be lower confidence, but they must
   fail soft rather than hide the pane entirely.
-- All tmux, GitHub, browser, clipboard, and notification effects flow through
+- All tmux, GitHub, browser, clipboard, terminal-display, and notification effects flow through
   adapters or services, never the renderer or reducer.
+- Source display identity is local state owned by the Foreman process/machine that owns the display. It is not included in SSH, snapshot, or companion registration transport payloads.
+- Ghostty display selection uses its stable AppleScript terminal ID and exact `focus` command. Titles are diagnostics only; tty and pid are not display selectors.
+- Source focus reports tmux and display outcomes independently. Registered display activation is attempted before the existing activation-command compatibility fallback.
 - tmux action adapters return structured success/failure results rather than
   leaking subprocess text into reducer-facing code.
 - Destructive pane actions require explicit confirmation.
@@ -340,6 +344,7 @@ boundaries unless an ADR changes them.
 | src/services/notifications.rs | Notification policy, configured cooldowns, backend-order wiring, backend fallback, and dispatch seams | `SPEC.md` |
 | src/services/pull_requests.rs | Pull request lookup, browser/copy effects, and degradation behavior | `SPEC.md` |
 | src/services/system_stats.rs | Header-level CPU and memory pressure snapshots behind a small service seam | This document |
+| src/source_display.rs | Machine-local display registration, ownership lifecycle, provider/AppleScript boundary, health, and activation-command fallback resolution | ADRs 0003 and 0004 |
 | src/services/logging.rs | Run logs, latest-run pointer, retention cleanup, and bootstrap/inventory summaries | `SPEC.md` |
 
 ---

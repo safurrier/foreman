@@ -2,26 +2,28 @@
 title: ADR 0004 — Source companion and relay architecture
 summary: Design the post-SSH source model for bidirectional workstation ↔ remote-host visibility, prewarmed source state, and robust source display activation.
 status: accepted
-updated: 2026-06-09
+updated: 2026-07-14
 related:
   code:
     - src/sources.rs
     - src/runtime.rs
     - src/services/control_api.rs
+    - src/source_display.rs
   docs:
     - docs/decisions/0002-source-aggregation-and-remote-ssh.md
     - docs/decisions/0003-remote-jump-terminal-activation.md
     - docs/workflows.md
   issues:
     - https://github.com/safurrier/foreman/issues/24
+    - https://github.com/safurrier/foreman/issues/34
 ---
 
 # ADR 0004: Source companion and relay architecture
 
 Status: accepted. Initial implementation now includes the snapshot store,
 prewarmer command, registration file, JSON-line companion transport,
-`connect-ssh` supervisor, and live remote-host → workstation reverse-forward
-smokes.
+`connect-ssh` supervisor, live remote-host → workstation reverse-forward
+smokes, and machine-local exact Ghostty display registration.
 
 ## Context
 
@@ -96,6 +98,9 @@ The first implementation on PR #27 adds:
   JSON-line request, and configures the remote host's companion source.
 - Python live-smoke orchestration in
   `scripts/source_companion_live_smoke.py`.
+- A separate machine-local source display registry with typed Ghostty capture, exact stable-terminal focus, ownership-guarded replacement/removal, doctor health, and activation-command fallback.
+
+Display identity is intentionally absent from companion registration and transport JSON. Each Foreman process consults only the registry on the machine that owns the display, including a companion server handling a focus request.
 
 The code path has been proven with OpenSSH `-R` reverse forwards from a
 workstation to a remote SSH host. A validation gotcha from the first attempt: do
@@ -308,13 +313,6 @@ safe actions. It should not own tmux panes or become a general remote shell.
     "tmuxPath": "/home/linuxbrew/.linuxbrew/bin/tmux",
     "tmuxVersion": "tmux 3.6a"
   },
-  "display": {
-    "app": "Ghostty",
-    "bundleId": "com.mitchellh.ghostty",
-    "windowId": "...",
-    "tabId": "...",
-    "title": "remote host"
-  },
   "endpoints": {
     "query": "local-file|ssh|reverse-tunnel|relay",
     "actions": ["focus", "send"]
@@ -499,8 +497,9 @@ sequenceDiagram
     UI->>Companion: focus source=remote pane=%42
     Companion->>Tmux: switch-client/select-pane %42
     Tmux-->>Companion: ok
-    Companion-->>UI: action ok + display identity
-    UI->>Display: activate registered window/tab
+    Companion->>Display: load local registration and focus exact terminal UUID
+    Display-->>Companion: activation outcome
+    Companion-->>UI: tmux action ok + separate display activation outcome
 ```
 
 ## Failure modes
@@ -625,10 +624,10 @@ app bundle, keyboard/focus, screenshot, or control-API paths change, also run
 
 ### Slice 6 — display registration
 
-- Extend registration with terminal display identity.
-- Replace title-only activation scripts with registered display activation where
-  available.
-- Keep `activation_command` as fallback.
+- Completed with a separate machine-local display registry rather than extending companion transport registration.
+- Capture and focus Ghostty by its official exact stable terminal UUID; retain optional tab/window IDs and title only for diagnostics.
+- Replace title-only activation scripts with registered display activation where available.
+- Keep `activation_command` as fallback, and keep tmux/display results structurally separate.
 
 ### Slice 7 — relay evaluation
 

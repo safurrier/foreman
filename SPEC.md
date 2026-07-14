@@ -58,6 +58,7 @@ yet expose a stable contract.
 - **control API**: Machine-readable CLI subcommands used by GUI clients and automation to list agents, focus panes, and send text without parsing the TUI.
 - **source**: A configured local or remote tmux-backed place Foreman can query and control.
 - **source-scoped pane**: A pane identified by both Foreman source id and tmux pane id; tmux pane ids are not globally unique across sources.
+- **source display registration**: Machine-local ownership of an exact terminal display identity for one source, used to activate the display after tmux focus without sending that identity over source transports.
 
 ## Goals / Non-Goals
 
@@ -217,6 +218,8 @@ yet expose a stable contract.
 - Session and window selections can resolve to an actionable visible pane for focus-oriented actions.
 - The UI identifies the resolved actionable pane for focus-oriented and direct-input actions.
 - In popup mode, successful focus-oriented actions close the dashboard automatically.
+- A machine may register one exact local display identity per source. A current registered identity is attempted before a configured activation-command fallback.
+- tmux focus success and display activation success remain separate outcomes; a missing or closed display does not turn successful tmux focus into focus failure.
 
 **R12. Direct input**
 
@@ -347,6 +350,7 @@ yet expose a stable contract.
 - It supports notification suppression for a single run.
 - It supports runtime overrides for monitoring cadence and capture depth.
 - It supports control subcommands for JSON agent listing, pane focus, and pane send.
+- Source commands can capture, explicitly register, list, diagnose, and ownership-guardedly unregister machine-local display identity as JSON.
 - Control subcommands reject conflicting top-level interactive modes such as doctor mode.
 - Hook-based native integrations may ship companion helper commands when the
   main dashboard process is not the right place to consume hook stdin directly.
@@ -356,7 +360,7 @@ yet expose a stable contract.
 - `foreman agents --json` returns schema-versioned JSON with inventory summary, entries, and diagnostics.
 - `foreman agents --json --all-panes` includes non-agent panes.
 - `foreman agents --json --pull-requests` includes best-effort pull request metadata.
-- `foreman focus --pane <pane-id> --json` focuses the requested tmux pane and reports success or failure in machine-readable form.
+- `foreman focus --pane <pane-id> --json` focuses the requested tmux pane and reports success or failure in machine-readable form, with display activation reported separately when attempted.
 - `foreman send --pane <pane-id> --stdin --json` sends stdin to the requested pane and reports bytes sent.
 - `foreman send --pane <pane-id> --text <text> --json` sends explicit text to the requested pane and reports bytes sent.
 - Control API diagnostics are visible to clients when tmux or runtime inventory is unavailable.
@@ -615,7 +619,9 @@ mise run ci
 
 **A9. Popup auto-exit**
 
-- Given the dashboard is running in popup mode, when the operator focuses a target pane successfully, tmux switches to that pane and the dashboard closes.
+- Given the dashboard is running in popup mode, when the operator focuses a target pane successfully, tmux switches to that pane and the dashboard closes even if optional display activation reports a warning.
+- Given a source has a current local Ghostty display registration, focus activates the exact stable terminal UUID through Ghostty's AppleScript `focus` command before trying the source's activation-command fallback; terminal title, tty, and pid are not target selectors.
+- Given the registered terminal is closed or unavailable, tmux focus remains successful and the JSON/runtime result includes an actionable `source.display.*` diagnostic.
 
 **A10. Direct input**
 
