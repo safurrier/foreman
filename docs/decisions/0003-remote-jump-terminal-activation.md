@@ -6,7 +6,7 @@ updated: 2026-07-14
 related:
   code:
     - src/runtime.rs
-    - src/source_display.rs
+    - src/source_display/
     - src/sources.rs
   docs:
     - docs/operator-guide.md

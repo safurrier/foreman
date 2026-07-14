@@ -66,6 +66,9 @@ const COMPANION_AFTER_HELP: &str = "Examples:\n  foreman companion serve --bind 
 const COMPANION_SERVE_AFTER_HELP: &str = "Examples:\n  foreman companion serve --bind 127.0.0.1:4040 --source-id workstation --token $FOREMAN_COMPANION_TOKEN --json\n  foreman companion serve --bind 127.0.0.1:4040 --source-id workstation --token $FOREMAN_COMPANION_TOKEN --allow-send --activation-command ~/.config/foreman/focus-terminal-tab.sh --json\n\nNotes:\n  --allow-send requires --token. Bind to loopback unless the endpoint is protected by another trusted transport.";
 const COMPANION_PROBE_AFTER_HELP: &str = "Examples:\n  foreman companion probe --endpoint 127.0.0.1:4040 --token $FOREMAN_COMPANION_TOKEN --json\n  ssh remote-dev.example 'foreman companion probe --endpoint 127.0.0.1:4040 --token $FOREMAN_COMPANION_TOKEN --json'\n\nUse this instead of empty TCP open/close readiness probes; it sends a real Foreman companion request.";
 const COMPANION_CONNECT_SSH_AFTER_HELP: &str = "Examples:\n  foreman companion connect-ssh remote-dev.example --source-id workstation --label Workstation --remote-foreman /usr/local/bin/foreman --replace --json\n  foreman companion connect-ssh remote-dev.example --source-id workstation --label Workstation --remote-foreman /usr/local/bin/foreman --allow-send --activation-command ~/.config/foreman/focus-terminal-tab.sh --replace --json\n\nNotes:\n  The command stays running to supervise the local companion server and SSH reverse tunnel.\n  --replace makes remote source configuration idempotent for reruns.\n  --allow-send auto-generates and wires a token unless --token is supplied.";
+const DISPLAY_CAPTURE_AFTER_HELP: &str = "Example:\n  foreman sources display capture remote-dev --provider ghostty --json\n\nThe source id must match the source whose pane focus should activate this terminal. Save the returned ownershipHandle for guarded cleanup.";
+const DISPLAY_REGISTER_AFTER_HELP: &str = "Example:\n  foreman sources display register remote-dev --provider ghostty --terminal-uuid $GHOSTTY_TERMINAL_UUID --json\n\nUse only official stable provider IDs. Titles, tty, and pid are diagnostics, not selectors.";
+const DISPLAY_UNREGISTER_AFTER_HELP: &str = "Example:\n  foreman sources display unregister remote-dev --handle $FOREMAN_DISPLAY_OWNERSHIP_HANDLE --json\n\nA stale handle exits nonzero and cannot remove a newer registration. Missing registration is an idempotent success with removed=false.";
 
 #[derive(Debug, Parser, Clone)]
 #[command(
@@ -461,27 +464,33 @@ pub enum SourcesCommand {
 #[derive(Debug, Subcommand, Clone, PartialEq, Eq)]
 pub enum SourcesDisplayCommand {
     /// Capture the currently focused provider display and register it for a source.
+    #[command(after_help = DISPLAY_CAPTURE_AFTER_HELP)]
     Capture(SourcesDisplayCaptureArgs),
     /// Register an exact provider display identity supplied by the caller.
+    #[command(after_help = DISPLAY_REGISTER_AFTER_HELP)]
     Register(SourcesDisplayRegisterArgs),
     /// List all local display registrations, or inspect one source.
     List {
+        #[arg(help = "Optional source id to inspect; omit to list every registration.")]
         source_id: Option<String>,
         #[arg(long, help = "Print display registrations as JSON.")]
         json: bool,
     },
     /// Probe whether a source's registered exact display still exists.
     Doctor {
+        #[arg(help = "Source id whose exact registered display should be probed.")]
         source_id: String,
         #[arg(long, help = "Print display health as JSON.")]
         json: bool,
     },
     /// Remove a display registration only when its ownership handle matches.
+    #[command(after_help = DISPLAY_UNREGISTER_AFTER_HELP)]
     Unregister(SourcesDisplayUnregisterArgs),
 }
 
 #[derive(Debug, Args, Clone, PartialEq, Eq)]
 pub struct SourcesDisplayCaptureArgs {
+    #[arg(help = "Source id whose pane focus should activate this local display.")]
     pub source_id: String,
     #[arg(long, value_enum, default_value_t = DisplayProviderKind::Ghostty)]
     pub provider: DisplayProviderKind,
@@ -491,6 +500,7 @@ pub struct SourcesDisplayCaptureArgs {
 
 #[derive(Debug, Args, Clone, PartialEq, Eq)]
 pub struct SourcesDisplayRegisterArgs {
+    #[arg(help = "Source id whose pane focus should activate this local display.")]
     pub source_id: String,
     #[arg(long, value_enum, default_value_t = DisplayProviderKind::Ghostty)]
     pub provider: DisplayProviderKind,
@@ -512,6 +522,7 @@ pub struct SourcesDisplayRegisterArgs {
 
 #[derive(Debug, Args, Clone, PartialEq, Eq)]
 pub struct SourcesDisplayUnregisterArgs {
+    #[arg(help = "Source id whose current display registration should be removed.")]
     pub source_id: String,
     #[arg(long, help = "Opaque ownership handle returned by capture/register.")]
     pub handle: String,
@@ -1348,15 +1359,14 @@ fn run_source_action(
     .map_err(|error| RunError::Usage(error.message))?;
     response.wrap_source(&descriptor);
     if send_text.is_none() {
-        response.companion_display_activation = response.display_activation.take();
-        response.display_activation = activate_registered_display_or_fallback(
+        response.caller_display_activation = activate_registered_display_or_fallback(
             &SourceDisplayRegistry::for_paths(paths),
             &SystemDisplayProvider::default(),
             &SystemActivationCommandRunner::login_shell(),
             &source_id,
             pane,
             fallback_command.as_deref(),
-            std::time::Duration::MAX,
+            crate::source_display::DEFAULT_ACTIVATION_TIMEOUT,
         );
     }
     Ok(response)
@@ -1496,6 +1506,25 @@ fn source_action_response(
         human();
     }
     Ok(RunOutcome::ControlJson(value))
+}
+
+fn source_action_failure_response(
+    value: serde_json::Value,
+    json: bool,
+    human: impl FnOnce(),
+    message: String,
+) -> Result<RunOutcome, RunError> {
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&value).map_err(|error| {
+                RunError::Usage(format!("failed to encode source JSON: {error}"))
+            })?
+        );
+    } else {
+        human();
+    }
+    Err(RunError::Usage(message))
 }
 
 fn handle_sources_command(
@@ -1901,41 +1930,54 @@ fn handle_sources_display_command(
         SourcesDisplayCommand::Unregister(args) => {
             SourceId::validate(&args.source_id).map_err(RunError::Usage)?;
             let source_id = SourceId::new(args.source_id.clone());
-            let (removed, code, message) = match registry.unregister(&source_id, &args.handle) {
-                Ok(removed) => (
-                    removed,
-                    if removed {
-                        "source.display.unregistered".to_string()
+            match registry.unregister(&source_id, &args.handle) {
+                Ok(removed) => {
+                    let code = if removed {
+                        "source.display.unregistered"
                     } else {
-                        "source.display.not-registered".to_string()
-                    },
-                    None,
-                ),
+                        "source.display.not-registered"
+                    };
+                    let value = serde_json::json!({
+                        "schemaVersion": crate::services::control_api::CONTROL_API_SCHEMA_VERSION,
+                        "ok": true,
+                        "action": "sources.display.unregister",
+                        "sourceId": args.source_id,
+                        "removed": removed,
+                        "code": code,
+                        "message": null,
+                        "path": registry.path(),
+                    });
+                    source_action_response(value, args.json, || {
+                        if removed {
+                            println!("Unregistered display for source {}", args.source_id);
+                        } else {
+                            println!(
+                                "No display registration exists for source {}",
+                                args.source_id
+                            );
+                        }
+                    })
+                }
                 Err(error) if error.code == "source.display.ownership-mismatch" => {
-                    (false, error.code, Some(error.message))
+                    let value = serde_json::json!({
+                        "schemaVersion": crate::services::control_api::CONTROL_API_SCHEMA_VERSION,
+                        "ok": false,
+                        "action": "sources.display.unregister",
+                        "sourceId": args.source_id,
+                        "removed": false,
+                        "code": &error.code,
+                        "message": &error.message,
+                        "path": registry.path(),
+                    });
+                    source_action_failure_response(
+                        value,
+                        args.json,
+                        || eprintln!("{}", error),
+                        error.to_string(),
+                    )
                 }
-                Err(error) => return Err(RunError::Usage(error.to_string())),
-            };
-            let value = serde_json::json!({
-                "schemaVersion": crate::services::control_api::CONTROL_API_SCHEMA_VERSION,
-                "ok": removed,
-                "action": "sources.display.unregister",
-                "sourceId": args.source_id,
-                "removed": removed,
-                "code": code,
-                "message": message,
-                "path": registry.path(),
-            });
-            source_action_response(value, args.json, || {
-                if removed {
-                    println!("Unregistered display for source {}", args.source_id);
-                } else {
-                    println!(
-                        "Display registration for source {} was not removed: {}",
-                        args.source_id, code
-                    );
-                }
-            })
+                Err(error) => Err(RunError::Usage(error.to_string())),
+            }
         }
     }
 }
@@ -3775,11 +3817,10 @@ mod tests {
             "stale-owner",
             "--json",
         ]);
-        let RunOutcome::ControlJson(wrong_result) = run(wrong).unwrap() else {
-            panic!("expected unregister JSON")
-        };
-        assert_eq!(wrong_result["ok"], false);
-        assert_eq!(wrong_result["code"], "source.display.ownership-mismatch");
+        let error = run(wrong).expect_err("stale ownership must fail the process contract");
+        assert!(error
+            .to_string()
+            .contains("source.display.ownership-mismatch"));
 
         let unregister = Cli::parse_from([
             "foreman",

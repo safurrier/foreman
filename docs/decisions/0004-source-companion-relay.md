@@ -8,7 +8,7 @@ related:
     - src/sources.rs
     - src/runtime.rs
     - src/services/control_api.rs
-    - src/source_display.rs
+    - src/source_display/
   docs:
     - docs/decisions/0002-source-aggregation-and-remote-ssh.md
     - docs/decisions/0003-remote-jump-terminal-activation.md
@@ -499,7 +499,8 @@ sequenceDiagram
     Tmux-->>Companion: ok
     Companion->>Display: load local registration and focus exact terminal UUID
     Display-->>Companion: activation outcome
-    Companion-->>UI: tmux action ok + separate display activation outcome
+    Companion-->>UI: tmux action ok + source-host displayActivation
+    UI->>UI: optionally add callerDisplayActivation without replacing the existing field
 ```
 
 ## Failure modes
@@ -627,7 +628,8 @@ app bundle, keyboard/focus, screenshot, or control-API paths change, also run
 - Completed with a separate machine-local display registry rather than extending companion transport registration.
 - Capture and focus Ghostty by its official exact stable terminal UUID; retain optional tab/window IDs and title only for diagnostics.
 - Replace title-only activation scripts with registered display activation where available.
-- Keep `activation_command` as fallback, and keep tmux/display results structurally separate.
+- Keep `activation_command` as a bounded fallback, and keep tmux/display results structurally separate.
+- Preserve source-host or companion-host activation in the existing `displayActivation` JSON field; add requesting-host activation as `callerDisplayActivation`.
 
 ### Slice 7 — relay evaluation
 

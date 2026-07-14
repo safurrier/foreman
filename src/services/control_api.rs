@@ -257,10 +257,13 @@ pub struct ActionResponse {
     #[serde(default = "default_source_pane_id")]
     pub source_pane_id: String,
     pub bytes_sent: Option<usize>,
+    /// Source-host display activation. This retains the original JSON field for
+    /// compatibility with clients that predate caller-side display activation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_activation: Option<DisplayActivationResponse>,
+    /// Additional activation performed by the requesting Foreman process.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub companion_display_activation: Option<DisplayActivationResponse>,
+    pub caller_display_activation: Option<DisplayActivationResponse>,
 }
 
 impl ActionResponse {
@@ -352,7 +355,7 @@ pub fn focus_response(pane_id: &str) -> ActionResponse {
         source_pane_id,
         bytes_sent: None,
         display_activation: None,
-        companion_display_activation: None,
+        caller_display_activation: None,
     }
 }
 
@@ -367,7 +370,7 @@ pub fn send_response(pane_id: &str, bytes_sent: usize) -> ActionResponse {
         source_pane_id,
         bytes_sent: Some(bytes_sent),
         display_activation: None,
-        companion_display_activation: None,
+        caller_display_activation: None,
     }
 }
 
@@ -547,7 +550,7 @@ mod tests {
             .expect("legacy display activation should remain present");
         assert_eq!(activation.provider, None);
         assert!(!activation.fallback_attempted);
-        assert_eq!(response.companion_display_activation, None);
+        assert_eq!(response.caller_display_activation, None);
     }
 
     #[test]
@@ -561,6 +564,14 @@ mod tests {
             code: Some("source.display.unavailable".to_string()),
             message: Some("registered terminal is closed".to_string()),
         });
+        response.caller_display_activation = Some(DisplayActivationResponse {
+            attempted: true,
+            ok: true,
+            provider: None,
+            fallback_attempted: true,
+            code: None,
+            message: None,
+        });
 
         let value = serde_json::to_value(response).unwrap();
         assert_eq!(value["ok"], true);
@@ -570,6 +581,7 @@ mod tests {
             value["displayActivation"]["code"],
             "source.display.unavailable"
         );
+        assert_eq!(value["callerDisplayActivation"]["ok"], true);
     }
 
     #[test]

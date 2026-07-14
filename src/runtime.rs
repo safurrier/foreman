@@ -552,7 +552,7 @@ impl DashboardRuntime {
         let mut activation = Vec::new();
         if let Some(response) = response {
             activation.extend(response.display_activation);
-            activation.extend(response.companion_display_activation);
+            activation.extend(response.caller_display_activation);
         }
         Ok(activation)
     }
@@ -606,7 +606,7 @@ impl DashboardRuntime {
             .wait_with_output()
             .map_err(|error| error.to_string())?;
         if output.status.success() {
-            Ok(serde_json::from_slice::<ActionResponse>(&output.stdout).ok())
+            parse_source_action_response(command_name, pane_key, &output.stdout)
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
             Err(if stderr.is_empty() {
@@ -1876,6 +1876,34 @@ impl Drop for ExtensionLookupWorker {
     }
 }
 
+fn parse_source_action_response(
+    command_name: &str,
+    pane_key: &PaneKey,
+    payload: &[u8],
+) -> Result<Option<ActionResponse>, String> {
+    match serde_json::from_slice::<ActionResponse>(payload) {
+        Ok(response) => Ok(Some(response)),
+        Err(error) if command_name == "focus" => {
+            let mut response = ActionResponse::new_focus(pane_key.pane_id.as_str());
+            response.caller_display_activation = Some(DisplayActivationResponse {
+                attempted: false,
+                ok: false,
+                provider: None,
+                fallback_attempted: false,
+                code: Some("source.display.response-invalid".to_string()),
+                message: Some(format!(
+                    "focused pane, but the source action response was not valid JSON: {error}"
+                )),
+            });
+            Ok(Some(response))
+        }
+        Err(error) => Err(format!(
+            "{command_name} succeeded but returned invalid action JSON for {}: {error}",
+            pane_key.stable_id()
+        )),
+    }
+}
+
 fn rotating_capture_batch(
     pane_ids: &[crate::app::PaneId],
     cursor: &mut usize,
@@ -2763,6 +2791,28 @@ mod tests {
                 )),
                 SelectionTarget::Pane(pane_key),
             ]
+        );
+    }
+
+    #[test]
+    fn malformed_focus_action_json_becomes_a_display_warning() {
+        let pane_key = crate::app::PaneKey::new(
+            crate::app::SourceId::new("remote-dev"),
+            crate::app::PaneId::new("%42"),
+        );
+
+        let response = parse_source_action_response("focus", &pane_key, b"not-json")
+            .expect("focus success should remain separate from response parsing")
+            .expect("warning response");
+
+        assert!(response.ok);
+        let warning = response
+            .caller_display_activation
+            .expect("parse failure should remain visible");
+        assert!(!warning.ok);
+        assert_eq!(
+            warning.code.as_deref(),
+            Some("source.display.response-invalid")
         );
     }
 }

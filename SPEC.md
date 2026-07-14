@@ -360,7 +360,7 @@ yet expose a stable contract.
 - `foreman agents --json` returns schema-versioned JSON with inventory summary, entries, and diagnostics.
 - `foreman agents --json --all-panes` includes non-agent panes.
 - `foreman agents --json --pull-requests` includes best-effort pull request metadata.
-- `foreman focus --pane <pane-id> --json` focuses the requested tmux pane and reports success or failure in machine-readable form, with display activation reported separately when attempted.
+- `foreman focus --pane <pane-id> --json` focuses the requested tmux pane and reports success or failure in machine-readable form. Source-host activation remains in `displayActivation`; requesting-host activation is additive in `callerDisplayActivation`.
 - `foreman send --pane <pane-id> --stdin --json` sends stdin to the requested pane and reports bytes sent.
 - `foreman send --pane <pane-id> --text <text> --json` sends explicit text to the requested pane and reports bytes sent.
 - Control API diagnostics are visible to clients when tmux or runtime inventory is unavailable.
@@ -621,7 +621,7 @@ mise run ci
 
 - Given the dashboard is running in popup mode, when the operator focuses a target pane successfully, tmux switches to that pane and the dashboard closes even if optional display activation reports a warning.
 - Given a source has a current local Ghostty display registration, focus activates the exact stable terminal UUID through Ghostty's AppleScript `focus` command before trying the source's activation-command fallback; terminal title, tty, and pid are not target selectors.
-- Given the registered terminal is closed or unavailable, tmux focus remains successful and the JSON/runtime result includes an actionable `source.display.*` diagnostic.
+- Given the registered terminal is closed or unavailable, tmux focus remains successful and the JSON/runtime result includes an actionable `source.display.*` diagnostic. Caller-side activation-command fallback is bounded to two seconds.
 
 **A10. Direct input**
 

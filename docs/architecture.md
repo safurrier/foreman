@@ -344,7 +344,7 @@ boundaries unless an ADR changes them.
 | src/services/notifications.rs | Notification policy, configured cooldowns, backend-order wiring, backend fallback, and dispatch seams | `SPEC.md` |
 | src/services/pull_requests.rs | Pull request lookup, browser/copy effects, and degradation behavior | `SPEC.md` |
 | src/services/system_stats.rs | Header-level CPU and memory pressure snapshots behind a small service seam | This document |
-| src/source_display.rs | Machine-local display registration, ownership lifecycle, provider/AppleScript boundary, health, and activation-command fallback resolution | ADRs 0003 and 0004 |
+| src/source_display/ | Machine-local display registration facade plus internal registry, Ghostty, command-runner, health, and fallback-resolution modules | ADRs 0003 and 0004 |
 | src/services/logging.rs | Run logs, latest-run pointer, retention cleanup, and bootstrap/inventory summaries | `SPEC.md` |
 
 ---

@@ -319,7 +319,9 @@ foreman sources display register remote-dev \
   --json
 ```
 
-Focus first switches tmux, then reloads the current local registration and asks Ghostty to `focus` that exact terminal. If the registration is unavailable or the terminal was closed, Foreman reports `source.display.unavailable` (or a more specific `source.display.*` code) while preserving successful tmux focus. The existing source `activation_command` runs afterward as a compatibility fallback. Activation-command-only configurations continue to work unchanged.
+Focus first switches tmux, then reloads the current local registration and asks Ghostty to `focus` that exact terminal. If the registration is unavailable or the terminal was closed, Foreman reports `source.display.unavailable` (or a more specific `source.display.*` code) while preserving successful tmux focus. The existing source `activation_command` runs afterward as a compatibility fallback. Activation-command-only configurations continue to work; Foreman bounds caller-side fallback commands to two seconds so a broken script cannot freeze focus.
+
+Focus JSON keeps source-host or companion-host activation in the existing `displayActivation` field. When the requesting Foreman process also tries its own local registration or command, that second outcome appears additively as `callerDisplayActivation`. A display warning never changes the top-level successful tmux `ok` result.
 
 The first AppleScript request may trigger macOS Automation/TCC consent. If capture or doctor reports a provider error, keep Ghostty running and allow the Foreman launcher (terminal app or `foreman` binary host) to control Ghostty under **System Settings → Privacy & Security → Automation**. `sources display doctor` probes the exact terminal; `sources list --json` reports whether a registration exists without triggering a focus action, and `sources doctor <source> --json` includes both tmux/source and display health.
 
