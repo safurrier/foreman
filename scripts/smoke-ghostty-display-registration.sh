@@ -100,7 +100,7 @@ expected_uuid = sys.argv[3]
 renamed_title = sys.argv[4]
 assert capture["registration"]["identity"]["terminalUuid"] == expected_uuid
 assert focus["ok"] is True, focus
-activation = focus.get("displayActivation")
+activation = focus.get("callerDisplayActivation")
 assert activation and activation["attempted"] is True and activation["ok"] is True, focus
 assert activation["provider"] == "ghostty", activation
 print(json.dumps({
@@ -109,6 +109,6 @@ print(json.dumps({
     "terminalUuid": expected_uuid,
     "renamedTitle": renamed_title,
     "tmuxServer": "isolated",
-    "displayActivation": activation,
+    "callerDisplayActivation": activation,
 }, indent=2))
 PY
