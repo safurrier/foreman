@@ -1,0 +1,36 @@
+{
+  "attached_artifacts": [],
+  "branch": "feature/ghostty-display-identity",
+  "diff_hash": "sha256:cc0e3cf49cf74ce26f114ec228abfdb86550dcf05111336a051cd343e98aa0d3",
+  "dirty": false,
+  "event_count": 18,
+  "event_seq": 18,
+  "evidence_count": 5,
+  "evidence_ids": [
+    "ev_20260714_073351_093086",
+    "ev_20260714_073419_597062",
+    "ev_20260714_073429_108898",
+    "ev_20260714_073447_384204",
+    "ev_20260714_073455_948526"
+  ],
+  "file_hashes": {
+    "README.md": "sha256:f181c1ef3b8726b1351e69fb148d804f2bf1d9a792f5a19b05d44d2d8742dc7b",
+    "artifacts/README.md": "sha256:c4bad9d4652f296a7e4dcf175fe1dd0c66a99ec0b74941cd45c499e84792436c"
+  },
+  "files": [
+    "README.md",
+    "meta.json",
+    "artifacts/README.md"
+  ],
+  "generated_at": "2026-07-14T14:39:51.960275+00:00",
+  "generated_by": "hk export --format handoff-dir",
+  "git_sha": "ac20727",
+  "output_path": ".ai/hk/2026-07-14-072828-ghostty-display-identity",
+  "ready": false,
+  "ready_status": "not-ready",
+  "schema_version": 1,
+  "sync_status": "needs-sync",
+  "target_root": ".",
+  "target_scope": ".",
+  "work_id": "2026-07-14-072828-ghostty-display-identity"
+}

@@ -1,20 +1,23 @@
 ---
 title: ADR 0003 — Remote jump and terminal activation
 summary: Decide how Foreman should focus both a remote tmux pane and the local terminal tab that displays that source.
-status: proposed
-updated: 2026-06-08
+status: accepted
+updated: 2026-07-14
 related:
   code:
     - src/runtime.rs
+    - src/source_display/
     - src/sources.rs
   docs:
     - docs/operator-guide.md
     - docs/decisions/0002-source-aggregation-and-remote-ssh.md
+  issues:
+    - https://github.com/safurrier/foreman/issues/34
 ---
 
 # 0003: Remote Jump and Terminal Activation
 
-Status: proposed
+Status: accepted
 
 ## Context
 
@@ -141,23 +144,19 @@ Decision: keep as long-term direction, not the next implementation.
 
 ## Decision
 
-Ship the next jump-to slice in this order:
+Ship jump-to as two structurally separate outcomes: tmux focus first, then best-effort local display activation. The compatibility activation command remains supported.
 
-1. Keep remote tmux focus as a fallback.
-2. Add a configurable per-source activation command with clear diagnostics.
-3. Prototype Ghostty AppleScript as an explicit strategy for Alex's setup.
-4. Revisit source companion registration only if configurable/Ghostty activation
-   proves too brittle or if Foreman needs persistent source state for other
-   reasons.
+ADR 0004 Slice 6 completes the native path with a machine-local source display registry. Foreman captures Ghostty's official stable terminal UUID and activates the exact terminal through its AppleScript `focus` command. Window/tab IDs and title are retained only for diagnostics; title substring, tty, and pid never select the target. A current registration is attempted before the activation command fallback.
+
+Display identity stays on the machine that owns the display. It is not copied into SSH, snapshot, or companion registration payloads. Companion-host focus reads the companion process's own local registry.
 
 ## Validation requirements
 
 Before implementing terminal activation, prove:
 
-- Remote source focus still works without activation configured.
-- Activation command failure does not make remote tmux focus look failed.
+- Remote source focus still works without display registration or activation configured.
+- Display or activation-command failure does not make successful tmux focus look failed.
 - Placeholder expansion is shell-safe.
-- Ghostty AppleScript proof commands work on the target macOS/Ghostty version, or
-  the feature reports an actionable unavailable diagnostic.
-- `sources doctor` can show enough tmux endpoint detail to explain why a Coder
-  tab and noninteractive SSH source might see different sessions.
+- Ghostty AppleScript capture and focus use the stable terminal UUID, or report an actionable `source.display.*` diagnostic for provider, platform, TCC, or closed-terminal failures.
+- Replacement creates a new opaque ownership handle; unregister compares the current handle before deletion.
+- `sources list`, `sources doctor`, and `sources display doctor` expose local registration health alongside tmux endpoint diagnostics.

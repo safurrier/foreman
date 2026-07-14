@@ -287,6 +287,46 @@ clients must treat `sourcePaneId` as the stable row/action identity and `paneId`
 as source-local display data. If a source is unreachable, Foreman reports a
 source diagnostic and continues rendering healthy sources.
 
+### Exact Ghostty display registration
+
+On macOS with Ghostty 1.3 or later, register the currently focused Ghostty terminal as the display for a source:
+
+```bash
+foreman sources display capture remote-dev --provider ghostty --json
+foreman sources display list remote-dev --json
+foreman sources display doctor remote-dev --json
+```
+
+Capture stores Ghostty's exact stable terminal UUID in Foreman's local state directory. Optional tab/window IDs and the current title are diagnostics only. Foreman never selects a display by title substring, tty, or pid, and never sends display identity over SSH, snapshots, or the companion protocol.
+
+The capture result includes an opaque `ownershipHandle`. Save it in the process or script that owns cleanup. A later capture/register replaces the current registration and returns a new handle; cleanup from the old owner cannot delete the replacement:
+
+```bash
+foreman sources display unregister remote-dev \
+  --handle "$FOREMAN_DISPLAY_OWNERSHIP_HANDLE" \
+  --json
+```
+
+Automation that already knows official stable IDs may register them explicitly:
+
+```bash
+foreman sources display register remote-dev \
+  --provider ghostty \
+  --terminal-uuid "$GHOSTTY_TERMINAL_UUID" \
+  --tab-id "$GHOSTTY_TAB_ID" \
+  --window-id "$GHOSTTY_WINDOW_ID" \
+  --diagnostic-title "$GHOSTTY_TITLE" \
+  --json
+```
+
+Focus first switches tmux, then reloads the current local registration and asks Ghostty to `focus` that exact terminal. If the registration is unavailable or the terminal was closed, Foreman reports `source.display.unavailable` (or a more specific `source.display.*` code) while preserving successful tmux focus. The existing source `activation_command` runs afterward as a compatibility fallback. Activation-command-only configurations continue to work; Foreman bounds caller-side fallback commands to two seconds so a broken script cannot freeze focus.
+
+Focus JSON keeps source-host or companion-host activation in the existing `displayActivation` field. When the requesting Foreman process also tries its own local registration or command, that second outcome appears additively as `callerDisplayActivation`. A display warning never changes the top-level successful tmux `ok` result.
+
+The first AppleScript request may trigger macOS Automation/TCC consent. If capture or doctor reports a provider error, keep Ghostty running and allow the Foreman launcher (terminal app or `foreman` binary host) to control Ghostty under **System Settings → Privacy & Security → Automation**. `sources display doctor` probes the exact terminal; `sources list --json` reports whether a registration exists without triggering a focus action, and `sources doctor <source> --json` includes both tmux/source and display health.
+
+For an opt-in live proof, run `FOREMAN_GHOSTTY_DISPLAY_SMOKE=1 mise run smoke-ghostty-display` from the Ghostty terminal Foreman may briefly rename and focus. The smoke uses only a named isolated tmux server and restores/removes its temporary state on exit.
+
 Snapshot sources are read-only cached inventories. They are useful for the first
 source companion/prewarmer slice and for manual workstation → remote-host
 visibility checks:

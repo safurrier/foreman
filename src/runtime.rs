@@ -14,7 +14,7 @@ use crate::integrations::{
     apply_configured_claude_signals, apply_configured_codex_signals, apply_configured_pi_signals,
     ClaudeNativeOverlaySummary, CodexNativeOverlaySummary, PiNativeOverlaySummary,
 };
-use crate::services::control_api::{AgentEntry, AgentsResponse};
+use crate::services::control_api::{ActionResponse, AgentEntry, AgentsResponse};
 use crate::services::extensions::{collect_workspace_extensions, ControlExtensionCard};
 use crate::services::logging::RunLogger;
 use crate::services::notifications::{
@@ -26,6 +26,10 @@ use crate::services::pull_requests::{
 use crate::services::startup_cache::{current_time_ms, write_startup_cache};
 use crate::services::system_stats::{SysinfoSystemStatsBackend, SystemStatsService};
 use crate::services::ui_preferences::{save_ui_preferences, PersistedUiPreferences};
+use crate::source_display::{
+    activate_registered_display_or_fallback, DisplayActivationResponse, SourceDisplayRegistry,
+    SystemActivationCommandRunner, SystemDisplayProvider,
+};
 use crate::sources::{
     CompanionSource, ForemanSource, SnapshotSource, SourceConfig, SourceDescriptor,
     SourceDiagnostic, SourceScope, SshSource,
@@ -527,14 +531,30 @@ impl DashboardRuntime {
         Ok(())
     }
 
-    fn focus_pane_key(&self, pane_key: &PaneKey) -> Result<(), String> {
+    fn focus_pane_key(&self, pane_key: &PaneKey) -> Result<Vec<DisplayActivationResponse>, String> {
         if pane_key.is_local() {
-            return self
-                .tmux
+            self.tmux
                 .focus_pane(&pane_key.pane_id)
-                .map_err(|error| error.to_string());
+                .map_err(|error| error.to_string())?;
+            let source_id = crate::sources::SourceId::new(pane_key.source_id.as_str());
+            let activation = activate_registered_display_or_fallback(
+                &SourceDisplayRegistry::for_log_dir(&self.runtime.log_dir),
+                &SystemDisplayProvider::default(),
+                &SystemActivationCommandRunner::login_shell(),
+                &source_id,
+                pane_key.pane_id.as_str(),
+                None,
+                Duration::from_millis(2_000),
+            );
+            return Ok(activation.into_iter().collect());
         }
-        self.run_source_action_command("focus", pane_key, None)
+        let response = self.run_source_action_command("focus", pane_key, None)?;
+        let mut activation = Vec::new();
+        if let Some(response) = response {
+            activation.extend(response.display_activation);
+            activation.extend(response.caller_display_activation);
+        }
+        Ok(activation)
     }
 
     fn send_input_to_pane_key(&self, pane_key: &PaneKey, text: &str) -> Result<(), String> {
@@ -546,48 +566,7 @@ impl DashboardRuntime {
                 .map_err(|error| error.to_string());
         }
         self.run_source_action_command("send", pane_key, Some(text))
-    }
-
-    fn activate_source_display(&self, pane_key: &PaneKey) -> Result<(), String> {
-        if pane_key.is_local() {
-            return Ok(());
-        }
-        let source_id = crate::sources::SourceId::new(pane_key.source_id.as_str());
-        let Some(source_config) = self.runtime.sources.get(&source_id) else {
-            return Ok(());
-        };
-        let Some(jump) = source_config.jump() else {
-            return Ok(());
-        };
-        let Some(command_template) = jump.activation_command.as_deref() else {
-            return Ok(());
-        };
-        if command_template.trim().is_empty() {
-            return Ok(());
-        }
-
-        let command = expand_activation_command(command_template, pane_key);
-        let output = Command::new("sh")
-            .arg("-lc")
-            .arg(&command)
-            .env("FOREMAN_SOURCE_ID", pane_key.source_id.as_str())
-            .env("FOREMAN_PANE_ID", pane_key.pane_id.as_str())
-            .output()
-            .map_err(|error| format!("failed to run activation command: {error}"))?;
-        if output.status.success() {
-            return Ok(());
-        }
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let detail = if !stderr.is_empty() { stderr } else { stdout };
-        if detail.is_empty() {
-            Err(format!(
-                "activation command exited with status {}",
-                output.status
-            ))
-        } else {
-            Err(detail)
-        }
+            .map(|_| ())
     }
 
     fn run_source_action_command(
@@ -595,12 +574,14 @@ impl DashboardRuntime {
         command_name: &str,
         pane_key: &PaneKey,
         stdin_text: Option<&str>,
-    ) -> Result<(), String> {
+    ) -> Result<Option<ActionResponse>, String> {
         let exe = std::env::current_exe().map_err(|error| error.to_string())?;
         let mut command = Command::new(exe);
         command
             .arg("--config-file")
             .arg(&self.runtime.config_file)
+            .arg("--log-dir")
+            .arg(&self.runtime.log_dir)
             .arg("--source")
             .arg(pane_key.source_id.as_str())
             .arg(command_name)
@@ -625,7 +606,7 @@ impl DashboardRuntime {
             .wait_with_output()
             .map_err(|error| error.to_string())?;
         if output.status.success() {
-            Ok(())
+            parse_source_action_response(command_name, pane_key, &output.stdout)
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
             Err(if stderr.is_empty() {
@@ -645,21 +626,37 @@ impl DashboardRuntime {
                     pane_key,
                     close_after,
                 } => match self.focus_pane_key(&pane_key) {
-                    Ok(()) => match self.activate_source_display(&pane_key) {
-                        Ok(()) => {
-                            self.clear_alert_source(OperatorAlertSource::Tmux)?;
-                            if close_after {
-                                should_quit = true;
-                            }
-                        }
-                        Err(error) => {
+                    Ok(activation_outcomes) => {
+                        self.clear_alert_source(OperatorAlertSource::Tmux)?;
+                        let warnings = activation_outcomes
+                            .iter()
+                            .filter(|outcome| !outcome.ok || outcome.message.is_some())
+                            .map(|outcome| {
+                                let code = outcome
+                                    .code
+                                    .as_deref()
+                                    .unwrap_or("source.display.unavailable");
+                                let message = outcome
+                                    .message
+                                    .as_deref()
+                                    .unwrap_or("display activation failed");
+                                format!("{code}: {message}")
+                            })
+                            .collect::<Vec<_>>();
+                        if !warnings.is_empty() {
                             self.record_alert(
                                 OperatorAlertSource::Tmux,
                                 OperatorAlertLevel::Warn,
-                                format!("Focused pane, but terminal activation failed: {error}"),
+                                format!(
+                                    "Focused pane, but display activation needs attention: {}",
+                                    warnings.join("; ")
+                                ),
                             )?;
                         }
-                    },
+                        if close_after {
+                            should_quit = true;
+                        }
+                    }
                     Err(error) => {
                         self.record_alert(
                             OperatorAlertSource::Tmux,
@@ -1879,23 +1876,32 @@ impl Drop for ExtensionLookupWorker {
     }
 }
 
-fn expand_activation_command(template: &str, pane_key: &PaneKey) -> String {
-    template
-        .replace("{source_id}", &shell_quote(pane_key.source_id.as_str()))
-        .replace("{pane_id}", &shell_quote(pane_key.pane_id.as_str()))
-}
-
-fn shell_quote(value: &str) -> String {
-    if value.is_empty() {
-        return "''".to_string();
+fn parse_source_action_response(
+    command_name: &str,
+    pane_key: &PaneKey,
+    payload: &[u8],
+) -> Result<Option<ActionResponse>, String> {
+    match serde_json::from_slice::<ActionResponse>(payload) {
+        Ok(response) => Ok(Some(response)),
+        Err(error) if command_name == "focus" => {
+            let mut response = ActionResponse::new_focus(pane_key.pane_id.as_str());
+            response.caller_display_activation = Some(DisplayActivationResponse {
+                attempted: false,
+                ok: false,
+                provider: None,
+                fallback_attempted: false,
+                code: Some("source.display.response-invalid".to_string()),
+                message: Some(format!(
+                    "focused pane, but the source action response was not valid JSON: {error}"
+                )),
+            });
+            Ok(Some(response))
+        }
+        Err(error) => Err(format!(
+            "{command_name} succeeded but returned invalid action JSON for {}: {error}",
+            pane_key.stable_id()
+        )),
     }
-    if value
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '_' | '-' | ':' | '='))
-    {
-        return value.to_string();
-    }
-    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn rotating_capture_batch(
@@ -2785,6 +2791,28 @@ mod tests {
                 )),
                 SelectionTarget::Pane(pane_key),
             ]
+        );
+    }
+
+    #[test]
+    fn malformed_focus_action_json_becomes_a_display_warning() {
+        let pane_key = crate::app::PaneKey::new(
+            crate::app::SourceId::new("remote-dev"),
+            crate::app::PaneId::new("%42"),
+        );
+
+        let response = parse_source_action_response("focus", &pane_key, b"not-json")
+            .expect("focus success should remain separate from response parsing")
+            .expect("warning response");
+
+        assert!(response.ok);
+        let warning = response
+            .caller_display_activation
+            .expect("parse failure should remain visible");
+        assert!(!warning.ok);
+        assert_eq!(
+            warning.code.as_deref(),
+            Some("source.display.response-invalid")
         );
     }
 }

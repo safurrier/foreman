@@ -243,14 +243,7 @@ pub struct ControlDiagnostic {
     pub message: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DisplayActivationResponse {
-    pub attempted: bool,
-    pub ok: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub message: Option<String>,
-}
+pub use crate::source_display::DisplayActivationResponse;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -264,8 +257,13 @@ pub struct ActionResponse {
     #[serde(default = "default_source_pane_id")]
     pub source_pane_id: String,
     pub bytes_sent: Option<usize>,
+    /// Source-host display activation. This retains the original JSON field for
+    /// compatibility with clients that predate caller-side display activation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_activation: Option<DisplayActivationResponse>,
+    /// Additional activation performed by the requesting Foreman process.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caller_display_activation: Option<DisplayActivationResponse>,
 }
 
 impl ActionResponse {
@@ -357,6 +355,7 @@ pub fn focus_response(pane_id: &str) -> ActionResponse {
         source_pane_id,
         bytes_sent: None,
         display_activation: None,
+        caller_display_activation: None,
     }
 }
 
@@ -371,6 +370,7 @@ pub fn send_response(pane_id: &str, bytes_sent: usize) -> ActionResponse {
         source_pane_id,
         bytes_sent: Some(bytes_sent),
         display_activation: None,
+        caller_display_activation: None,
     }
 }
 
@@ -526,6 +526,63 @@ mod tests {
     use super::*;
     use crate::app::{inventory, HarnessKind, PaneBuilder, SessionBuilder, WindowBuilder};
     use std::path::PathBuf;
+
+    #[test]
+    fn legacy_focus_json_without_new_display_fields_stays_compatible() {
+        let response: ActionResponse = serde_json::from_str(
+            r#"{
+                "schemaVersion": 1,
+                "ok": true,
+                "action": "focus",
+                "paneId": "%42",
+                "sourceId": "local",
+                "sourcePaneId": "local::%42",
+                "displayActivation": {
+                    "attempted": true,
+                    "ok": true
+                }
+            }"#,
+        )
+        .expect("legacy action response should deserialize");
+
+        let activation = response
+            .display_activation
+            .expect("legacy display activation should remain present");
+        assert_eq!(activation.provider, None);
+        assert!(!activation.fallback_attempted);
+        assert_eq!(response.caller_display_activation, None);
+    }
+
+    #[test]
+    fn focus_success_remains_separate_from_display_activation_failure() {
+        let mut response = focus_response("%42");
+        response.display_activation = Some(DisplayActivationResponse {
+            attempted: true,
+            ok: false,
+            provider: Some(crate::source_display::DisplayProviderKind::Ghostty),
+            fallback_attempted: false,
+            code: Some("source.display.unavailable".to_string()),
+            message: Some("registered terminal is closed".to_string()),
+        });
+        response.caller_display_activation = Some(DisplayActivationResponse {
+            attempted: true,
+            ok: true,
+            provider: None,
+            fallback_attempted: true,
+            code: None,
+            message: None,
+        });
+
+        let value = serde_json::to_value(response).unwrap();
+        assert_eq!(value["ok"], true);
+        assert_eq!(value["action"], "focus");
+        assert_eq!(value["displayActivation"]["ok"], false);
+        assert_eq!(
+            value["displayActivation"]["code"],
+            "source.display.unavailable"
+        );
+        assert_eq!(value["callerDisplayActivation"]["ok"], true);
+    }
 
     #[test]
     fn agents_response_defaults_to_agent_panes_only() {

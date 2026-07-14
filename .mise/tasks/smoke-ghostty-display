@@ -1,0 +1,4 @@
+#!/bin/sh
+# MISE description="Opt-in exact Ghostty display capture/title-change/focus smoke"
+set -eu
+exec "${MISE_PROJECT_ROOT}/scripts/smoke-ghostty-display-registration.sh"

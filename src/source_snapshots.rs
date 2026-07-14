@@ -426,6 +426,25 @@ mod tests {
     }
 
     #[test]
+    fn existing_source_registration_json_without_display_identity_stays_compatible() {
+        let registration: SourceRegistrationEnvelope = serde_json::from_str(
+            r#"{
+                "schemaVersion": 1,
+                "sourceId": "mac",
+                "label": "Mac",
+                "registeredAtUnixMs": 1000,
+                "heartbeatAtUnixMs": 1000
+            }"#,
+        )
+        .expect("legacy source companion registration should deserialize");
+
+        assert_eq!(registration.source_id, "mac");
+        assert!(registration.snapshot_path.is_none());
+        assert!(registration.companion_endpoint.is_none());
+        assert!(registration.display_activation_command.is_none());
+    }
+
+    #[test]
     fn snapshot_store_marks_stale_registration() {
         let dir = tempfile::tempdir().unwrap();
         let store = SourceSnapshotStore::new(dir.path());
