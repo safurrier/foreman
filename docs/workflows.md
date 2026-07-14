@@ -174,24 +174,27 @@ working directory:
 then `foreman --doctor --doctor-json --doctor-strict --repo <repo-root>`. It
 writes setup progress and diagnostics to stderr, and exactly one JSON receipt to
 stdout. It is safe to rerun because it delegates setup convergence to the
-existing setup and doctor commands. It exits zero only when both stages pass;
-on failure it returns the failing setup or strict-doctor exit code after still
-emitting its receipt. The receipt schema is `foreman.agent.setup-receipt`,
+existing setup and doctor commands. It exits zero only when both stages and
+the doctor receipt schema pass; schema validation exits `1`, while setup or
+strict-doctor failures preserve their stage exit code after still emitting the
+receipt. The receipt schema is `foreman.agent.setup-receipt`,
 version `1`, with `ready`, per-stage `setup` and `doctor` status/exit codes, the
 validated doctor `report`, doctor-derived `warnings`/`errors`, canonical
 `commands`, and `logs` (`directory` plus an optional `latest` path).
 
 `.agents/resume` is read-only: it does not invoke setup, doctor fixes, HK
 lifecycle writes, runtime startup, or git checkout operations. It reports the
-current branch/detached/dirty state, runs the report-only doctor JSON command,
+repository-state availability plus current branch/detached/dirty state, runs the report-only doctor JSON command,
 and, when installed, runs `hk status --target <repo-root> --json`. It emits one
 `foreman.agent.resume-report` version `1` JSON document on stdout; stderr is
 reserved for diagnostics. Its report contains `repo`, `doctor`, optional-tool
 availability/status, doctor-derived `warnings`/`errors`, canonical `commands`,
 and `logs`. Missing optional HK or `latest.log` are warnings, not failures.
-Resume exits nonzero only when Foreman doctor cannot be collected (including a
-missing `foreman` command); findings reported by the non-strict doctor remain in
-the JSON report for the caller to decide. Both entrypoints report the existing
+Resume exits nonzero when Foreman doctor cannot be collected, its JSON violates
+the known schema, or `foreman` is missing; findings reported by the non-strict
+doctor remain in the JSON report for the caller to decide. Missing or unusable
+Git metadata is a structured `repo-state-unavailable` warning and sets
+`repo.status` instead of pretending the checkout is clean. Both entrypoints report the existing
 log location from Foreman's `FOREMAN_LOG_DIR`, `XDG_STATE_HOME`, or default
 state-directory contract; relative overrides resolve from the repository root,
 matching the doctor invocation. They do not create or parse logs.
@@ -203,10 +206,14 @@ than through a shell. This preserves paths containing spaces or quotes. Both
 `{status, stage, code, message, next_command, finding}`. `status` is `warning`
 or `error`; `next_command` and `finding` are optional (`null`) and otherwise use
 the command object and a validated canonical doctor finding. Doctor reports
-must have the known `{repo_path, findings, fixes}` envelope; malformed but valid
-JSON is surfaced as a `doctor-schema-invalid` error with `doctor.report: null`,
-not converted into an empty finding list. Doctor finding severities are the
-canonical `ok`, `info`, `warn`, or `error` values. Missing Foreman diagnostics
+must have exactly the known `{repo_path, findings, fixes}` envelope; malformed
+but valid JSON is surfaced as a `doctor-schema-invalid` error with
+`doctor.report: null`, not converted into an empty finding list. Each finding
+requires `id`, severity, area, nullable provider/pane/repo/detail/next-step,
+summary, and string evidence. Each fix requires nullable provider/preview plus
+path, message, and a `planned`, `written`, `unchanged`, or `skipped` status.
+Doctor finding severities are the canonical `ok`, `info`, `warn`, or `error`
+values. Missing Foreman diagnostics
 recommend `mise run install-local` from the repository root before retrying
 setup.
 

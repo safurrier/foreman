@@ -12,13 +12,21 @@ trap 'rm -f "$DOCTOR_FILE" "$HK_FILE"' EXIT HUP INT TERM
 branch=""
 detached=0
 dirty=0
+repo_status=available
 if ! command -v git >/dev/null 2>&1; then
+  repo_status=git-unavailable
   printf '%s\n' 'foreman agent resume: git is not installed; repository state is unavailable' >&2
 elif ! git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  repo_status=metadata-unavailable
   printf '%s\n' 'foreman agent resume: repository metadata is unavailable' >&2
 else
   branch="$(git -C "$ROOT" symbolic-ref -q --short HEAD)" || detached=1
-  if [ -n "$(git -C "$ROOT" status --porcelain)" ]; then
+  status_output="$(git -C "$ROOT" status --porcelain)"
+  status_exit=$?
+  if [ "$status_exit" -ne 0 ]; then
+    repo_status=metadata-unavailable
+    printf '%s\n' 'foreman agent resume: git status failed; dirty state is unavailable' >&2
+  elif [ -n "$status_output" ]; then
     dirty=1
   fi
 fi
@@ -59,6 +67,7 @@ fi
 FOREMAN_AGENT_BRANCH="$branch" \
 FOREMAN_AGENT_DETACHED="$detached" \
 FOREMAN_AGENT_DIRTY="$dirty" \
+FOREMAN_AGENT_REPO_STATUS="$repo_status" \
 FOREMAN_AGENT_DOCTOR_STATUS="$doctor_status" \
 FOREMAN_AGENT_DOCTOR_EXIT="$doctor_exit" \
 FOREMAN_AGENT_DOCTOR_FILE="$doctor_receipt_file" \
