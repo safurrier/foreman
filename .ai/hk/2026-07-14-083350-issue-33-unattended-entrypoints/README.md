@@ -56,6 +56,7 @@ with open("Cargo.docker.toml", "rb") as f: docker = tomllib.load(f)
 assert set(main["dependencies"]) == set(docker["dependencies"])
 PY
 '`: pass (exit 0) — validates: CI stabilization keeps Docker proof independent, syncs direct Docker dependencies, and preserves local heavy-gate behavior — `<local HK state not exported>`
+- `mise run verify-release`: pass (exit 0) — validates: Decomposed PR Full Validation preserves unique proof while release gauntlet passes locally — `<local HK state not exported>`
 
 ## Readiness
 - context: info — context recorded
@@ -63,10 +64,10 @@ PY
 - decision: pass — decision and spec reflection recorded
 - validation: pass — validation evidence with rationale recorded
 - review: pass — external-enough review recorded
-- profile-check:fast-gate: pass — validation dangerously skipped: fast-gate; reason: The new CI-only split does not change runtime code; prior fast-gate attempts pass all changed entrypoint tests and 375 Rust tests before the unchanged tmux timing flake.; mitigation: Quality Gate and dedicated Real Agent Entrypoints are green; final CI rerun will separately prove Docker Build and Full Validation.
-- profile-check:heavy-gate: pass — validation dangerously skipped: heavy-gate; reason: Local Docker daemon is unavailable, so the split Docker image lane cannot run locally; Full Validation previously loses runner communication during its inline Docker build.; mitigation: The final PR CI now runs Docker Build on a separate Buildx runner and Full Validation without inline Docker; both must pass before merge.
-- profile-check:macos-overlay-required-lane: pass — validation dangerously skipped: macos-overlay-required-lane; reason: No macOS overlay or Swift code changes exist in the CI stabilization diff.; mitigation: Changed surfaces are CI workflow, Docker build metadata, verify orchestration, and docs only.
-- profile-review:codex-review: pass — required profile review recorded: codex-review (matched .github/workflows/ci.yml, .mise/tasks/check, .mise/tasks/smoke-ghostty-display, +20 more)
+- profile-check:fast-gate: pass — validation dangerously skipped: fast-gate; reason: CI-only decomposition does not change runtime code; previous fast-gate attempts pass all changed tests and 375 Rust tests before the unchanged tmux timing flake.; mitigation: Final PR CI independently requires Quality Gate, Real Agent Entrypoints, Docker Build, and Full Validation.
+- profile-check:heavy-gate: pass — validation dangerously skipped: heavy-gate; reason: Local Docker daemon is unavailable, so the complete local heavy gate cannot run here.; mitigation: Release gauntlet and real entrypoint E2E pass locally; final CI must pass Docker Build and decomposed Full Validation.
+- profile-check:macos-overlay-required-lane: pass — validation dangerously skipped: macos-overlay-required-lane; reason: No overlay or Swift code changes exist.; mitigation: CI decomposition and entrypoint reviews passed; changed paths do not affect the overlay.
+- profile-review:codex-review: pass — required profile review recorded: codex-review (matched .github/workflows/ci.yml, .mise/tasks/check, .mise/tasks/smoke-ghostty-display, +19 more)
 
 ## Review
 - subagent / reviewer-fresh-context-gpt-5.6-sol [codex-review]: Issue #33 review requested changes: P1 portable command paths, P1 canonical log resolution, P1 typed/validated receipt schema, and P2 actionable diagnostics. Artifact: .pi-subagents/artifacts/ac0316ba-7c56-4709-8b3b-d67e774e94a7_reviewer_output.md paths: .agents/entrypoint-report.py, .agents/resume, .agents/setup, +30 more. [changes-requested]
@@ -79,6 +80,7 @@ PY
 - subagent / reviewer-fresh-context [codex-review]: Real-E2E review findings fixed: HK receipt is bound to the newly started work item, Harness Kit CI install is pinned to immutable v0.3.0 commit c4bde2dbe1600a4aea7239ed40a500fb175ab182, docs match, and the local real-tool task passes. paths: .github/workflows/ci.yml, .mise/tasks/verify-agent-entrypoints, tests/agent_entrypoints_real_e2e.py, +1 more. [accepted]
 - subagent / reviewer-fresh-context [codex-review]: Targeted context/docs review replaced prose-fragile assertions with exact entrypoint and workflow-link checks; 10 focused tests pass and the new real-E2E task is documented across agent/human entry surfaces. paths: tests/agent_entrypoints_test.py. [accepted]
 - subagent / reviewer-fresh-context [codex-review]: Fresh CI review passed: local verify still builds Docker, PR Full Validation skips only its Docker subphase, dedicated cache-aware Docker Build preserves image proof, release compile concurrency is bounded, direct dependencies are synchronized, and docs match. paths: .github/workflows/ci.yml, .mise/tasks/verify, Cargo.docker.toml, +2 more. [accepted]
+- subagent / reviewer-fresh-context [codex-review]: Fresh review passed: local verify is restored unchanged; PR Quality Gate, Real Agent Entrypoints, Docker Build, and decomposed Full Validation preserve every unique proof without rerunning duplicated phases. paths: .github/workflows/ci.yml, docs/workflows.md. [accepted]
 
 ## Sync exclusions
 - .pi-subagents: Runner-provided prompts, transcripts, and required child output are local orchestration artifacts, not repository source.
@@ -97,3 +99,9 @@ PY
 - validation: fast-gate — reason: The new CI-only split does not change runtime code; prior fast-gate attempts pass all changed entrypoint tests and 375 Rust tests before the unchanged tmux timing flake.; mitigation: Quality Gate and dedicated Real Agent Entrypoints are green; final CI rerun will separately prove Docker Build and Full Validation.
 - validation: heavy-gate — reason: Local Docker daemon is unavailable, so the split Docker image lane cannot run locally; Full Validation previously loses runner communication during its inline Docker build.; mitigation: The final PR CI now runs Docker Build on a separate Buildx runner and Full Validation without inline Docker; both must pass before merge.
 - validation: macos-overlay-required-lane — reason: No macOS overlay or Swift code changes exist in the CI stabilization diff.; mitigation: Changed surfaces are CI workflow, Docker build metadata, verify orchestration, and docs only.
+- validation: fast-gate — reason: CI-only decomposition does not change runtime code; previous fast-gate attempts reached only the known unchanged tmux timing flake after all changed tests and 375 Rust tests passed.; mitigation: Final PR CI independently requires Quality Gate, Real Agent Entrypoints, Docker Build, and Full Validation.
+- validation: heavy-gate — reason: Local Docker daemon is unavailable; the complete local heavy gate cannot run here.; mitigation: Release gauntlet passes locally; final CI must pass separate Docker Build and decomposed Full Validation before merge.
+- validation: macos-overlay-required-lane — reason: No overlay or Swift code changes exist.; mitigation: CI/workflow decomposition review passed and all changed entrypoint tests remain green.
+- validation: fast-gate — reason: CI-only decomposition does not change runtime code; previous fast-gate attempts pass all changed tests and 375 Rust tests before the unchanged tmux timing flake.; mitigation: Final PR CI independently requires Quality Gate, Real Agent Entrypoints, Docker Build, and Full Validation.
+- validation: heavy-gate — reason: Local Docker daemon is unavailable, so the complete local heavy gate cannot run here.; mitigation: Release gauntlet and real entrypoint E2E pass locally; final CI must pass Docker Build and decomposed Full Validation.
+- validation: macos-overlay-required-lane — reason: No overlay or Swift code changes exist.; mitigation: CI decomposition and entrypoint reviews passed; changed paths do not affect the overlay.
