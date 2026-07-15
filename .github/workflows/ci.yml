@@ -99,10 +99,16 @@ jobs:
       - name: Setup
         run: mise run setup
 
-      - name: Verify
-        run: mise run verify
-        env:
-          FOREMAN_VERIFY_SKIP_DOCKER_BUILD: "1"
+      - name: Release confidence
+        run: mise run verify-release
+
+      - name: Refresh UX evidence when VHS is available
+        run: |
+          if command -v vhs >/dev/null 2>&1; then
+            mise run verify-ux -- --capture-only
+          else
+            echo "VHS unavailable; UX artifact refresh skipped"
+          fi
 
       - name: Upload validation evidence
         if: always()
