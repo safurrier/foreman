@@ -103,7 +103,10 @@ def verify_rust(cwd=PROJECT_ROOT):
 
     dockerfile = cwd / "Dockerfile"
     if dockerfile.exists():
-        _build_docker_image(cwd)
+        if os.environ.get("FOREMAN_VERIFY_SKIP_DOCKER_BUILD"):
+            log_step("Docker build delegated to the dedicated CI job")
+        else:
+            _build_docker_image(cwd)
 
 
 log_step("Running verification suite")

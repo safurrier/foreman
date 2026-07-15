@@ -487,6 +487,11 @@ manual release assets.
   Colima, make sure Colima is running before debugging the app itself.
 - `.dockerignore` and `Cargo.docker.toml` are part of the heavy validation path.
   They keep Docker context size and dependency-layer churn under control.
+- Local `mise run verify` still builds the Docker image. Pull-request CI delegates
+  that build to the cache-aware **Docker Build** job and sets
+  `FOREMAN_VERIFY_SKIP_DOCKER_BUILD=1` only for **Full Validation**. This keeps
+  Rust/release verification and image proof independent so a release build cannot
+  starve the long-running validation runner.
 - The release pipeline must ship all companion binaries:
   `foreman`, `foreman-claude-hook`, `foreman-codex-hook`, and `foreman-pi-hook`.
 - Historical `.ai` entries are evidence. Stable guidance belongs here, in
