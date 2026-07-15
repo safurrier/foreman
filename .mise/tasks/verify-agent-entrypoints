@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# MISE description="Run real-tool unattended entrypoint E2E in a disposable clone"
+set -euo pipefail
+
+cd "$MISE_PROJECT_ROOT"
+python3 tests/agent_entrypoints_real_e2e.py

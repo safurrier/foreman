@@ -102,6 +102,22 @@ To try the dashboard from the checkout without installing:
 mise run dev
 ```
 
+### Unattended agent setup and resume
+
+Remote coding agents should use the repository-owned machine interface instead
+of reconstructing setup and readiness from prose:
+
+```bash
+./.agents/setup   # idempotent setup + strict doctor receipt
+./.agents/resume  # read-only checkout, doctor, HK, and log status
+```
+
+Both commands reserve stdout for one versioned JSON document and send human
+diagnostics to stderr. Run `mise run verify-agent-entrypoints` to exercise them
+against real mise, Foreman, Git, and HK binaries in an isolated disposable clone.
+See the [workflow guide](docs/workflows.md#unattended-agent-entrypoints) for
+schemas, exit behavior, and path-resolution rules.
+
 ## Native macOS app
 
 The macOS app is a Swift/AppKit/SwiftUI client for Foreman's Rust control API.

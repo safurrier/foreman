@@ -22,6 +22,10 @@ runtime/release-sensitive changes.
 
 **Setup**: `mise run setup`.
 
+**Unattended checkout setup/status**: `.agents/setup` and `.agents/resume`.
+
+**Real unattended entrypoint E2E**: `mise run verify-agent-entrypoints`.
+
 **Fast gate**: `mise run check`.
 
 **Heavy gate**: `mise run verify`.
@@ -36,6 +40,11 @@ Claude, Codex, and Pi E2Es with `mise run verify-native`.
 **Local app**: `mise run dev`.
 
 ## Gotchas
+
+- **DO** use `.agents/setup` and `.agents/resume` as the machine-facing entry
+  contract for unattended repository work. **NOT** reconstruct setup, doctor,
+  HK, or log state from prose or make resume mutate the checkout. **BECAUSE**
+  the entrypoints delegate to canonical owners and emit versioned JSON receipts.
 
 - **DO** use portable `sh` in tmux smoke tests. **NOT** `zsh`. **BECAUSE**
   GitHub Linux runners do not guarantee `zsh`, and panes can exit immediately.

@@ -160,6 +160,73 @@ Setup workflow notes:
 - Setup is safe to rerun. It should converge files instead of creating drift.
 - Setup does not fix already-running panes. Restart the affected agent panes after changing hook wiring.
 
+### Unattended agent entrypoints
+
+Repository-local agents can use the executable entrypoints without assuming a
+working directory:
+
+```bash
+/path/to/foreman/.agents/setup
+/path/to/foreman/.agents/resume
+```
+
+`.agents/setup` is a thin, non-interactive wrapper around `mise run setup` and
+then `foreman --doctor --doctor-json --doctor-strict --repo <repo-root>`. It
+writes setup progress and diagnostics to stderr, and exactly one JSON receipt to
+stdout. It is safe to rerun because it delegates setup convergence to the
+existing setup and doctor commands. It exits zero only when both stages and
+the doctor receipt schema pass; schema validation exits `1`, while setup or
+strict-doctor failures preserve their stage exit code after still emitting the
+receipt. The receipt schema is `foreman.agent.setup-receipt`,
+version `1`, with `ready`, per-stage `setup` and `doctor` status/exit codes, the
+validated doctor `report`, doctor-derived `warnings`/`errors`, canonical
+`commands`, and `logs` (`directory` plus an optional `latest` path).
+
+`.agents/resume` is read-only: it does not invoke setup, doctor fixes, HK
+lifecycle writes, runtime startup, or git checkout operations. It reports
+repository-state availability plus current branch/detached/dirty state, runs
+the report-only doctor JSON command, and, when installed, runs
+`hk status --target <repo-root> --json`. It emits one
+`foreman.agent.resume-report` version `1` JSON document on stdout; stderr is
+reserved for diagnostics. Its report contains `repo`, `doctor`, optional-tool
+availability/status, doctor-derived `warnings`/`errors`, canonical `commands`,
+and `logs`. Missing optional HK or `latest.log` are warnings, not failures.
+Resume exits nonzero when Foreman doctor cannot be collected, its JSON violates
+the known schema, or `foreman` is missing; findings reported by the non-strict
+doctor remain in the JSON report for the caller to decide. Missing or unusable
+Git metadata is a structured `repo-state-unavailable` warning and sets
+`repo.status` instead of pretending the checkout is clean. Both entrypoints
+report the existing log location from Foreman's `FOREMAN_LOG_DIR`,
+`XDG_STATE_HOME`, or default
+state-directory contract; relative overrides resolve from the repository root,
+matching the doctor invocation. They do not create or parse logs.
+
+Receipt `commands` are structured objects with `argv` (an argument array) and
+`cwd` (the repository root), so consumers must execute them directly rather
+than through a shell. This preserves paths containing spaces or quotes. Both
+`warnings` and `errors` are arrays of the same message object:
+`{status, stage, code, message, next_command, finding}`. `status` is `warning`
+or `error`; `next_command` and `finding` are optional (`null`) and otherwise use
+the command object and a validated canonical doctor finding. Doctor reports
+must have exactly the known `{repo_path, findings, fixes}` envelope; malformed
+but valid JSON is surfaced as a `doctor-schema-invalid` error with
+`doctor.report: null`, not converted into an empty finding list. Each finding
+requires `id`, severity, area, nullable provider/pane/repo/detail/next-step,
+summary, and string evidence. Each fix requires nullable provider/preview plus
+path, message, and a `planned`, `written`, `unchanged`, or `skipped` status.
+Doctor finding severities are the canonical `ok`, `info`, `warn`, or `error`
+values. Missing Foreman diagnostics
+recommend `mise run install-local` from the repository root before retrying
+setup.
+
+Run `mise run verify-agent-entrypoints` for the real-tool integration gate. It
+builds Foreman, creates a disposable clone with isolated config/state, invokes
+real mise setup twice, starts a real HK work item, verifies real doctor and
+resume receipts, proves setup convergence and read-only resume through Git
+status snapshots, and removes the clone on success. CI installs Harness Kit
+`v0.3.0` at commit `c4bde2dbe1600a4aea7239ed40a500fb175ab182` and runs this as
+the dedicated **Real Agent Entrypoints** job.
+
 Use `--repo /path/to/repo` when you need to diagnose or set up a different
 checkout. `--setup` is intentionally conservative. It can initialize Foreman
 config, merge Claude and Codex hook wiring, scaffold the Pi extension, and you
@@ -420,6 +487,12 @@ manual release assets.
   Colima, make sure Colima is running before debugging the app itself.
 - `.dockerignore` and `Cargo.docker.toml` are part of the heavy validation path.
   They keep Docker context size and dependency-layer churn under control.
+- Local `mise run verify` remains the complete sequential gate. Pull-request CI
+  decomposes the same evidence: **Quality Gate** owns format/lint/typecheck/tests,
+  **Docker Build** owns the cache-aware image build, and **Full Validation** owns
+  the release gauntlet plus optional UX capture. This avoids rerunning the same
+  build/test phases inside one long-lived hosted runner while preserving each
+  proof as an independent required check.
 - The release pipeline must ship all companion binaries:
   `foreman`, `foreman-claude-hook`, `foreman-codex-hook`, and `foreman-pi-hook`.
 - Historical `.ai` entries are evidence. Stable guidance belongs here, in

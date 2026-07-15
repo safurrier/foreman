@@ -8,11 +8,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /build
 COPY Cargo.docker.toml Cargo.toml
 COPY Cargo.lock* ./
-RUN mkdir src && echo 'fn main() {}' > src/main.rs && cargo build --release && rm -rf src Cargo.toml
+RUN mkdir src && echo 'fn main() {}' > src/main.rs && cargo build --release --jobs 2 && rm -rf src Cargo.toml
 
 COPY Cargo.toml Cargo.lock* ./
 COPY src ./src
-RUN cargo build --release --bins
+RUN cargo build --release --bins --jobs 2
 
 # ── Runtime ───────────────────────────────────
 FROM debian:bookworm-slim

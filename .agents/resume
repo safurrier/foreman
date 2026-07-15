@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# Read-only status receipt for resuming work. stdout is one JSON document.
+set -u
+
+SCRIPT_DIR="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd -P -- "$SCRIPT_DIR/.." && pwd)"
+REPORTER="$SCRIPT_DIR/entrypoint-report.py"
+DOCTOR_FILE="$(mktemp "${TMPDIR:-/tmp}/foreman-agent-doctor.XXXXXX")"
+HK_FILE="$(mktemp "${TMPDIR:-/tmp}/foreman-agent-hk.XXXXXX")"
+trap 'rm -f "$DOCTOR_FILE" "$HK_FILE"' EXIT HUP INT TERM
+
+branch=""
+detached=0
+dirty=0
+repo_status=available
+if ! command -v git >/dev/null 2>&1; then
+  repo_status=git-unavailable
+  printf '%s\n' 'foreman agent resume: git is not installed; repository state is unavailable' >&2
+elif ! git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  repo_status=metadata-unavailable
+  printf '%s\n' 'foreman agent resume: repository metadata is unavailable' >&2
+else
+  branch="$(git -C "$ROOT" symbolic-ref -q --short HEAD)" || detached=1
+  status_output="$(git -C "$ROOT" status --porcelain)"
+  status_exit=$?
+  if [ "$status_exit" -ne 0 ]; then
+    repo_status=metadata-unavailable
+    printf '%s\n' 'foreman agent resume: git status failed; dirty state is unavailable' >&2
+  elif [ -n "$status_output" ]; then
+    dirty=1
+  fi
+fi
+
+doctor_status=ok
+doctor_exit=0
+doctor_receipt_file=""
+if ! command -v foreman >/dev/null 2>&1; then
+  doctor_status=unavailable
+  doctor_exit=127
+  printf '%s\n' "foreman agent resume: foreman is not installed; run 'cd $ROOT && mise run install-local', then rerun $ROOT/.agents/setup" >&2
+else
+  (cd "$ROOT" && foreman --doctor --doctor-json --repo "$ROOT") >"$DOCTOR_FILE"
+  doctor_exit=$?
+  doctor_receipt_file="$DOCTOR_FILE"
+  if ! python3 -m json.tool "$DOCTOR_FILE" >/dev/null 2>&1; then
+    doctor_status=failed
+    doctor_exit=1
+    printf '%s\n' "foreman agent resume: doctor did not emit valid JSON; inspect stderr and rerun $ROOT/.agents/setup if repair is needed" >&2
+  elif [ "$doctor_exit" -ne 0 ]; then
+    doctor_status=failed
+    printf '%s\n' "foreman agent resume: doctor failed; inspect the receipt and rerun $ROOT/.agents/setup if repair is needed" >&2
+  fi
+fi
+
+hk_available=0
+if command -v hk >/dev/null 2>&1; then
+  hk_available=1
+  if ! (cd "$ROOT" && hk status --target "$ROOT" --json) >"$HK_FILE"; then
+    printf '%s\n' 'foreman agent resume: hk status was unavailable; its diagnostic is above' >&2
+  fi
+else
+  rm -f "$HK_FILE"
+  HK_FILE=""
+  printf '%s\n' 'foreman agent resume: optional hk is not installed' >&2
+fi
+
+FOREMAN_AGENT_BRANCH="$branch" \
+FOREMAN_AGENT_DETACHED="$detached" \
+FOREMAN_AGENT_DIRTY="$dirty" \
+FOREMAN_AGENT_REPO_STATUS="$repo_status" \
+FOREMAN_AGENT_DOCTOR_STATUS="$doctor_status" \
+FOREMAN_AGENT_DOCTOR_EXIT="$doctor_exit" \
+FOREMAN_AGENT_DOCTOR_FILE="$doctor_receipt_file" \
+FOREMAN_AGENT_HK_AVAILABLE="$hk_available" \
+FOREMAN_AGENT_HK_FILE="$HK_FILE" \
+python3 "$REPORTER" resume "$ROOT"
+receipt_exit=$?
+if [ "$receipt_exit" -ne 0 ]; then
+  printf '%s\n' 'foreman agent resume: could not render JSON receipt' >&2
+  exit "$receipt_exit"
+fi
+
+if [ "$doctor_status" != ok ]; then
+  exit "$doctor_exit"
+fi

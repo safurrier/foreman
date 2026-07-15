@@ -1,0 +1,47 @@
+{
+  "attached_artifacts": [],
+  "branch": "feature/issue-33-unattended-entrypoints",
+  "diff_hash": "sha256:b7ccbfd9e09f9a50f40ec0e300e5ed9eb5da7cd64a292eaef119f6987c248293",
+  "dirty": false,
+  "event_count": 52,
+  "event_seq": 66,
+  "evidence_count": 16,
+  "evidence_ids": [
+    "ev_20260714_084045_051624",
+    "ev_20260714_084100_999012",
+    "ev_20260714_084130_683909",
+    "ev_20260714_084224_293721",
+    "ev_20260714_084423_688820",
+    "ev_20260714_084515_802662",
+    "ev_20260714_132927_072420",
+    "ev_20260714_140946_342869",
+    "ev_20260714_140957_552521",
+    "ev_20260714_143854_982509",
+    "ev_20260714_143855_265059",
+    "ev_20260714_152820_524240",
+    "ev_20260714_154357_233454",
+    "ev_20260714_161055_023214",
+    "ev_20260714_170716_856387",
+    "ev_20260714_180038_366395"
+  ],
+  "file_hashes": {
+    "README.md": "sha256:425d4ba2f2643ab0ff90d6db4680599effa4b3642192c98cea2525b8b3b407f6",
+    "artifacts/README.md": "sha256:c4bad9d4652f296a7e4dcf175fe1dd0c66a99ec0b74941cd45c499e84792436c"
+  },
+  "files": [
+    "README.md",
+    "meta.json",
+    "artifacts/README.md"
+  ],
+  "generated_at": "2026-07-15T01:02:43.783826+00:00",
+  "generated_by": "hk export --format handoff-dir",
+  "git_sha": "f37e8da",
+  "output_path": ".ai/hk/2026-07-14-083350-issue-33-unattended-entrypoints",
+  "ready": true,
+  "ready_status": "ready-with-dangerous-skips",
+  "schema_version": 1,
+  "sync_status": "synced",
+  "target_root": ".",
+  "target_scope": ".",
+  "work_id": "2026-07-14-083350-issue-33-unattended-entrypoints"
+}
