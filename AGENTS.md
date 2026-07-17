@@ -7,6 +7,20 @@ Foreman is a Rust/Ratatui operator console for AI agents running in tmux. Treat
 `SPEC.md` as the product contract, `docs/architecture.md` as the architecture
 record, and `docs/workflows.md` as the validation/process guide.
 
+## Scoped Guidance
+
+Read the `AGENTS.md` closest to the files you are changing. The closest file
+takes precedence for its subtree; this root file still owns repository-wide
+workflow and validation policy.
+
+| Scope | Local guidance |
+|---|---|
+| App state and reducer | `src/app/AGENTS.md` |
+| Harness integrations | `src/integrations/AGENTS.md` |
+| External adapters | `src/adapters/AGENTS.md` |
+| Native macOS app | `apps/macos-overlay/AGENTS.md` |
+| Integration and E2E tests | `tests/AGENTS.md` |
+
 ## How to Work Here
 
 For meaningful work, create a feature branch and use the Harness Kit lifecycle:
@@ -46,13 +60,6 @@ Claude, Codex, and Pi E2Es with `mise run verify-native`.
   HK, or log state from prose or make resume mutate the checkout. **BECAUSE**
   the entrypoints delegate to canonical owners and emit versioned JSON receipts.
 
-- **DO** use portable `sh` in tmux smoke tests. **NOT** `zsh`. **BECAUSE**
-  GitHub Linux runners do not guarantee `zsh`, and panes can exit immediately.
-
-- **DO** write native-signal fixtures atomically. **NOT** overwrite them
-  in-place. **BECAUSE** partial reads create false compatibility fallback and
-  flaky runtime tests.
-
 - **DO** promote recurring workflow lessons out of `.ai/plans/*` or `.ai/hk/*`
   into `docs/` or `AGENTS.md`. **NOT** treat historical plan logs or generated
   HK exports as canonical truth. **BECAUSE** lifecycle artifacts are evidence
@@ -84,11 +91,6 @@ Claude, Codex, and Pi E2Es with `mise run verify-native`.
   harness or hook behavior. **NOT** count skip-only `mise run verify-native`
   runs as done. **BECAUSE** the real-provider E2Es are the only proof that
   native Claude, Codex, and Pi wiring still works end to end.
-
-- **DO** keep native integration status pure to provider hook/file signals.
-  **NOT** promote native panes with terminal text heuristics. **BECAUSE**
-  heuristics are intentionally compatibility behavior; mixing them into native
-  provenance makes Foreman look precise while it is guessing.
 
 - **DO** make double-clicking a macOS overlay agent row focus that pane.
   **NOT** require the footer Focus button for pointer-driven selection.
@@ -158,23 +160,6 @@ Claude, Codex, and Pi E2Es with `mise run verify-native`.
   an explicit mode/setting makes that tradeoff clear. **BECAUSE** the overlay's
   command-palette interaction model depends on plain typing going to search.
 
-- **DO** let AppKit text fields own normal search/compose editing when focused.
-  **NOT** manually mutate text for cursor movement, selected-text replacement,
-  Option+Delete, or Cmd+A paths. **BECAUSE** the overlay should feel like a
-  native Mac command palette, not a custom terminal prompt.
-
-- **DO** use the `KeyboardShortcuts` package for both persisted macOS overlay
-  shortcut recording and normal global shortcut handling. **NOT** register a
-  second custom Carbon hotkey for the same persisted shortcut. **BECAUSE** mixed
-  ownership races the recorder and can leave Settings showing stale registration
-  failures.
-
-- **DO** run `mise run validate-macos-overlay-change` for Swift overlay,
-  app-bundle, keyboard/focus, screenshot, or control-API changes. **NOT** treat
-  plain `swift test` as sufficient for these paths. **BECAUSE** the required
-  lane also proves fake-Foreman UI events, real tmux smoke, snapshots/OCR, and
-  app bundle launch.
-
 - **DO** preserve direct-argv tmux popup bindings like
   `display-popup -h 80% -w 80% -E -- "$HOME/.cargo/bin/foreman" --popup`.
   **NOT** wrap the popup command in a shell unless expansion is required.
@@ -227,4 +212,4 @@ Claude, Codex, and Pi E2Es with `mise run verify-native`.
 | `.ai/plans/AGENTS.md` | Legacy plan artifact contract |
 | `README.md` | Human quickstart, install, dashboard keys, and status matrix |
 
-<!-- generated-by: context-engineering@2.2.0 | last-updated: 2026-04-30 -->
+<!-- generated-by: context-engineering@2.2.0 | last-updated: 2026-07-15 -->
