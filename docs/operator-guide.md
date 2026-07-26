@@ -297,7 +297,9 @@ foreman sources display list remote-dev --json
 foreman sources display doctor remote-dev --json
 ```
 
-Capture stores Ghostty's exact stable terminal UUID in Foreman's local state directory. Optional tab/window IDs and the current title are diagnostics only. Foreman never selects a display by title substring, tty, or pid, and never sends display identity over SSH, snapshots, or the companion protocol.
+Capture stores Ghostty's exact stable terminal UUID in Foreman's local state directory. Ghostty exposes separate title layers: Foreman prefers the selected tab's non-empty title for `diagnosticTitle`, then falls back to the focused terminal's title. Optional tab/window IDs and both title values are diagnostics only. Foreman never selects a display by title substring, tty, or pid, and never sends display identity over SSH, snapshots, or the companion protocol.
+
+Existing registrations remain readable and are not rewritten automatically, so their diagnostic title may still show the older terminal title. To refresh that label, first confirm the intended tab is selected, then run an explicit capture; save the newly returned ownership handle if a process owns cleanup. This replaces the current registration without changing its UUID-based focus behavior.
 
 The capture result includes an opaque `ownershipHandle`. Save it in the process or script that owns cleanup. A later capture/register replaces the current registration and returns a new handle; cleanup from the old owner cannot delete the replacement:
 

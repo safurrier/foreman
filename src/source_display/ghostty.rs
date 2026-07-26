@@ -160,11 +160,19 @@ impl DisplayProviderAdapter for SystemDisplayProvider {
 
 fn parse_ghostty_capture(output: &str) -> Result<DisplayIdentity, DisplayError> {
     let output = output.trim_end_matches(['\r', '\n']);
-    let mut fields = output.splitn(4, GHOSTTY_CAPTURE_SEPARATOR);
+    let mut fields = output.splitn(5, GHOSTTY_CAPTURE_SEPARATOR);
     let terminal_uuid = fields.next().unwrap_or_default().to_string();
     let tab_id = non_empty(fields.next());
     let window_id = non_empty(fields.next());
-    let diagnostic_title = non_empty(fields.next());
+    let tab_title = fields.next();
+    let terminal_title = fields.next();
+    let diagnostic_title = match terminal_title {
+        Some(terminal_title) => {
+            normalize_title(tab_title).or_else(|| normalize_title(Some(terminal_title)))
+        }
+        // Keep parsing the previous four-field capture payload as a terminal title.
+        None => normalize_title(tab_title),
+    };
     let identity = DisplayIdentity {
         terminal_uuid,
         tab_id,
@@ -179,6 +187,13 @@ fn non_empty(value: Option<&str>) -> Option<String> {
     value.filter(|value| !value.is_empty()).map(str::to_string)
 }
 
+fn normalize_title(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
 pub fn ghostty_capture_script() -> &'static str {
     r#"tell application "Ghostty"
     if (count of windows) is 0 then error "Ghostty has no open windows" number 1728
@@ -188,7 +203,17 @@ pub fn ghostty_capture_script() -> &'static str {
     set targetTerminal to focused terminal of targetTab
     if targetTerminal is missing value then error "Ghostty selected tab has no focused terminal" number 1728
     set fieldSeparator to ASCII character 30
-    return (id of targetTerminal) & fieldSeparator & (id of targetTab) & fieldSeparator & (id of targetWindow) & fieldSeparator & (name of targetTerminal)
+    set targetTabTitle to ""
+    try
+        set candidateTabTitle to name of targetTab
+        if candidateTabTitle is not missing value then set targetTabTitle to candidateTabTitle as text
+    end try
+    set targetTerminalTitle to ""
+    try
+        set candidateTerminalTitle to name of targetTerminal
+        if candidateTerminalTitle is not missing value then set targetTerminalTitle to candidateTerminalTitle as text
+    end try
+    return (id of targetTerminal) & fieldSeparator & (id of targetTab) & fieldSeparator & (id of targetWindow) & fieldSeparator & targetTabTitle & fieldSeparator & targetTerminalTitle
 end tell"#
 }
 

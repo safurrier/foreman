@@ -97,11 +97,12 @@ impl AppleScriptExecutor for RecordingAppleScript {
 }
 
 #[test]
-fn ghostty_capture_parses_stable_ids_and_title_as_diagnostic_only() {
+fn ghostty_capture_prefers_non_empty_tab_title_for_diagnostics() {
     let calls = Arc::new(Mutex::new(Vec::new()));
     let executor = RecordingAppleScript {
         output: Ok(
-            "terminal-exact\u{001e}tab-exact\u{001e}window-exact\u{001e}same title\n".to_string(),
+            "terminal-exact\u{001e}tab-exact\u{001e}window-exact\u{001e}tab title\u{001e}terminal title\n"
+                .to_string(),
         ),
         calls: calls.clone(),
     };
@@ -110,12 +111,30 @@ fn ghostty_capture_parses_stable_ids_and_title_as_diagnostic_only() {
     assert_eq!(captured.terminal_uuid, "terminal-exact");
     assert_eq!(captured.tab_id.as_deref(), Some("tab-exact"));
     assert_eq!(captured.window_id.as_deref(), Some("window-exact"));
-    assert_eq!(captured.diagnostic_title.as_deref(), Some("same title"));
-    assert!(calls.lock().unwrap()[0].0.contains("focused terminal"));
+    assert_eq!(captured.diagnostic_title.as_deref(), Some("tab title"));
+    assert!(calls.lock().unwrap()[0].0.contains("selected tab"));
+    assert!(calls.lock().unwrap()[0].0.contains("targetTabTitle"));
+    assert!(calls.lock().unwrap()[0].0.contains("targetTerminalTitle"));
+    assert!(calls.lock().unwrap()[0].0.contains("is not missing value"));
 }
 
 #[test]
-fn ghostty_focus_passes_only_exact_terminal_uuid_and_never_uses_title() {
+fn ghostty_capture_falls_back_to_terminal_title_when_tab_title_is_blank_or_unavailable() {
+    for tab_title in ["", "   "] {
+        let executor = RecordingAppleScript {
+            output: Ok(format!(
+                "terminal-exact\u{001e}tab-exact\u{001e}window-exact\u{001e}{tab_title}\u{001e}terminal title\n"
+            )),
+            calls: Arc::new(Mutex::new(Vec::new())),
+        };
+        let provider = SystemDisplayProvider::with_executor(true, Box::new(executor));
+        let captured = provider.capture(DisplayProviderKind::Ghostty).unwrap();
+        assert_eq!(captured.diagnostic_title.as_deref(), Some("terminal title"));
+    }
+}
+
+#[test]
+fn ghostty_focus_and_check_pass_only_exact_terminal_uuid() {
     let calls = Arc::new(Mutex::new(Vec::new()));
     let executor = RecordingAppleScript {
         output: Ok("terminal-exact\n".to_string()),
@@ -131,11 +150,15 @@ fn ghostty_focus_passes_only_exact_terminal_uuid_and_never_uses_title() {
         ownership_handle: "handle".to_string(),
     };
     provider.activate(&registration).unwrap();
+    provider.check(&registration).unwrap();
     let calls = calls.lock().unwrap();
     assert_eq!(calls[0].1, vec!["terminal-exact"]);
+    assert_eq!(calls[1].1, vec!["terminal-exact"]);
     assert!(calls[0].0.contains("every terminal whose id is targetID"));
     assert!(calls[0].0.contains("focus targetTerminal"));
+    assert!(calls[1].0.contains("every terminal whose id is targetID"));
     assert!(!calls[0].0.contains("name of"));
+    assert!(!calls[1].0.contains("name of"));
 }
 
 #[test]
