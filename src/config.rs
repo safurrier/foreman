@@ -918,6 +918,102 @@ enabled = false
     }
 
     #[test]
+    fn v1_config_fixture_loads_with_current_defaults_and_runtime() {
+        let temp_dir = tempdir().expect("temp dir should exist");
+        let config_path = temp_dir.path().join("config.toml");
+        fs::write(
+            &config_path,
+            include_str!("../tests/fixtures/config/v1.0.0.toml"),
+        )
+        .expect("v1 config fixture should be written");
+
+        let config = load_config(&config_path).expect("v1 config should load");
+
+        assert_eq!(config.monitoring.poll_interval_ms, 2_750);
+        assert_eq!(config.monitoring.capture_lines, 77);
+        assert!(!config.notifications.enabled);
+        assert_eq!(config.notifications.cooldown_ticks, 9);
+        assert_eq!(
+            config.notifications.backends,
+            vec![
+                NotificationBackendName::NotifySend,
+                NotificationBackendName::OsaScript,
+            ]
+        );
+        assert_eq!(
+            config.notifications.active_profile,
+            NotificationProfile::AttentionOnly
+        );
+        assert_eq!(config.logging.retain_run_logs, 13);
+        assert!(!config.pull_requests.enabled);
+        assert_eq!(config.pull_requests.poll_interval_ms, 45_000);
+        assert_eq!(
+            config.integrations.claude_code.mode,
+            IntegrationPreference::Compatibility
+        );
+        assert_eq!(
+            config.integrations.claude_code.native_dir,
+            Some(Path::new("/tmp/foreman-v1/claude").to_path_buf())
+        );
+        assert_eq!(
+            config.integrations.codex_cli.mode,
+            IntegrationPreference::Native
+        );
+        assert_eq!(
+            config.integrations.codex_cli.native_dir,
+            Some(Path::new("/tmp/foreman-v1/codex").to_path_buf())
+        );
+        assert_eq!(config.integrations.pi.mode, IntegrationPreference::Auto);
+        assert_eq!(config.ui.theme, ThemeName::Nord);
+
+        assert_eq!(
+            config.monitoring.startup_cache_max_age_ms,
+            DEFAULT_STARTUP_CACHE_MAX_AGE_MS
+        );
+        assert_eq!(config.extensions, ExtensionConfig::default());
+        assert_eq!(config.sources, crate::sources::SourcesConfig::default());
+        assert_eq!(config.notifications.sound_profile, "default");
+        assert_eq!(
+            config.notifications.sound_profiles.get("default"),
+            Some(&NotificationSoundProfile::default())
+        );
+        assert_eq!(config.ui.default_sort, SortMode::Stable);
+        assert!(config.ui_sources.theme);
+        assert!(!config.ui_sources.default_sort);
+
+        let cli = Cli::parse_from(["foreman"]);
+        let runtime = RuntimeConfig::from_sources(
+            super::AppPaths {
+                config_file: config_path,
+                log_dir: temp_dir.path().join("logs"),
+                startup_cache_dir: temp_dir.path().join("cache"),
+                ui_preferences_file: temp_dir.path().join("ui-state.json"),
+            },
+            config,
+            &cli,
+        );
+
+        assert_eq!(runtime.poll_interval_ms, 2_750);
+        assert_eq!(runtime.capture_lines, 77);
+        assert_eq!(
+            runtime.startup_cache_max_age_ms,
+            DEFAULT_STARTUP_CACHE_MAX_AGE_MS
+        );
+        assert!(!runtime.pull_request_monitoring_enabled);
+        assert_eq!(runtime.pull_request_poll_interval_ms, 45_000);
+        assert_eq!(
+            runtime.extension_poll_interval_ms,
+            DEFAULT_EXTENSION_POLL_INTERVAL_MS
+        );
+        assert!(!runtime.notifications_enabled);
+        assert_eq!(runtime.notification_sound_profile, "default");
+        assert_eq!(runtime.theme, ThemeName::Nord);
+        assert_eq!(runtime.default_sort, SortMode::Stable);
+        assert!(runtime.ui_theme_configured);
+        assert!(!runtime.ui_default_sort_configured);
+    }
+
+    #[test]
     fn config_parsing_supports_notification_and_integration_preferences() {
         let parsed: AppConfig = toml::from_str(
             r#"
