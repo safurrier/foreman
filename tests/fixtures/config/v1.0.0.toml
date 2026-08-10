@@ -1,0 +1,33 @@
+# Foreman v1.0.0 configuration schema. Keep this fixture unchanged so it
+# continues to represent a user configuration created by that release.
+
+[monitoring]
+poll_interval_ms = 2750
+capture_lines = 77
+
+[notifications]
+enabled = false
+cooldown_ticks = 9
+backends = ["notify-send", "osascript"]
+active_profile = "attention-only"
+
+[logging]
+retain_run_logs = 13
+
+[pull_requests]
+enabled = false
+poll_interval_ms = 45000
+
+[integrations.claude_code]
+mode = "compatibility"
+native_dir = "/tmp/foreman-v1/claude"
+
+[integrations.codex_cli]
+mode = "native"
+native_dir = "/tmp/foreman-v1/codex"
+
+[integrations.pi]
+mode = "auto"
+
+[ui]
+theme = "nord"
