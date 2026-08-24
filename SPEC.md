@@ -2,7 +2,7 @@
 id: foreman-spec
 title: foreman Specification
 description: >
-  Correctness envelope for foreman — the requirements, contracts, invariants,
+  Correctness envelope for foreman—the requirements, contracts, invariants,
   and acceptance criteria that any valid implementation must satisfy.
 index:
   - id: summary
@@ -17,7 +17,7 @@ index:
     keywords: [validation, scenarios, check, verify, ci]
 ---
 
-# foreman — Specification
+# foreman—Specification
 
 > This document defines the correctness envelope for foreman. For how the
 > system is organized, see `docs/architecture.md`. For how to work in this repo,
@@ -36,29 +36,6 @@ Foreman is intentionally designed around two integration paths:
 Native integrations are the preferred long-term architecture. Compatibility
 integrations exist so the dashboard remains useful even when a harness does not
 yet expose a stable contract.
-
-## Glossary
-
-- **tmux session**: A top-level tmux workspace that can contain multiple windows.
-- **tmux window**: A container inside a session that can contain one or more panes.
-- **tmux pane**: The basic terminal surface monitored and focused by the dashboard.
-- **agent pane**: A pane recognized as running a supported AI coding agent.
-- **non-agent pane**: A pane not recognized as running a supported AI coding agent.
-- **operator**: The human user driving the dashboard.
-- **focus**: Moving tmux view and selection to a target pane.
-- **popup mode**: A mode intended for use inside a tmux popup, where successful focus-oriented actions close the dashboard automatically.
-- **summary panel**: A compact view of current work, TODOs, or recent derived activity.
-- **subagent**: A child task or delegated unit of work surfaced by an agent that supports this concept.
-- **flash navigation**: Short-label jump navigation that lets the operator quickly target any visible item.
-- **pull request panel**: The product surface that shows pull request status and related actions for the selected workspace.
-- **notification profile**: A named notification-behavior preset that determines which status transitions emit alerts.
-- **native mode**: An integration path that consumes structured events, hooks, or machine-readable output from a supported agent harness.
-- **compatibility mode**: A fallback integration path that infers state from tmux-visible process and terminal behavior when no structured integration is available.
-- **macOS control app**: A native `Foreman.app` wrapper and overlay that exposes Foreman's core control plane from outside the terminal.
-- **control API**: Machine-readable CLI subcommands used by GUI clients and automation to list agents, focus panes, and send text without parsing the TUI.
-- **source**: A configured local or remote tmux-backed place Foreman can query and control.
-- **source-scoped pane**: A pane identified by both Foreman source id and tmux pane id; tmux pane ids are not globally unique across sources.
-- **source display registration**: Machine-local ownership of an exact terminal display identity for one source, used to activate the display after tmux focus without sending that identity over source transports.
 
 ## Goals / Non-Goals
 
@@ -210,7 +187,7 @@ yet expose a stable contract.
   supported agent family at a time, with empty harness views skipped by default.
 - The operator can cycle the active theme at runtime.
 - The operator can scroll the help surface with the keyboard when help is open.
-- Escape cancels or dismisses non-normal modes; in normal mode it quits like `q`.
+- Escape cancels or dismisses non-normal modes. In normal mode it quits like `q`.
 
 **R11. Pane focus behavior**
 
@@ -219,7 +196,7 @@ yet expose a stable contract.
 - The UI identifies the resolved actionable pane for focus-oriented and direct-input actions.
 - In popup mode, successful focus-oriented actions close the dashboard automatically.
 - A machine may register one exact local display identity per source. A current registered identity is attempted before a configured activation-command fallback.
-- tmux focus success and display activation success remain separate outcomes; a missing or closed display does not turn successful tmux focus into focus failure.
+- tmux focus success and display activation success remain separate outcomes. A missing or closed display does not turn successful tmux focus into focus failure.
 
 **R12. Direct input**
 
@@ -335,6 +312,30 @@ yet expose a stable contract.
 
 ## Interfaces & Contracts
 
+### Glossary
+
+- **tmux session**: A top-level tmux workspace that can contain multiple windows.
+- **tmux window**: A container inside a session that can contain one or more panes.
+- **tmux pane**: The basic terminal surface monitored and focused by the dashboard.
+- **agent pane**: A pane recognized as running a supported AI coding agent.
+- **non-agent pane**: A pane not recognized as running a supported AI coding agent.
+- **operator**: The human user driving the dashboard.
+- **focus**: Moving tmux view and selection to a target pane.
+- **popup mode**: A mode intended for use inside a tmux popup, where successful focus-oriented actions close the dashboard automatically.
+- **summary panel**: A compact view of current work, TODOs, or recent derived activity.
+- **subagent**: A child task or delegated unit of work surfaced by an agent that supports this concept.
+- **flash navigation**: Short-label jump navigation that lets the operator quickly target any visible item.
+- **pull request panel**: The product surface that shows pull request status and related actions for the selected workspace.
+- **notification profile**: A named notification-behavior preset that determines which status transitions emit alerts.
+- **native mode**: An integration path that consumes structured events, hooks, or machine-readable output from a supported agent harness.
+- **compatibility mode**: A fallback integration path that infers state from tmux-visible process and terminal behavior when no structured integration is available.
+- **macOS control app**: A native `Foreman.app` wrapper and overlay that exposes Foreman's core control plane from outside the terminal.
+- **control API**: Machine-readable CLI subcommands used by GUI clients and automation to list agents, focus panes, and send text without parsing the TUI.
+- **source**: A configured local or remote tmux-backed place Foreman can query and control.
+- **source-scoped pane**: A pane identified by both Foreman source id and tmux pane id. The tmux pane ids are not globally unique across sources.
+- **source display registration**: Machine-local ownership of an exact terminal display identity for one source, used to activate the display after tmux focus without sending that identity over source transports.
+
+
 ### CLI contract
 
 - The command-line interface is exposed through `foreman`.
@@ -360,7 +361,7 @@ yet expose a stable contract.
 - `foreman agents --json` returns schema-versioned JSON with inventory summary, entries, and diagnostics.
 - `foreman agents --json --all-panes` includes non-agent panes.
 - `foreman agents --json --pull-requests` includes best-effort pull request metadata.
-- `foreman focus --pane <pane-id> --json` focuses the requested tmux pane and reports success or failure in machine-readable form. Source-host activation remains in `displayActivation`; requesting-host activation is additive in `callerDisplayActivation`.
+- `foreman focus --pane <pane-id> --json` focuses the requested tmux pane and reports success or failure in machine-readable form. Source-host activation remains in `displayActivation`. Requesting-host activation is additive in `callerDisplayActivation`.
 - `foreman send --pane <pane-id> --stdin --json` sends stdin to the requested pane and reports bytes sent.
 - `foreman send --pane <pane-id> --text <text> --json` sends explicit text to the requested pane and reports bytes sent.
 - Control API diagnostics are visible to clients when tmux or runtime inventory is unavailable.
@@ -620,7 +621,7 @@ mise run ci
 **A9. Popup auto-exit**
 
 - Given the dashboard is running in popup mode, when the operator focuses a target pane successfully, tmux switches to that pane and the dashboard closes even if optional display activation reports a warning.
-- Given a source has a current local Ghostty display registration, focus activates the exact stable terminal UUID through Ghostty's AppleScript `focus` command before trying the source's activation-command fallback; terminal title, tty, and pid are not target selectors.
+- Given a source has a current local Ghostty display registration, focus activates the exact stable terminal UUID through Ghostty's AppleScript `focus` command before trying the source's activation-command fallback. Terminal title, tty, and pid are not target selectors.
 - Given the registered terminal is closed or unavailable, tmux focus remains successful and the JSON/runtime result includes an actionable `source.display.*` diagnostic. Caller-side activation-command fallback is bounded to two seconds.
 
 **A10. Direct input**
@@ -674,7 +675,7 @@ mise run ci
 
 - Given the dashboard is running, cycling sort mode reorders the sidebar by the selected preset (`stable` or `attention -> recent`) and preserves the current logical selection where possible.
 - Given `[ui].default_sort = "attention-recent"`, startup uses the attention/recent order before the operator presses `o`, even when persisted UI state contains a different sort.
-- Given the operator changes sort/filter/theme/collapsed state or selection, a later launch restores those choices when the target still exists; explicit `[ui]` config keys override persisted theme/sort.
+- Given the operator changes sort/filter/theme/collapsed state or selection, a later launch restores those choices when the target still exists. Explicit `[ui]` config keys override persisted theme/sort.
 - Given persisted UI state is corrupt or unwanted, `foreman --doctor` reports it and `foreman --reset-ui-state` removes it.
 
 **A16. Pull request awareness**

@@ -1,16 +1,19 @@
 ---
 id: foreman-adr-0002
-title: ADR 0002 — Source aggregation and remote SSH targets
+title: ADR 0002—Source aggregation and remote SSH targets
 description: >
   Design and implementation plan for making Foreman aggregate local and remote
-  tmux-backed sources, including Alex's Coder SSH workflow, while keeping the
+  tmux-backed sources, including a remote development host SSH workflow, while keeping the
   tmux popup and macOS overlay product surfaces conceptually parallel.
+status: accepted
+date: 2026-06-04
+updated: 2026-06-09
 index:
   - id: decision
     keywords: [sources, remote, ssh, coder, tmux, macos-overlay, popup]
   - id: implementation-plan
     keywords: [phases, source-provider, tmux-server-name, aggregation]
-  - id: validation-plan
+  - id: validation-plan-summary
     keywords: [tests, smoke, ssh, coder, validation]
   - id: herdr-comparison
     keywords: [herdr, server-client, deviation, remote-attach]
@@ -18,10 +21,9 @@ index:
 
 # ADR 0002: Source aggregation and remote SSH targets
 
-**Status**: Proposed — architecture-polish reviewed, revised for implementation
-**Date**: 2026-06-04
-**Deciders**: Alex Furrier, Foreman maintainers
+**Deciders**: Foreman maintainers
 **Generated from**: Herdr remote attach research, Coder workflow spikes, and architecture polish review
+**Transition**: Proposed on 2026-06-04; accepted after the source-aware implementation merged in PR #25 on 2026-06-09.
 
 ---
 
@@ -35,7 +37,7 @@ host where `foreman` executes. It has two user-facing surfaces:
 - the native macOS `Foreman.app` overlay, which shells out to Foreman's control
   API commands
 
-Alex's common work setup is local Mac → SSH to Coder → `tmux -L user`. The
+A representative remote-host setup is local Mac → SSH to Coder → `tmux -L user`. The
 existing dots binding launches the terminal popup directly to avoid shell
 startup latency:
 
@@ -67,12 +69,12 @@ the machine that owns the tmux server.
 
 ### Coder SSH config spike
 
-`ssh -G coder.alex-furrier-dev-gpu-1` resolves a normal SSH host with:
+`ssh -G remote-dev.example` resolves a normal SSH host with:
 
-- `hostname coder.alex-furrier-dev-gpu-1`
-- `user alex.furrier`
+- `hostname remote-dev.example`
+- `user dev`
 - `controlmaster auto`
-- `controlpath /Users/alex.furrier/.ssh/control-alex.furrier@coder.alex-furrier-dev-gpu-1:22`
+- `controlpath ~/.ssh/control-%r@%h:%p`
 - `forwardagent yes`
 - keepalives already set
 
@@ -85,16 +87,16 @@ in v1.
 A noninteractive command can reach the Coder workspace:
 
 ```bash
-ssh -o BatchMode=yes -o ConnectTimeout=8 coder.alex-furrier-dev-gpu-1 \
+ssh -o BatchMode=yes -o ConnectTimeout=8 remote-dev.example \
   'printf "host="; hostname; printf "tmux="; command -v tmux; printf "foreman="; command -v foreman || true'
 ```
 
 Observed result:
 
 ```text
-host=alex-furrier-dev-gpu-1
+host=remote-dev
 tmux=/usr/bin/tmux
-foreman=/home/discord/.cargo/bin/foreman
+foreman=/usr/local/bin/foreman
 ```
 
 ### tmux server-name spike
@@ -107,10 +109,10 @@ to the socket path Foreman already knows how to pass as `tmux -S <path>`.
 A remote fresh tmux server worked with today's hidden `--tmux-socket` path:
 
 ```bash
-ssh coder.alex-furrier-dev-gpu-1 \
+ssh remote-dev.example \
   'set -e; name=foreman_spike_$$; \
    tmux -L $name new-session -d -s spike "sh -lc sleep\\ 20"; \
-   /home/discord/.cargo/bin/foreman --tmux-socket /tmp/tmux-$(id -u)/$name agents --json --all-panes | head -80; \
+   /usr/local/bin/foreman --tmux-socket /tmp/tmux-$(id -u)/$name agents --json --all-panes | head -80; \
    tmux -L $name kill-server'
 ```
 
@@ -182,7 +184,7 @@ Foreman supports explicit source scope controls:
 ```bash
 foreman --sources all
 foreman --sources current
-foreman --source coder-dev-gpu-1
+foreman --source remote-dev
 ```
 
 Proposed final defaults once both surfaces are source-aware:
@@ -235,10 +237,10 @@ Control API entries gain source fields and a stable composite id:
 
 ```json
 {
-  "id": "source:coder-dev-gpu-1:pane:%42",
-  "sourcePaneId": "source:coder-dev-gpu-1:pane:%42",
-  "sourceId": "coder-dev-gpu-1",
-  "sourceLabel": "Coder dev-gpu-1",
+  "id": "source:remote-dev:pane:%42",
+  "sourcePaneId": "source:remote-dev:pane:%42",
+  "sourceId": "remote-dev",
+  "sourceLabel": "Remote dev",
   "sourceKind": "ssh",
   "paneId": "%42",
   "status": "working"
@@ -252,17 +254,17 @@ Action responses also include source identity:
   "schemaVersion": 2,
   "ok": true,
   "action": "focus",
-  "sourceId": "coder-dev-gpu-1",
+  "sourceId": "remote-dev",
   "paneId": "%42",
-  "sourcePaneId": "source:coder-dev-gpu-1:pane:%42"
+  "sourcePaneId": "source:remote-dev:pane:%42"
 }
 ```
 
 Focus/send include source when operating on merged inventory:
 
 ```bash
-foreman focus --source coder-dev-gpu-1 --pane %42 --json
-foreman send --source coder-dev-gpu-1 --pane %42 --stdin --json
+foreman focus --source remote-dev --pane %42 --json
+foreman send --source remote-dev --pane %42 --stdin --json
 ```
 
 For compatibility, omitting `--source` targets the current/local source when the
@@ -287,11 +289,11 @@ kind = "local"
 label = "Local Mac"
 enabled = true
 
-[sources.coder-dev-gpu-1]
+[sources.remote-dev]
 kind = "ssh"
-label = "Coder dev-gpu-1"
-host = "coder.alex-furrier-dev-gpu-1"
-foreman = "/home/discord/.cargo/bin/foreman"
+label = "Remote dev"
+host = "remote-dev.example"
+foreman = "/usr/local/bin/foreman"
 tmux_server_name = "user"
 enabled = true
 query_timeout_ms = 5000
@@ -301,19 +303,19 @@ Source management commands:
 
 ```bash
 foreman sources list --json
-foreman sources add ssh coder-dev-gpu-1 \
-  --host coder.alex-furrier-dev-gpu-1 \
-  --foreman /home/discord/.cargo/bin/foreman \
+foreman sources add ssh remote-dev \
+  --host remote-dev.example \
+  --foreman /usr/local/bin/foreman \
   --tmux-server-name user \
-  --label "Coder dev-gpu-1"
-foreman sources doctor coder-dev-gpu-1
-foreman sources remove coder-dev-gpu-1
+  --label "Remote dev"
+foreman sources doctor remote-dev
+foreman sources remove remote-dev
 ```
 
-A later convenience command may infer Alex's common Coder settings:
+A later convenience command may infer common Coder settings:
 
 ```bash
-foreman sources add-coder alex-furrier-dev-gpu-1
+foreman sources add-coder remote-dev
 ```
 
 ## Architecture
@@ -331,7 +333,7 @@ Proposed Rust ownership:
 | `adapters::tmux` | tmux subprocess adapter, extended for `tmux -L` server names |
 | `services::control_api` | source-aware JSON schema and action responses |
 | `runtime` | periodic source refresh, source diagnostics, action routing |
-| `apps/macos-overlay` | display source-aware control API results; no independent SSH implementation |
+| `apps/macos-overlay` | display source-aware control API results. No independent SSH implementation |
 
 ### Source provider and aggregator seam
 
@@ -377,7 +379,7 @@ struct AggregateSnapshot {
 `LocalSource` calls today's bootstrap/tmux path. `SshSource` shells out to the
 remote `foreman` binary in internal `source-probe --local-only` mode to prevent
 recursive source aggregation on the remote host. Runtime consumes a single
-`AggregateSnapshot`; it should not implement per-source timeout or stale-cache
+`AggregateSnapshot`. It should not implement per-source timeout or stale-cache
 policy itself.
 
 ### Avoid recursive source fan-out
@@ -429,16 +431,16 @@ The provider should:
 ### Source diagnostics
 
 A source query returns inventory and/or structured source diagnostics. Diagnostics
-must have stable fields for renderers; `message` is for humans, not control flow.
+must have stable fields for renderers. `message` is for humans, not control flow.
 
 ```json
 {
   "level": "warning",
   "code": "source.ssh.timeout",
-  "sourceId": "coder-dev-gpu-1",
-  "sourceLabel": "Coder dev-gpu-1",
+  "sourceId": "remote-dev",
+  "sourceLabel": "Remote dev",
   "sourceKind": "ssh",
-  "message": "Coder dev-gpu-1 unreachable: ssh timed out after 2500ms",
+  "message": "Remote dev unreachable: ssh timed out after 2500ms",
   "retryable": true,
   "durationMs": 2500,
   "lastSuccessUnixMs": 1780000000000
@@ -457,7 +459,7 @@ Important diagnostic cases:
 
 ## Implementation plan
 
-### Phase 0 — product/schema design freeze
+### Phase 0—product/schema design freeze
 
 - Finalize source config names and defaults.
 - Record the rollout rule: backend aggregation can be opt-in before parity, but
@@ -470,7 +472,7 @@ Important diagnostic cases:
   tests.
 - Add examples to `docs/operator-guide.md` for Coder and source diagnostics.
 
-### Phase 1 — tmux server-name support
+### Phase 1—tmux server-name support
 
 Goal: make Coder's `tmux -L user` a first-class Foreman target.
 
@@ -502,7 +504,7 @@ Validation:
 - Real tmux smoke using temporary `tmux -L foreman-test-*`.
 - Existing `mise run check`.
 
-### Phase 2 — source config and local source provider
+### Phase 2—source config and local source provider
 
 Goal: introduce source identity without remote complexity.
 
@@ -531,7 +533,7 @@ Validation:
 - Ratatui rendering tests for source badges.
 - Swift decoder tests with source-aware fixtures.
 
-### Phase 3 — SSH source provider
+### Phase 3—SSH source provider
 
 Goal: one-shot remote source queries/actions over SSH.
 
@@ -565,12 +567,12 @@ Validation:
 - Manual Coder smoke:
 
   ```bash
-  foreman sources doctor coder-dev-gpu-1
+  foreman sources doctor remote-dev
   foreman agents --json --sources all
-  foreman focus --source coder-dev-gpu-1 --pane <pane> --json
+  foreman focus --source remote-dev --pane <pane> --json
   ```
 
-### Phase 4 — unified TUI/popup merged inventory
+### Phase 4—unified TUI/popup merged inventory
 
 Goal: terminal Foreman has parity with macOS overlay.
 
@@ -591,7 +593,7 @@ Validation:
   marking from last successful refresh.
 - Real tmux popup smoke remains fast and current-pane focus works.
 
-### Phase 5 — macOS overlay consumes merged API
+### Phase 5—macOS overlay consumes merged API
 
 Goal: Mac overlay displays the same source-aware inventory as the TUI.
 
@@ -601,7 +603,7 @@ Changes:
   identity.
 - Add source badges/group labels to overlay rows.
 - Add settings UI for selecting scope if needed, but keep configured default.
-- Ensure Swift does not implement SSH; it shells out to local `foreman`, which
+- Ensure Swift does not implement SSH. It shells out to local `foreman`, which
   owns source aggregation.
 - Focus/send calls pass `--source <id>` for selected row.
 - Land default-scope parity with the Ratatui surface in the same release gate;
@@ -616,13 +618,13 @@ Validation:
 - Snapshot tests for grouped sources and unreachable Coder.
 - Required overlay lane: `mise run validate-macos-overlay-change`.
 
-### Phase 6 — performance and persistence polish
+### Phase 6—performance and persistence polish
 
 Goal: make all-sources overview feel boring and fast.
 
 Changes:
 
-- Use SSH ControlMaster when available; document recommended SSH config.
+- Use SSH ControlMaster when available. Document recommended SSH config.
 - Add short-lived per-source cache with stale markers for overlay first paint.
 - Add source-level query timing logs.
 - Add config reload/source doctor guidance.
@@ -655,7 +657,7 @@ foreman --tmux-server-name "$name" agents --json --all-panes
 tmux -L "$name" kill-server
 
 # fake SSH provider tests should run in cargo test; manual Coder smoke is opt-in
-foreman sources doctor coder-dev-gpu-1
+foreman sources doctor remote-dev
 foreman agents --json --sources all
 ```
 
@@ -695,15 +697,15 @@ are touched.
 | SSH latency makes overview slow | Per-source timeouts, parallel queries, ControlMaster, stale cache. |
 | Surface divergence during rollout | Keep all-source default behind opt-in until Ratatui and macOS overlay both support source-aware display/actions. |
 | Local and remote `%42` collide | Store and act on `SourcePaneId`, never bare pane id in merged state. |
-| Product surfaces diverge | Rust core owns aggregation; both TUI and macOS overlay consume same source-aware API. |
-| Coder tmux stale socket breaks dashboard | Source-scoped diagnostics; healthy sources still render. |
+| Product surfaces diverge | Rust core owns aggregation. Both TUI and macOS overlay consume same source-aware API. |
+| Coder tmux stale socket breaks dashboard | Source-scoped diagnostics. Healthy sources still render. |
 | Remote shell quoting bugs | Vectorized SSH argv, stdin for send text, fake SSH tests. |
-| Schema churn breaks overlay | Additive fields first where possible; fixture decoder tests; schema bump only when necessary. |
+| Schema churn breaks overlay | Additive fields first where possible. Fixture decoder tests. Schema bump only when necessary. |
 
 ## Deferred decisions
 
 - Whether remote Foreman binary auto-install belongs in Foreman v1. Initial plan:
-  no; `sources doctor` should report missing binary and suggest install.
+  no. `sources doctor` should report missing binary and suggest install.
 - Whether a future Foreman daemon should provide subscriptions/caching. Initial
   plan: design provider seam so daemon transport can replace SSH one-shot later.
 - Whether the terminal popup should visually group by current source first or use

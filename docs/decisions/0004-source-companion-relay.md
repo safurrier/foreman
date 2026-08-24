@@ -1,8 +1,24 @@
 ---
-title: ADR 0004 — Source companion and relay architecture
-summary: Design the post-SSH source model for bidirectional workstation ↔ remote-host visibility, prewarmed source state, and robust source display activation.
+id: foreman-adr-0004
+title: ADR 0004—Source companion and relay architecture
+description: >
+  Records the accepted source companion, snapshot, reverse-tunnel, and machine-local display architecture.
 status: accepted
+date: 2026-06-09
 updated: 2026-07-14
+index:
+  - id: context
+    keywords: [sources, companion, relay]
+  - id: decision-summary
+    keywords: [ssh, snapshot, transport]
+  - id: implementation-status
+    keywords: [companion, prewarm, display]
+  - id: candidate-designs
+    keywords: [reverse-tunnel, relay, one-shot]
+  - id: snapshot-store-ownership
+    keywords: [snapshot, ownership, atomic-write]
+  - id: failure-modes
+    keywords: [fallback, stale, diagnostics]
 related:
   code:
     - src/sources.rs
@@ -20,10 +36,6 @@ related:
 
 # ADR 0004: Source companion and relay architecture
 
-Status: accepted. Initial implementation now includes the snapshot store,
-prewarmer command, registration file, JSON-line companion transport,
-`connect-ssh` supervisor, live remote-host → workstation reverse-forward
-smokes, and machine-local exact Ghostty display registration.
 
 ## Context
 
@@ -145,7 +157,7 @@ Limits:
 
 ## Candidate designs
 
-### Option A — Reverse SSH tunnel
+### Option A—Reverse SSH tunnel
 
 A tunnel connects a remote-host-side Foreman process back to a workstation-local Foreman
 endpoint. The workstation opens or maintains the tunnel, then the remote host can query the workstation
@@ -182,7 +194,7 @@ Cons:
 Best use: transport for a companion protocol when workstation ↔ remote host bidirectionality is
 needed before a general relay exists.
 
-### Option B — Source companion process
+### Option B—Source companion process
 
 A lightweight companion runs near each source. It periodically queries its local
 tmux, writes/publishes fresh source snapshots, registers endpoint metadata, and
@@ -225,7 +237,7 @@ Cons:
 Best use: preferred next architecture seam. Prototype locally before adding a
 remote transport.
 
-### Option C — Relay/cache service
+### Option C—Relay/cache service
 
 Sources publish snapshots to a shared relay. Foreman clients read snapshots and
 send actions through registered channels.
@@ -260,7 +272,7 @@ Cons:
 Best use: future transport if reverse tunnels or local companion files are too
 limited.
 
-### Option D — One-shot SSH plus local prewarmer only
+### Option D—One-shot SSH plus local prewarmer only
 
 Keep ADR 0002's SSH source unchanged and add a local background job that
 periodically runs source refreshes and writes cached snapshots.
@@ -391,7 +403,7 @@ TUI, popup, and overlay behavior does not fork.
   local trust boundary. Reverse tunnel and relay proofs must define auth before
   accepting `send`.
 - Focus responses must distinguish tmux focus from display activation. A remote
-  tmux focus can succeed even when terminal/tab activation is unavailable; the
+  tmux focus can succeed even when terminal/tab activation is unavailable. The
   operator-visible result should not collapse those into one failure.
 
 ## Snapshot store ownership
@@ -422,7 +434,7 @@ Store invariants:
   explains endpoint health, stale snapshot explains row freshness.
 - Duplicate registration for the same source id is rejected unless it has the
   same endpoint identity or an explicit replacement marker.
-- Retention is bounded; expired snapshots can be pruned after they are no longer
+- Retention is bounded. Expired snapshots can be pruned after they are no longer
   useful for diagnostics.
 
 This module is the deep seam. Runtime, popup, overlay control paths, prewarmers,
@@ -441,7 +453,7 @@ Recommended freshness tiers:
 | fresh | ≤ 2s | Render normally and refresh in background. |
 | warm | ≤ 15s | Render with subtle stale marker and refresh in background. |
 | stale | ≤ 5m | Render below healthy/fresh rows with source diagnostic. |
-| expired | > 5m | Do not render rows by default; show source diagnostic only. |
+| expired | > 5m | Do not render rows by default. Show source diagnostic only. |
 
 A source action against stale rows may still be attempted if the source endpoint
 is available, but the action response must report whether the target pane was
@@ -507,12 +519,12 @@ sequenceDiagram
 
 | Failure | Expected behavior | Diagnostic |
 |---|---|---|
-| source offline | Keep healthy sources visible; show source diagnostic. | `source.companion.offline` |
+| source offline | Keep healthy sources visible. Show source diagnostic. | `source.companion.offline` |
 | snapshot fresh but live refresh slow | Render snapshot, defer merge while user is navigating. | timing logs, no blocking alert |
-| snapshot expired | Hide rows by default; show source diagnostic. | `source.snapshot.expired` |
-| reverse tunnel down | remote host view shows workstation source unavailable; workstation local view still works. | `source.transport.unavailable` |
-| companion schema too new | Ignore rows; show unsupported schema diagnostic. | `source.companion.schema-unsupported` |
-| terminal tab closed | tmux focus may succeed; activation reports unavailable. | `source.display.unavailable` |
+| snapshot expired | Hide rows by default. Show source diagnostic. | `source.snapshot.expired` |
+| reverse tunnel down | remote host view shows workstation source unavailable. Workstation local view still works. | `source.transport.unavailable` |
+| companion schema too new | Ignore rows. Show unsupported schema diagnostic. | `source.companion.schema-unsupported` |
+| terminal tab closed | tmux focus may succeed. Activation reports unavailable. | `source.display.unavailable` |
 | tmux server mismatch | Source doctor reports configured and discovered tmux endpoint. | `source.tmux.endpoint-mismatch` |
 | action against stale pane | Return action failure with missing pane detail. | `source.action.target-missing` |
 | relay unavailable | Fall back to local cache or one-shot SSH if configured. | `source.relay.unavailable` |
@@ -547,7 +559,7 @@ Acceptance criteria:
 - `scripts/smoke-popup-key-latency.sh` passes with zero slow `move-selection`
   actions in all scenarios.
 - Local-only and all-source-idle bursts process the configured key count within
-  the script budget; all-source idle must not exceed the local-only wall time by
+  the script budget. All-source idle must not exceed the local-only wall time by
   more than the script's relative overhead budget.
 - Refresh-overlap logs stable deferred-merge and deferred-apply markers before
   the test passes.
@@ -555,7 +567,7 @@ Acceptance criteria:
   and overlap scenarios.
 - A fresh companion snapshot fixture renders source rows before any live network
   refresh is released.
-- A stale snapshot fixture renders rows with a source diagnostic; an expired
+- A stale snapshot fixture renders rows with a source diagnostic. An expired
   snapshot fixture hides rows by default and shows only the diagnostic.
 - Corrupt, partial, unsupported-schema, and source-id-mismatched snapshot files
   never hide healthy local rows.
@@ -578,21 +590,21 @@ app bundle, keyboard/focus, screenshot, or control-API paths change, also run
 
 ## Recommended implementation slices
 
-### Slice 0 — characterization baseline
+### Slice 0—characterization baseline
 
 - Preserve current one-shot SSH behavior with source aggregation tests.
 - Capture current popup key-latency numbers with `scripts/smoke-popup-key-latency.sh`.
 - Add fixtures for fresh, stale, expired, corrupt, schema-too-new, and
   source-id-mismatched snapshots before wiring them into runtime.
 
-### Slice 1 — snapshot store only
+### Slice 1—snapshot store only
 
 - Add the `SourceSnapshotStore` read/write module and fixture tests.
 - Implement atomic writes, strict reads, freshness classification, source-id
   validation, schema handling, and pruning.
 - Do not add a daemon, reverse tunnel, relay, or generic transport interface yet.
 
-### Slice 2 — read-only runtime cache integration
+### Slice 2—read-only runtime cache integration
 
 - Teach source aggregation/runtime to load fresh-enough snapshots behind explicit
   config.
@@ -600,14 +612,14 @@ app bundle, keyboard/focus, screenshot, or control-API paths change, also run
 - Prove corrupt/expired/mismatched snapshots produce diagnostics without hiding
   healthy local rows.
 
-### Slice 3 — SSH prewarmer writer
+### Slice 3—SSH prewarmer writer
 
 - Add an explicit prewarmer command or mode that refreshes configured SSH sources
   and writes snapshots through `SourceSnapshotStore`.
 - Compare prewarmed first paint against today's live SSH path.
 - Keep source actions routed through the existing SSH command path.
 
-### Slice 4 — local companion snapshot command
+### Slice 4—local companion snapshot command
 
 - Add a hidden or experimental command that writes a registration and snapshot
   for the current local tmux endpoint.
@@ -615,7 +627,7 @@ app bundle, keyboard/focus, screenshot, or control-API paths change, also run
   heartbeat time, and supported actions.
 - Keep lifecycle manual/explicit until `doctor` can explain it.
 
-### Slice 5 — reverse tunnel proof
+### Slice 5—reverse tunnel proof
 
 - Prototype remote host querying a workstation companion through a manually established reverse
   tunnel.
@@ -623,15 +635,15 @@ app bundle, keyboard/focus, screenshot, or control-API paths change, also run
 - Do not generalize a transport framework until this creates a second concrete
   transport beside local file/SSH pull.
 
-### Slice 6 — display registration
+### Slice 6—display registration
 
 - Completed with a separate machine-local display registry rather than extending companion transport registration.
-- Capture and focus Ghostty by its official exact stable terminal UUID; retain optional tab/window IDs and title only for diagnostics.
+- Capture and focus Ghostty by its official exact stable terminal UUID. Retain optional tab/window IDs and title only for diagnostics.
 - Replace title-only activation scripts with registered display activation where available.
 - Keep `activation_command` as a bounded fallback, and keep tmux/display results structurally separate.
-- Preserve source-host or companion-host activation in the existing `displayActivation` JSON field; add requesting-host activation as `callerDisplayActivation`.
+- Preserve source-host or companion-host activation in the existing `displayActivation` JSON field. Add requesting-host activation as `callerDisplayActivation`.
 
-### Slice 7 — relay evaluation
+### Slice 7—relay evaluation
 
 - Evaluate relay/cache service only after local snapshot store, prewarmer, and
   reverse tunnel proof reveal concrete limits.

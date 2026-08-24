@@ -30,7 +30,7 @@ better tool.
 | Control API | You want scripts or native clients to read Foreman's tmux inventory | `foreman agents --json` |
 
 Foreman is built from this source checkout today. Release artifacts are published
-from version tags; do not assume a package registry install unless a release note
+from version tags. Do not assume a package registry install unless a release note
 or local workflow verifies it.
 
 ## Demo
@@ -90,7 +90,7 @@ Success signal: `foreman --setup` ends with `Next` steps, `foreman --doctor`
 prints Machine/Config/Repo/Runtime findings, and a ready setup has no `ERROR`
 lines. `WARN` lines are still useful: they tell you which panes are running in
 fallback mode or which hook wiring needs a restart. `foreman` should open the
-operator dashboard; press `?` there for the key map and status legend.
+operator dashboard. Press `?` there for the key map and status legend.
 
 `foreman --setup` is safe to rerun. It writes hook/config files, but it does not
 repair already-running agent panes. Restart affected panes after changing hook
@@ -121,7 +121,7 @@ schemas, exit behavior, and path-resolution rules.
 ## Native macOS app
 
 The macOS app is a Swift/AppKit/SwiftUI client for Foreman's Rust control API.
-It does not reimplement tmux discovery; it calls `foreman agents --json`,
+It does not reimplement tmux discovery. It calls `foreman agents --json`,
 `foreman focus --pane ... --json`, and `foreman send --pane ... --json`.
 
 Use the app for:
@@ -229,7 +229,7 @@ foreman --doctor --repo /path/to/repo
 ```
 
 If an existing pane was started before hook wiring changed, restart that agent
-pane. Setup updates files; it does not repair already-running processes.
+pane. Setup updates files. It does not repair already-running processes.
 
 See [Operator Guide](docs/operator-guide.md) for setup scopes, doctor fixes,
 native hook examples, notification config, UI preferences, and troubleshooting.
@@ -281,7 +281,7 @@ the related tmux pane. Custom notification sounds can use
 `notification-sounds:<prefix>` so playback stays on the notification path instead
 of direct `afplay` audio.
 
-See [Operator Guide — Notifications](docs/operator-guide.md#notifications) for
+See [Operator Guide—Notifications](docs/operator-guide.md#notifications) for
 configuration, custom sound routes, and troubleshooting. That guide includes both
 macOS custom sound routes: direct file playback and the `alerter --sound`
 notification-sound prefix path that better respects Focus / Do Not Disturb.
@@ -301,25 +301,25 @@ foreman send --pane %42 --text "continue" --json
 ```
 
 Use `foreman <command> --help` for the exact contract. These commands are the
-stable seam for clients; tmux scraping and native signal details stay behind the
+stable seam for clients. The tmux scraping and native signal details stay behind the
 CLI.
 
 ## Docs
 
-- [Docs index](docs/README.md) — start here for the durable docs map
-- [Operator Guide](docs/operator-guide.md) — setup, dashboard, config, hooks,
+- [Docs index](docs/README.md)—start here for the durable docs map
+- [Operator Guide](docs/operator-guide.md)—setup, dashboard, config, hooks,
   notifications, extension providers, and troubleshooting
-- [Repo Tour](docs/tour.md) — contributor-oriented code map and reading order
-- [Workflow Guide](docs/workflows.md) — HK lifecycle, validation ladder, release
+- [Repo Tour](docs/tour.md)—contributor-oriented code map and reading order
+- [Workflow Guide](docs/workflows.md)—HK lifecycle, validation ladder, release
   process, and `.ai/` policy
-- [Architecture](docs/architecture.md) — system boundaries and module map
-- [macOS App Bundle](docs/macos-overlay/app-bundle.md) — build, install, launch,
+- [Architecture](docs/architecture.md)—system boundaries and module map
+- [macOS App Bundle](docs/macos-overlay/app-bundle.md)—build, install, launch,
   and validate `Foreman.app`
-- [macOS Overlay Architecture](docs/macos-overlay/architecture.md) — Swift app
+- [macOS Overlay Architecture](docs/macos-overlay/architecture.md)—Swift app
   boundaries and control API seams
-- [Harness Kit Provider](docs/providers/harness-kit.md) — install and operate
+- [Harness Kit Provider](docs/providers/harness-kit.md)—install and operate
   the read-only HK provider
-- [Changelog](CHANGELOG.md) — release history
+- [Changelog](CHANGELOG.md)—release history
 
 ## Development
 
@@ -341,12 +341,12 @@ Useful tasks:
 | `mise run typecheck` | Run static type analysis |
 | `mise run test` | Run Rust tests |
 | `mise run build` | Build release binaries |
-| `mise run check` | Fast quality gate; this is what CI calls |
+| `mise run check` | Fast quality gate. This is what CI calls |
 | `mise run verify` | Heavy validation, including release/UX evidence |
 | `mise run verify-release` | Release-confidence operator gauntlet |
 | `mise run pr-preflight` | Large-PR checklist and cheap merge-prep guardrails |
 | `mise run validate-macos-overlay-change` | Required lane for macOS app, overlay, keyboard/focus, screenshot, or control-API changes |
-| `mise run capture-macos-overlay-demo` | Regenerate the deterministic macOS overlay demo GIF/MP4; requires `ffmpeg` |
+| `mise run capture-macos-overlay-demo` | Regenerate the deterministic macOS overlay demo GIF/MP4. Requires `ffmpeg` |
 | `mise run install-macos-overlay-app` | Build, install, and reset `~/Applications/Foreman.app` |
 | `mise run verify-macos-overlay-app` | Non-activating app-bundle smoke test |
 | `mise run native-preflight` | Check local real-harness readiness |
@@ -365,34 +365,15 @@ CI calls `mise run ci`, which maps to the fast check gate. See
 [Workflow Guide](docs/workflows.md) for HK lifecycle, validation layers, `.ai/`
 policy, and release evidence.
 
-## Release plan for `1.5.0`
+## Released in `1.5.0`
 
-The multi-source/source-companion work is a minor release. It adds source-aware
-local + remote SSH aggregation, companion/snapshot transports, `connect-ssh`,
-trusted reverse focus/send, display activation, and macOS overlay source parity.
-The planned release version is `1.5.0`.
-
-Before tagging:
-
-```bash
-python3 -c 'import tomllib; from pathlib import Path; assert tomllib.loads(Path("Cargo.toml").read_text())["package"]["version"] == "1.5.0"'
-rg -n 'Current crate version: `1.5.0`|## 1.5.0' README.md CHANGELOG.md
-mise run check
-mise run verify
-```
-
-After the version-bump PR is squash-merged:
-
-```bash
-git checkout main
-git pull --ff-only origin main
-git tag -a v1.5.0 -m "Release 1.5.0"
-git push origin v1.5.0
-gh run list --workflow Release --limit 3
-gh run watch <run-id> --exit-status
-gh release view v1.5.0
-```
+Release 1.5.0 added source-aware local and remote SSH aggregation,
+companion/snapshot transports, `connect-ssh`, trusted reverse focus/send,
+machine-local display activation, and macOS overlay source parity. See the
+[`1.5.0` changelog](CHANGELOG.md#150---2026-06-10) and
+[GitHub release](https://github.com/safurrier/foreman/releases/tag/v1.5.0) for
+release notes and archives.
 
 The release workflow rejects tags that do not match `Cargo.toml`, rebuilds the
-release binaries, uploads validation evidence, and publishes GitHub release
-archives for Linux and macOS.
+release binaries, uploads validation evidence, and publishes Linux and macOS
+archives.

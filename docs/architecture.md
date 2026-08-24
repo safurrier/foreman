@@ -87,6 +87,9 @@ testable as the app grows.
 - **remote source boundary**: SSH-backed sources run Foreman probes on another
   host. Remote timeouts, stale tmux sockets, missing binaries, and schema
   mismatches are source diagnostics rather than whole-dashboard failures.
+- **companion action boundary**: The local JSON-line companion endpoint requires
+  explicit send trust. Send capability requires a token, and reverse tunnels or
+  relay transports must preserve that authorization boundary.
 - **Harness boundary**: native integration signals are more structured but still
   external to Foreman and may disconnect or downgrade to compatibility mode.
   For Claude Code and Codex CLI, those signals arrive through official hook
@@ -136,7 +139,7 @@ testable as the app grows.
 - Direct-input drafts and rename/spawn/kill modal targets live in `AppState`;
   widgets render them but do not own them.
 - Search queries, flash prefixes, and their restore-selection targets also live
-  in `AppState`; cancel behavior is reducer-owned rather than widget-local.
+  in `AppState`. Cancel behavior is reducer-owned rather than widget-local.
 - Selected workspace identity is derived from tmux pane working directories, not
   sidebar row indexes or cursor position.
 - In a merged source inventory, `SourcePaneId` (`source_id` + tmux `pane_id`) is
@@ -145,7 +148,7 @@ testable as the app grows.
 - Pull request cache entries, detail-panel state, and auto-open suppression are
   keyed by workspace path in `AppState`.
 - Notification mute state, profile, refresh tick, configured cooldown, and
-  per-pane cooldowns also live in `AppState`; refresh reconciliation emits
+  per-pane cooldowns also live in `AppState`. Refresh reconciliation emits
   notification effects but does not choose notification backends directly.
 - Header system stats and the latest operator-visible alert also live in
   `AppState`, so rendering stays pure and failure surfaces remain testable.
@@ -159,7 +162,7 @@ testable as the app grows.
 
 - Native integration state wins over compatibility heuristics when both are
   available for the same agent.
-- Harness mode preference is typed config owned by runtime/bootstrap code; the
+- Harness mode preference is typed config owned by runtime/bootstrap code. The
   reducer only consumes the resulting inventory state.
 - Claude Code hook bridging is outside the reducer and renderer. The bridge
   reads hook stdin, resolves the pane identity, and writes atomic signal files
@@ -179,7 +182,7 @@ testable as the app grows.
 - All tmux, GitHub, browser, clipboard, terminal-display, and notification effects flow through
   adapters or services, never the renderer or reducer.
 - Source display identity is local state owned by the Foreman process/machine that owns the display. It is not included in SSH, snapshot, or companion registration transport payloads.
-- Ghostty display selection uses its stable AppleScript terminal ID and exact `focus` command. Titles are diagnostics only; tty and pid are not display selectors.
+- Ghostty display selection uses its stable AppleScript terminal ID and exact `focus` command. Titles are diagnostics only. Tty and pid are not display selectors.
 - Source focus reports tmux and display outcomes independently. Registered display activation is attempted before the existing activation-command compatibility fallback.
 - tmux action adapters return structured success/failure results rather than
   leaking subprocess text into reducer-facing code.
@@ -223,7 +226,7 @@ testable as the app grows.
 - **Prefer commands over raw keys** - input maps to `Command`, then `Action`;
   business logic never matches raw keycodes.
 - **Prefer a pure reducer with explicit Effects** - reducer owns state
-  transitions; adapters own I/O.
+  transitions. Adapters own I/O.
 - **Prefer fake-backed contract tests** - most tmux, pull request, and
   notification behavior should be validated behind seams before live smoke tests.
 - **Prefer pure notification policy** - transition detection, suppression, and
@@ -234,13 +237,13 @@ testable as the app grows.
 - **Prefer keyboard-first, instant interaction** - navigation should feel
   immediate, with no delay inserted between keypress and state change.
 - **Prefer progressive disclosure** - header, sidebar, preview, and input stay
-  primary; search, flash, help, rename, spawn, and PR detail remain secondary
+  primary. Search, flash, help, rename, spawn, and PR detail remain secondary
   surfaces.
 - **Keep overlays reducer-owned** - help scroll position, modal drafts, search
   state, and flash state belong in `AppState` so overlay behavior stays
   testable and deterministic.
 - **Prefer compact badges over repeated prose** - dense tree rows should expose
-  status, harness, and primary identity at a glance; details belong in preview
+  status, harness, and primary identity at a glance. Details belong in preview
   or overlay surfaces, not in every sidebar row. If a mark needs explanation,
   the help surface should carry the legend instead of expanding every row.
 - **Prefer monochrome-safe status cues** - color may help, but labels and
@@ -288,15 +291,17 @@ GitHub Actions currently maps those workflows like this:
 
 Before pushing feature work:
 
-1. `mise run check`
-2. `/plan-sync`
-3. `/spec-sync`
-4. `/context-engineering update` when AGENTS routing changed
-5. `/docs-workflow update` when docs changed
+1. Record focused proof with `hk validate` as the change stabilizes.
+2. Run `mise run check`.
+3. Use `/spec-sync` when behavior changes current contracts.
+4. Update AGENTS or docs through their current context owners when routing or documentation changed.
+5. Run `hk sync` and inspect `hk ready` before handoff.
+
+Use `/plan-sync` only when explicitly maintaining a named historical `.ai/plans/**` artifact.
 
 ### Artifact-first debugging
 
-When CI fails, inspect the uploaded `test-results/` artifact first and use it
+When CI fails, inspect the optional GitHub artifact named `test-results`, which uploads generated `test-results/` and `apps/*/test-results/` paths when present, and use it
 to choose the narrowest reproducible local command.
 
 ---
@@ -320,7 +325,8 @@ decisions that materially constrain work.
 | [0001-stack-choice](decisions/0001-stack-choice.md) | Stack selection for foreman |
 | [0002-source-aggregation-and-remote-ssh](decisions/0002-source-aggregation-and-remote-ssh.md) | Source-scoped local/remote tmux aggregation and one-shot SSH source transport |
 | [0003-remote-jump-terminal-activation](decisions/0003-remote-jump-terminal-activation.md) | Remote tmux focus plus local terminal/tab activation |
-| [0004-source-companion-relay](decisions/0004-source-companion-relay.md) | Proposed companion/relay direction for bidirectional and prewarmed sources |
+| [0004-source-companion-relay](decisions/0004-source-companion-relay.md) | Accepted companion, snapshot, reverse-tunnel, and machine-local display architecture |
+| [0005-native-provenance-authority](decisions/0005-native-provenance-authority.md) | Provider hook/file authority with lower-confidence compatibility fallback |
 
 ---
 
@@ -336,11 +342,19 @@ boundaries unless an ADR changes them.
 | src/bin/foreman-claude-hook.rs | Claude Code hook bridge CLI that resolves the signal directory and writes native per-pane status files | This document |
 | src/bin/foreman-codex-hook.rs | Codex hook bridge CLI that resolves the signal directory and writes native per-pane status files | This document |
 | src/bin/foreman-pi-hook.rs | Pi lifecycle bridge CLI that resolves the signal directory and writes native per-pane status files | This document |
-| src/runtime.rs | Interactive terminal setup, event polling, redraw cadence, effect execution, and runtime-level soft-failure handling | This document |
+| src/runtime.rs | Interactive terminal setup, event polling, redraw cadence, effect execution, source refresh, and runtime-level soft-failure handling | This document |
+| src/sources.rs | Source-scoped local, SSH, snapshot, and companion inventory plus safe action routing | ADRs 0002 and 0004 |
+| src/source_companion.rs and src/source_companion_connect.rs | JSON-line companion protocol, authorization, probes, and reverse-tunnel supervision | ADR 0004 |
+| src/source_snapshots.rs | Atomic source snapshots, registration metadata, and stale-cache fallback | ADR 0004 |
 | src/app/ | Core state, commands, actions, reducer, selectors, drafts, modal targets, and UI-facing invariants | This document |
 | src/ui/ | Ratatui layout, widgets, rendering, and buffer-test helpers | This document |
-| src/adapters/tmux.rs | tmux discovery, capture, pane working-directory lookup, focus, send-input, rename, spawn, and kill seam; transport only, no status heuristics | `SPEC.md` |
+| src/adapters/tmux.rs | tmux discovery, capture, pane working-directory lookup, focus, send-input, rename, spawn, and kill seam. Transport only, no status heuristics | `SPEC.md` |
 | src/integrations/ | Harness recognition, compatibility status derivation, debounce logic, hook-to-signal bridging, shared native file-signal helpers, native-over-compatibility precedence overlays, and config-driven per-harness mode preference | `SPEC.md` |
+| src/services/control_api.rs | Typed JSON control plane consumed by Foreman.app and automation | `SPEC.md` |
+| src/services/extensions.rs | Read-only extension card loading and provider failure isolation | This document |
+| src/services/linked_repositories.rs | Explicit pane-to-repository association and repository metadata | This document |
+| src/services/pi_subagents.rs | Typed Pi subagent activity service and native evidence | ADR 0005 |
+| src/services/ui_preferences.rs | Persistent UI preference ownership and config precedence | `SPEC.md` |
 | src/services/notifications.rs | Notification policy, configured cooldowns, backend-order wiring, backend fallback, and dispatch seams | `SPEC.md` |
 | src/services/pull_requests.rs | Pull request lookup, browser/copy effects, and degradation behavior | `SPEC.md` |
 | src/services/system_stats.rs | Header-level CPU and memory pressure snapshots behind a small service seam | This document |

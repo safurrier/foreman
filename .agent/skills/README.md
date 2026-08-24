@@ -33,6 +33,8 @@ Each skill follows this structure:
 | `foreman-swift-overlay-ux` | Foreman-specific UX review workflow for the Swift macOS overlay |
 | `foreman-swift-overlay-validation` | Foreman-specific validation workflow for overlay fixtures, fake Foreman, and screenshots |
 | `foreman-agent-sim-validation` | Repo-local scripted agent simulation scenarios for deterministic Foreman behavior rollouts |
+| `plan-sync` | Legacy-only audit route for historical `.ai/plans/**`. Current work uses HK |
+| `spec-sync` | Foreman compatibility route into the installed `context-contracts` owner |
 
 ## Adding a Skill
 

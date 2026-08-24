@@ -21,6 +21,7 @@
 | Doc | Topic |
 |---|---|
 | [`architecture.md`](architecture.md) | System boundaries, invariants, and module map |
+| [`project-evolution.md`](project-evolution.md) | Evidence-backed product and architecture phases |
 | [`macos-overlay/architecture.md`](macos-overlay/architecture.md) | Swift macOS overlay boundaries, modules, and app-shell seams |
 | [`macos-overlay/ux-checklist.md`](macos-overlay/ux-checklist.md) | Native Mac UX checklist for the overlay command palette |
 
@@ -31,6 +32,7 @@
 | [`decisions/0001-stack-choice.md`](decisions/0001-stack-choice.md) | Stack choice ADR |
 | [`decisions/0002-source-aggregation-and-remote-ssh.md`](decisions/0002-source-aggregation-and-remote-ssh.md) | Source aggregation and remote SSH target architecture |
 | [`decisions/0003-remote-jump-terminal-activation.md`](decisions/0003-remote-jump-terminal-activation.md) | Remote tmux focus plus local terminal activation options |
-| [`decisions/0004-source-companion-relay.md`](decisions/0004-source-companion-relay.md) | Follow-up source companion, relay, reverse tunnel, and prewarmed snapshot architecture |
+| [`decisions/0004-source-companion-relay.md`](decisions/0004-source-companion-relay.md) | Accepted source companion, reverse tunnel, snapshot, and display architecture |
+| [`decisions/0005-native-provenance-authority.md`](decisions/0005-native-provenance-authority.md) | Provider-native provenance and compatibility fallback authority |
 
 <!-- generated-by: context-engineering@2.2.0 | last-updated: 2026-04-30 -->

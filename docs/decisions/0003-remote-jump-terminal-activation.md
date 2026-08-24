@@ -1,8 +1,20 @@
 ---
-title: ADR 0003 — Remote jump and terminal activation
-summary: Decide how Foreman should focus both a remote tmux pane and the local terminal tab that displays that source.
+id: foreman-adr-0003
+title: ADR 0003—Remote jump and terminal activation
+description: >
+  Separates remote tmux focus from machine-local terminal display activation.
 status: accepted
+date: 2026-06-09
 updated: 2026-07-14
+index:
+  - id: context
+    keywords: [remote, focus, terminal, display]
+  - id: options
+    keywords: [activation-command, ghostty, companion]
+  - id: decision
+    keywords: [tmux-focus, display-activation, fallback]
+  - id: validation-requirements
+    keywords: [tcc, ownership, diagnostics]
 related:
   code:
     - src/runtime.rs
@@ -17,20 +29,19 @@ related:
 
 # 0003: Remote Jump and Terminal Activation
 
-Status: accepted
 
 ## Context
 
 Foreman can now focus remote tmux panes through source-routed actions, e.g.
-`foreman --source coder-dev-gpu-1 focus --pane %3`. That is only half of the
-operator experience. Alex's normal setup has Ghostty tabs for both local and
-Coder, and the expected Foreman behavior is still command-palette-like: select a
+`foreman --source remote-dev focus --pane %3`. That is only half of the
+operator experience. A common setup has Ghostty tabs for both local and
+a remote development host, and the expected Foreman behavior is still command-palette-like: select a
 row, press Enter/focus, and land in the right pane. A flow that focuses remote
-tmux and then asks the operator to manually switch to the Coder terminal tab is
+tmux and then asks the operator to manually switch to the remote terminal tab is
 not good enough as the target UX.
 
 The implementation also revealed a related problem: noninteractive SSH does not
-inherit the `$TMUX` environment from an already-attached Ghostty Coder tab. A
+inherit the `$TMUX` environment from an already-attached Ghostty remote-host tab. A
 remote source may query a different tmux server/socket than the tab the operator
 is looking at unless the source is configured or registered precisely.
 
@@ -49,7 +60,7 @@ Pros:
 
 Cons:
 
-- Does not meet the desired UX; it requires an extra manual tab switch.
+- Does not meet the desired UX. It requires an extra manual tab switch.
 
 Decision: keep as fallback only.
 
@@ -58,19 +69,19 @@ Decision: keep as fallback only.
 Each source can declare a local activation command. Focus becomes a two-step
 operation:
 
-1. Source-routed tmux focus, e.g. `ssh coder tmux switch-client -t %3`.
+1. Source-routed tmux focus, e.g. `ssh remote-dev tmux switch-client -t %3`.
 2. Run a local command to activate the terminal/tab that displays that source.
 
 Example shape:
 
 ```toml
-[sources.coder-dev-gpu-1.jump]
+[sources.remote-dev.jump]
 activate_command = "osascript ~/.config/foreman/focus-coder-ghostty-tab.scpt"
 ```
 
 Pros:
 
-- First shippable path for Alex's setup.
+- First shippable path for a remote-host setup.
 - Terminal-agnostic escape hatch.
 - Does not require Foreman to own a persistent source daemon.
 
@@ -84,13 +95,13 @@ Decision: recommended first implementation path.
 ### C. Ghostty AppleScript integration
 
 Ghostty 1.3+ exposes a macOS AppleScript object model with windows, tabs, and
-terminals. Foreman can potentially activate Ghostty, select the configured Coder
+terminals. Foreman can potentially activate Ghostty, select the configured remote-host
 tab, and focus its terminal after focusing the remote tmux pane.
 
 Proof/research notes:
 
 - Ghostty docs describe `application -> windows -> tabs -> terminals`.
-- `window` has `selected tab`; `tab` has `selected` and `focused terminal`.
+- `window` has `selected tab`. `tab` has `selected` and `focused terminal`.
 - AppleScript commands include selecting a tab and focusing a terminal.
 - First use may trigger macOS Automation/TCC permission prompts.
 - The API is currently described as preview/young, so Foreman should gate this
@@ -99,9 +110,9 @@ Proof/research notes:
 Potential shape:
 
 ```toml
-[sources.coder-dev-gpu-1.jump]
+[sources.remote-dev.jump]
 strategy = "ghostty-applescript"
-tab_title_contains = "Coder"
+tab_title_contains = "Remote dev"
 ```
 
 Pros:
@@ -146,7 +157,7 @@ Decision: keep as long-term direction, not the next implementation.
 
 Ship jump-to as two structurally separate outcomes: tmux focus first, then best-effort local display activation. The compatibility activation command remains supported.
 
-ADR 0004 Slice 6 completes the native path with a machine-local source display registry. Foreman captures Ghostty's official stable terminal UUID and activates the exact terminal through its AppleScript `focus` command. Window/tab IDs and title are retained only for diagnostics; title substring, tty, and pid never select the target. A current registration is attempted before the activation command fallback.
+ADR 0004 Slice 6 completes the native path with a machine-local source display registry. Foreman captures Ghostty's official stable terminal UUID and activates the exact terminal through its AppleScript `focus` command. Window/tab IDs and title are retained only for diagnostics. Title substring, tty, and pid never select the target. A current registration is attempted before the activation command fallback.
 
 Display identity stays on the machine that owns the display. It is not copied into SSH, snapshot, or companion registration payloads. Companion-host focus reads the companion process's own local registry.
 
@@ -158,5 +169,5 @@ Before implementing terminal activation, prove:
 - Display or activation-command failure does not make successful tmux focus look failed.
 - Placeholder expansion is shell-safe.
 - Ghostty AppleScript capture and focus use the stable terminal UUID, or report an actionable `source.display.*` diagnostic for provider, platform, TCC, or closed-terminal failures.
-- Replacement creates a new opaque ownership handle; unregister compares the current handle before deletion.
+- Replacement creates a new opaque ownership handle. Unregister compares the current handle before deletion.
 - `sources list`, `sources doctor`, and `sources display doctor` expose local registration health alongside tmux endpoint diagnostics.

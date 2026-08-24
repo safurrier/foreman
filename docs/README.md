@@ -15,22 +15,27 @@ index:
 
 ## Start Here
 
-- [Repo Tour](tour.md) — first read for onboarding, reading order, and the code map
-- [Workflow Guide](workflows.md) — HK lifecycle, validation layers, unattended setup/resume receipts, and common rough edges
+- [Repo Tour](tour.md)—first read for onboarding, reading order, and the code map
+- [Workflow Guide](workflows.md)—HK lifecycle, validation layers, unattended setup/resume receipts, and common rough edges
 
 ## Operate Foreman
 
-- [Operator Guide](operator-guide.md) — install, setup, dashboard, config, hooks, notifications, and troubleshooting
-- [Harness Kit Provider](providers/harness-kit.md) — install and operate the read-only HK extension card provider
-- [macOS App Bundle](macos-overlay/app-bundle.md) — build, install, launch, and smoke-test `Foreman.app`
-- [macOS Overlay Validation](macos-overlay/validation.md) — required overlay change lane, snapshots, gauntlet, and manual smoke checks
+- [Operator Guide](operator-guide.md)—install, setup, dashboard, config, hooks, notifications, and troubleshooting
+- [Harness Kit Provider](providers/harness-kit.md)—install and operate the read-only HK extension card provider
+- [macOS App Bundle](macos-overlay/app-bundle.md)—build, install, launch, and smoke-test `Foreman.app`
+- [macOS Overlay Validation](macos-overlay/validation.md)—required overlay change lane, snapshots, gauntlet, and manual smoke checks
 
 ## Understand the System
 
-- [Architecture](architecture.md) — invariants, boundaries, and cross-cutting design
-- [macOS Overlay Architecture](macos-overlay/architecture.md) — Swift modules, app-shell seams, hotkey routing, and control API boundaries
-- [macOS Overlay UX Checklist](macos-overlay/ux-checklist.md) — command-palette and good-Mac-citizen UX expectations
+- [Architecture](architecture.md)—invariants, boundaries, and cross-cutting design
+- [Project Evolution](project-evolution.md)—evidence-backed phases and retained boundaries
+- [macOS Overlay Architecture](macos-overlay/architecture.md)—Swift modules, app-shell seams, hotkey routing, and control API boundaries
+- [macOS Overlay UX Checklist](macos-overlay/ux-checklist.md)—command-palette and good-Mac-citizen UX expectations
 
 ## Decisions
 
-- [ADR 0001 — Stack Choice](decisions/0001-stack-choice.md) — why the repo is Rust-first
+- [ADR 0001—Stack Choice](decisions/0001-stack-choice.md)—why the repo is Rust-first
+- [ADR 0002—Source Aggregation](decisions/0002-source-aggregation-and-remote-ssh.md)—source-scoped local and SSH inventory
+- [ADR 0003—Remote Jump](decisions/0003-remote-jump-terminal-activation.md)—tmux focus and machine-local display activation
+- [ADR 0004—Source Companion](decisions/0004-source-companion-relay.md)—companion, snapshot, tunnel, and display architecture
+- [ADR 0005—Native Provenance](decisions/0005-native-provenance-authority.md)—hook-native authority and compatibility fallback

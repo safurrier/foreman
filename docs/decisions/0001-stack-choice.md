@@ -1,9 +1,11 @@
 ---
 id: foreman-adr-0001
-title: ADR 0001 — Stack Choice for foreman
+title: ADR 0001—Stack Choice for foreman
 description: >
   Records the rust stack selection decision for foreman,
   including rationale, trade-offs, and alternatives considered.
+status: accepted
+date: 2026-04-08
 index:
   - id: decision
     keywords: [stack, choice, python, go, tools, rationale]
@@ -15,9 +17,6 @@ index:
 
 # ADR 0001: Stack Choice for foreman
 
-**Status**: Accepted
-**Date**: <!-- YYYY-MM-DD -->
-**Deciders**: <!-- names or team -->
 **Generated from**: init
 
 ---
@@ -52,8 +51,7 @@ The Rust stack uses:
 
 ## Alternatives Considered
 
-<!-- List stacks that were considered but not chosen, and why -->
-
 | Alternative | Reason not chosen |
 |---|---|
-| <!-- alt --> | <!-- reason --> |
+| Python | Faster iteration, but weaker compile-time guarantees for a stateful terminal control plane. |
+| Go | Simple deployment, but less alignment with the chosen Ratatui ecosystem and reducer-oriented UI implementation. |
