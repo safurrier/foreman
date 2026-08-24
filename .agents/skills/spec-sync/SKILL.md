@@ -1,118 +1,23 @@
 ---
 name: spec-sync
-description: >
-  Review changes against SPEC.md and docs/decisions/. Capture architectural
-  decisions as ADRs, update SPEC.md if invariants changed. Run before pushing.
+description: Route a branch diff through the repository's current SPEC and ADR contract owners. Use when reviewing whether changed behavior requires a contract update before handoff.
 allowed-tools: Read, Edit, Write, Glob, Grep, Bash
 ---
 
-Review the current branch's changes against the project's correctness envelope
-and decision records. Propose updates if needed, skip if nothing changed.
+# Contract sync compatibility route
 
-## When to Run
+Use the installed `context-contracts` workflow as the preferred authority for `SPEC.md` and `docs/decisions/`. This repo-local skill supplies Foreman routing plus a portable fallback for fresh checkouts where that external skill is unavailable.
 
-Before pushing to a PR branch. Part of the pre-push workflow in AGENTS.md:
+## Workflow
 
-1. `mise run check` — must pass
-2. **`/spec-sync`** — this skill
-3. `/context-engineering update` — if AGENTS.md affected
-4. `/docs-workflow update` — if docs/ affected
+1. Inspect `git diff origin/main...HEAD` and read current `SPEC.md`, ADRs, source, and tests affected by the diff.
+2. When `context-contracts` is available, ask it to analyze or update the existing Foreman contract convention.
+3. Otherwise, apply the portable fallback:
+   - Keep exactly the six existing second-level SPEC sections and edit only changed requirements, interfaces, invariants, or acceptance evidence.
+   - Create an ADR only for an evidenced lasting decision with rationale and counterevidence. Avoid requiring one ADR per branch.
+   - Preserve the established YAML metadata, original decision date, update history, and sequential numbering.
+4. When adding or changing a decision, update `docs/AGENTS.md`, `docs/README.md`, and the architecture decision index.
+5. Run `tests/docs_contract_test.py` through the repository Python environment and run `git diff --check`.
+6. When `context-review` is available, run it after all context and prose edits stabilize. Otherwise, report that semantic context review was unavailable rather than inventing an equivalent check.
 
-## Process
-
-### 1. Assess what changed
-
-```bash
-git diff origin/main...HEAD --name-only
-git diff origin/main...HEAD --stat
-```
-
-If no changes, report "nothing to sync" and exit.
-
-### 2. Read the spec and existing decisions
-
-- Read `SPEC.md` — current invariants, requirements, interfaces
-- Read `docs/decisions/` — existing ADRs (if directory exists)
-- Note the highest ADR number for sequential numbering
-
-### 3. Review changes against the spec
-
-For each significant change, ask:
-
-- **Did this change an invariant?** (state rule, safety boundary, interface contract)
-  → If yes, update SPEC.md
-- **Did this make an architectural decision?** (chose one approach over alternatives,
-  established a pattern, added a dependency, changed a boundary)
-  → If yes, propose an ADR
-- **Did this change a public interface?** (API surface, CLI flags, config format)
-  → If yes, update SPEC.md Interfaces section
-
-Skip trivial changes: formatting, typo fixes, test-only changes, dependency bumps
-without behavioral impact.
-
-### 4. Write updates
-
-**ADRs**: One ADR per branch summarizing key decisions. Follow the schema:
-
-```markdown
----
-id: {project}-adr-{NNNN}
-title: ADR {NNNN} — {Title}
-description: >
-  {One-line summary}
-index:
-  - id: decision
-    keywords: [{relevant, keywords}]
----
-
-# ADR {NNNN}: {Title}
-
-**Status**: Accepted
-**Date**: {YYYY-MM-DD}
-**Deciders**: {names}
-**Generated from**: {diff | pr | agent-session | manual}
-
----
-
-## Context
-{Why this decision was needed}
-
-## Decision
-{What was chosen}
-
-## Consequences
-**Positive:**
-- {benefits}
-
-**Negative / Trade-offs:**
-- {costs}
-
-## Alternatives Considered
-| Alternative | Reason not chosen |
-|---|---|
-| {option} | {reason} |
-```
-
-**SPEC.md**: Use targeted edits — update only the affected section.
-Don't rewrite the whole file.
-
-**Architecture.md decisions index**: If a new ADR was created, add it to the
-decisions index table in `docs/architecture.md`.
-
-### 5. Report
-
-Print a summary:
-- **No updates needed** — if nothing changed that affects spec/decisions
-- **Updated SPEC.md** — list which sections and why
-- **Created ADR {NNNN}** — one-line summary of the decision
-- **Updated decisions index** — if architecture.md was touched
-
-## Rules
-
-- **Don't over-capture** — not every code change is a decision. Only capture choices
-  that constrain future work or that someone would want to understand later.
-- **One ADR per branch** — summarize the key decisions, don't create one per commit.
-- **Respect existing content** — use targeted edits, never rewrite SPEC.md or
-  architecture.md wholesale.
-- **Contract tests validate** — `mise run check` will catch malformed ADRs or
-  missing SPEC sections. Run it after making changes.
+Skip contract edits for formatting, tests that do not change accepted behavior, and dependency updates without a behavioral contract change. Never create placeholders or a separate decision ledger.

@@ -53,6 +53,15 @@ def main() -> None:
     assert "Never create a new plan" in plans
     assert "hk start" in plans
 
+    for skill_name in ("plan-sync", "spec-sync"):
+        primary = ROOT / f".agent/skills/{skill_name}/SKILL.md"
+        compatibility = ROOT / f".agents/skills/{skill_name}/SKILL.md"
+        assert primary.read_bytes() == compatibility.read_bytes()
+
+    spec_sync = (ROOT / ".agent/skills/spec-sync/SKILL.md").read_text()
+    assert "portable fallback" in spec_sync
+    assert "semantic context review was unavailable" in spec_sync
+
     docs_index = (ROOT / "docs/README.md").read_text()
     for decision in decisions:
         assert decision.name in docs_index
