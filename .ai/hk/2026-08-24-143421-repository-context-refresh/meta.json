@@ -1,0 +1,32 @@
+{
+  "attached_artifacts": [],
+  "branch": "docs/repository-context-refresh",
+  "diff_hash": "sha256:2fedd4f52d891cd490faabb9c41eb9ea499bbc3b6e0b79b601e99d6b2f11488b",
+  "dirty": false,
+  "event_count": 7,
+  "event_seq": 7,
+  "evidence_count": 1,
+  "evidence_ids": [
+    "ev_20260824_152213_491996"
+  ],
+  "file_hashes": {
+    "README.md": "sha256:bc48aaca5e717e320d8e052a62749447ade7a94a88b4411f2259ea004bb788a0",
+    "artifacts/README.md": "sha256:c4bad9d4652f296a7e4dcf175fe1dd0c66a99ec0b74941cd45c499e84792436c"
+  },
+  "files": [
+    "README.md",
+    "meta.json",
+    "artifacts/README.md"
+  ],
+  "generated_at": "2026-08-24T22:34:28.699304+00:00",
+  "generated_by": "hk export --format handoff-dir",
+  "git_sha": "0794d4b",
+  "output_path": ".ai/hk/2026-08-24-143421-repository-context-refresh",
+  "ready": true,
+  "ready_status": "ready-with-dangerous-skips",
+  "schema_version": 1,
+  "sync_status": "synced",
+  "target_root": ".",
+  "target_scope": ".",
+  "work_id": "2026-08-24-143421-repository-context-refresh"
+}
