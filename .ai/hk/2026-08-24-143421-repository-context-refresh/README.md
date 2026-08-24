@@ -40,13 +40,14 @@ Historical hand-authored slice plans live under `.ai/plans/`; new Harness Toolki
 - context: info — no context recorded; okay for trivial work, add hk context if it prevents rediscovery
 - plan: pass — plan recorded
 - decision: pass — decision and spec reflection recorded
-- validation: pass — validation dangerously skipped: fast-gate; reason: The unchanged wall-clock timing test sources::tests::aggregator_queries_sources_in_parallel fails persistently on this loaded host; the full gate otherwise reached 376 passing tests; mitigation: cargo fmt/clippy/check pass, 376 non-timing Rust tests pass, docs contracts pass, and GitHub CI will run the exact gate on a clean runner
+- validation: fail — validation evidence is stale for current changed paths; rerun hk validate or dangerously-skip validation. Current changed paths: .agent/skills/spec-sync/SKILL.md, .agents/skills/plan-sync/SKILL.md, .agents/skills/spec-sync/SKILL.md, docs/architecture.md, docs/decisions/0002-source-aggregation-and-remote-ssh.md, +3 more.
 - review: pass — external-enough review recorded
-- profile-check:fast-gate: pass — validation dangerously skipped: fast-gate; reason: The unchanged wall-clock timing test sources::tests::aggregator_queries_sources_in_parallel fails persistently on this loaded host; the full gate otherwise reached 376 passing tests; mitigation: cargo fmt/clippy/check pass, 376 non-timing Rust tests pass, docs contracts pass, and GitHub CI will run the exact gate on a clean runner
+- profile-check:fast-gate: fail — missing required profile check `fast-gate` (matched .agent/skills/README.md, .ai/plans/AGENTS.md, .mise/tasks/check, +11 more); run the matching native command from `hk checks --changed`, record it with `hk validate --check fast-gate --why '...' -- <command>`, or `hk dangerously-skip validation --label fast-gate --reason ... --mitigation ...`
 - profile-review:codex-review: pass — required profile review recorded: codex-review (matched .mise/tasks/check, tests/docs_contract_test.py)
 
 ## Review
 - codex / codex-four-perspective-review [codex-review]: Independent review found six concrete metadata, sanitization, workflow, test, and trust-boundary defects. All six were reproduced and fixed; contracts/docs tests, Rust checks, 376 non-timing tests, and final context check/review pass. paths: .agent/skills/README.md, .agent/skills/plan-sync/SKILL.md, .agent/skills/spec-sync/SKILL.md, +14 more. [accepted]
+- github-codex / chatgpt-codex-connector [codex-review]: GitHub review found stale discoverable skill copies and a missing portable fallback. Both findings were fixed, acknowledged, and covered by mirror/fallback contract tests; final CI passes. paths: .agent/skills/spec-sync/SKILL.md, .agents/skills/plan-sync/SKILL.md, .agents/skills/spec-sync/SKILL.md, +1 more. [accepted]
 
 ## Dangerous skips
 - validation: fast-gate — reason: The unchanged wall-clock timing test sources::tests::aggregator_queries_sources_in_parallel fails persistently on this loaded host; the full gate otherwise reached 376 passing tests; mitigation: cargo fmt/clippy/check pass, 376 non-timing Rust tests pass, docs contracts pass, and GitHub CI will run the exact gate on a clean runner
