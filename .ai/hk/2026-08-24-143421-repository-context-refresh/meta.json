@@ -1,17 +1,18 @@
 {
   "attached_artifacts": [],
   "branch": "docs/repository-context-refresh",
-  "diff_hash": "sha256:77c93c81c59550aa30d0e9a0685b6271b167f0bd9c13675addc08e929f2162cc",
+  "diff_hash": "sha256:e938f9571bca9b97a305f7580f0d151c9bcb371b0f62826567d88d6386ebf708",
   "dirty": false,
-  "event_count": 10,
-  "event_seq": 12,
-  "evidence_count": 2,
+  "event_count": 12,
+  "event_seq": 15,
+  "evidence_count": 3,
   "evidence_ids": [
     "ev_20260824_152213_491996",
-    "ev_20260824_155606_916122"
+    "ev_20260824_155606_916122",
+    "ev_20260824_180236_792072"
   ],
   "file_hashes": {
-    "README.md": "sha256:f7b62d775293c061a5b4c050f0fe959bb5d77f5faa265128aac853de7175e16e",
+    "README.md": "sha256:2a6c0f90ad3f726bc64a86924edb74dd467221c38d60812e3ed347507aebe780",
     "artifacts/README.md": "sha256:c4bad9d4652f296a7e4dcf175fe1dd0c66a99ec0b74941cd45c499e84792436c"
   },
   "files": [
@@ -19,12 +20,12 @@
     "meta.json",
     "artifacts/README.md"
   ],
-  "generated_at": "2026-08-24T22:57:30.289670+00:00",
+  "generated_at": "2026-08-25T01:03:44.162534+00:00",
   "generated_by": "hk export --format handoff-dir",
-  "git_sha": "7531dcc",
+  "git_sha": "6915d6a",
   "output_path": ".ai/hk/2026-08-24-143421-repository-context-refresh",
-  "ready": true,
-  "ready_status": "ready-with-dangerous-skips",
+  "ready": false,
+  "ready_status": "not-ready",
   "schema_version": 1,
   "sync_status": "synced",
   "target_root": ".",
