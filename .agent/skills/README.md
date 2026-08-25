@@ -24,11 +24,11 @@ Each skill follows this structure:
 └── scripts/          # Automation scripts used by the skill
 ```
 
-## Current Skills
+## Current skills
 
 | Skill | Purpose |
 |---|---|
-| `macos-design-guidelines` | Vendored Apple HIG-oriented macOS design rules from `ehmo/platform-design-skills` |
+| `macos-design-guidelines` | Vendored Apple Human Interface Guidelines for macOS design from `ehmo/platform-design-skills` |
 | `macos-app-design` | Vendored native macOS app checklist/reference from `petekp/agent-skills` |
 | `foreman-swift-overlay-ux` | Foreman-specific UX review workflow for the Swift macOS overlay |
 | `foreman-swift-overlay-validation` | Foreman-specific validation workflow for overlay fixtures, fake Foreman, and screenshots |
@@ -36,7 +36,7 @@ Each skill follows this structure:
 | `plan-sync` | Legacy-only audit route for historical `.ai/plans/**`. Current work uses HK |
 | `spec-sync` | Foreman compatibility route into the installed `context-contracts` owner |
 
-## Adding a Skill
+## Add a skill
 
 A starter template is in `example-skill/SKILL.md`. Copy it:
 
@@ -45,7 +45,7 @@ cp -r .agent/skills/example-skill/ .agent/skills/<your-skill-name>/
 ```
 
 Then edit `SKILL.md` to describe:
-- When to load this skill (activation signals)
+- Signals that should load this skill
 - The opinionated workflow it encodes
 - Any references or scripts alongside it
 
@@ -55,6 +55,6 @@ Reference the skill from `AGENTS.md` if it applies broadly.
 
 Skills are **preference-based**. Canonical truth stays in `docs/`.
 
-- If a workflow is universally agreed → may become default practice (document in `AGENTS.md`)
+- A shared workflow may become default practice. Record it in `AGENTS.md`.
 - If preference-based → keep as optional Skill
 - If critical and objective → encode in CI/tooling instead

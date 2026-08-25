@@ -50,7 +50,7 @@ def main() -> None:
 
     plans = (ROOT / ".ai/plans/AGENTS.md").read_text()
     assert "Do not create a new plan" not in plans
-    assert "Never create a new plan" in plans
+    assert "Never add a new plan" in plans
     assert "hk start" in plans
 
     for skill_name in ("plan-sync", "spec-sync"):
@@ -59,8 +59,8 @@ def main() -> None:
         assert primary.read_bytes() == compatibility.read_bytes()
 
     spec_sync = (ROOT / ".agent/skills/spec-sync/SKILL.md").read_text()
-    assert "portable fallback" in spec_sync
-    assert "semantic context review was unavailable" in spec_sync
+    assert "local steps below" in spec_sync
+    assert "If missing, report that gap" in spec_sync
 
     docs_index = (ROOT / "docs/README.md").read_text()
     for decision in decisions:

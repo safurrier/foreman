@@ -7,7 +7,7 @@
 Foreman is a terminal console and native macOS control app for supervising AI
 coding agents that run in tmux.
 
-It gives one operator view over Claude Code, Codex CLI, Pi, Gemini CLI, and
+It gives one user view over Claude Code, Codex CLI, Pi, Gemini CLI, and
 OpenCode panes. The dashboard groups tmux sessions, shows which panes are stable
 or need attention, lets you jump directly to the right pane, and can wire native
 status hooks for the harnesses that support them. The optional native macOS app
@@ -27,32 +27,32 @@ better tool.
 |---|---|---|
 | Terminal dashboard | You live in tmux and want the full Ratatui console | `foreman` |
 | macOS app | You want a global hotkey, Spotlight/Raycast launch, search, preview, and pane focus outside the terminal | `open -a Foreman` |
-| Control API | You want scripts or native clients to read Foreman's tmux inventory | `foreman agents --json` |
+| Control API | You want scripts or native clients to read Foreman's tmux pane list | `foreman agents --json` |
 
-Foreman is built from this source checkout today. Release artifacts are published
-from version tags. Do not assume a package registry install unless a release note
-or local workflow verifies it.
+Build Foreman from this source checkout. Version tags publish release artifacts.
+Don't assume a package registry install unless a release note or local workflow
+verifies it.
 
 ## Demo
 
-The macOS overlay demo is generated from the real Swift renderer with fixture
-agent data, so it is deterministic rather than a live desktop recording.
+The real Swift renderer creates the macOS overlay demo from fixture agent data.
+That keeps the demo deterministic without recording a live desktop.
 
 ![Foreman macOS overlay demo](demos/macos-overlay-demo.gif)
 
-The terminal dashboard demo is a VHS recording of the TUI path:
+The terminal dashboard demo records the terminal UI with `vhs`:
 
 ![Foreman dashboard demo](demos/readme-quickstart.gif)
 
-## Why operators use it
+## Why users use it
 
 - One dashboard for agent panes instead of spelunking through tmux windows.
-- Native hook signals for Claude Code, Codex, and Pi when they are wired;
-  lower-confidence compatibility detection when they are not.
-- Fast operator actions: focus a pane, compose input, search/filter, inspect
-  status provenance, and get desktop notifications when work finishes or needs
+- Native hook signals for Claude Code, Codex, and Pi when they're available.
+- Lower-confidence fallback detection when they aren't.
+- Fast user actions: focus a pane, compose input, search/filter, inspect
+  status provenance, and get desktop alerts when work finishes or needs
   attention.
-- Optional PR cards, linked repositories, and extension-provider cards for
+- Optional PR cards, linked repos, and extension-provider cards for
   adjacent context without opening each repo by hand.
 
 ## Quick start: terminal dashboard
@@ -77,7 +77,7 @@ That installs:
 - `foreman-codex-hook`
 - `foreman-pi-hook`
 
-Wire user-level and current-repo harness integration files, then inspect the
+Wire user-level and current-repo harness provider files, then inspect the
 result:
 
 ```bash
@@ -90,10 +90,10 @@ Success signal: `foreman --setup` ends with `Next` steps, `foreman --doctor`
 prints Machine/Config/Repo/Runtime findings, and a ready setup has no `ERROR`
 lines. `WARN` lines are still useful: they tell you which panes are running in
 fallback mode or which hook wiring needs a restart. `foreman` should open the
-operator dashboard. Press `?` there for the key map and status legend.
+user dashboard. Press `?` there for the key map and status legend.
 
-`foreman --setup` is safe to rerun. It writes hook/config files, but it does not
-repair already-running agent panes. Restart affected panes after changing hook
+`foreman --setup` is safe to rerun. It writes hook and config files, but it
+won't repair agent panes that are already running. Restart affected panes after changing hook
 wiring.
 
 To try the dashboard from the checkout without installing:
@@ -104,7 +104,7 @@ mise run dev
 
 ### Unattended agent setup and resume
 
-Remote coding agents should use the repository-owned machine interface instead
+Remote coding agents should use the repo-owned machine interface instead
 of reconstructing setup and readiness from prose:
 
 ```bash
@@ -113,7 +113,7 @@ of reconstructing setup and readiness from prose:
 ```
 
 Both commands reserve stdout for one versioned JSON document and send human
-diagnostics to stderr. Run `mise run verify-agent-entrypoints` to exercise them
+details to stderr. Run `mise run verify-agent-entrypoints` to exercise them
 against real mise, Foreman, Git, and HK binaries in an isolated disposable clone.
 See the [workflow guide](docs/workflows.md#unattended-agent-entrypoints) for
 schemas, exit behavior, and path-resolution rules.
@@ -121,7 +121,7 @@ schemas, exit behavior, and path-resolution rules.
 ## Native macOS app
 
 The macOS app is a Swift/AppKit/SwiftUI client for Foreman's Rust control API.
-It does not reimplement tmux discovery. It calls `foreman agents --json`,
+It doesn't reimplement tmux discovery. It calls `foreman agents --json`,
 `foreman focus --pane ... --json`, and `foreman send --pane ... --json`.
 
 Use the app for:
@@ -142,7 +142,7 @@ open -a Foreman
 
 The install task builds `apps/macos-overlay`, installs
 `~/Applications/Foreman.app`, and removes stale local development bundles so
-macOS launchers do not open an old app.
+macOS launchers don't open an old app.
 
 Run this after changing overlay code and before manual Spotlight/Raycast testing:
 
@@ -154,20 +154,20 @@ open -a Foreman
 
 See [macOS App Bundle](docs/macos-overlay/app-bundle.md),
 [macOS Overlay Architecture](docs/macos-overlay/architecture.md), and
-[macOS Overlay Validation](docs/macos-overlay/validation.md) for the deeper app
+[macOS Overlay Checks](docs/macos-overlay/validation.md) for the deeper app
 workflow.
 
-## What Foreman shows
+## Displayed information
 
-Foreman starts from live tmux inventory and layers higher-confidence signals on
+Foreman starts from live tmux pane list and layers higher-confidence signals on
 top of it.
 
-- **Inventory**: tmux sessions, windows, panes, titles, working directories, and
+- **Pane list**: tmux sessions, windows, panes, titles, working directories, and
   captured preview lines.
-- **Harness identity**: Claude Code, Codex CLI, Pi, Gemini CLI, OpenCode, or a
-  non-agent pane when you ask for all panes.
+- **Harness identity.** Foreman recognizes Claude Code, Codex CLI, Pi, Gemini CLI,
+  OpenCode, and non-agent panes when you ask for all panes.
 - **Status**: working, idle, needs attention, error, or unknown.
-- **Provenance**: whether status came from a native hook or from compatibility
+- **Provenance**: whether status came from a native hook or from fallback
   heuristics.
 - **Actions**: focus tmux, send input, search/filter, inspect details, and open
   related PR/provider context.
@@ -201,12 +201,12 @@ Common keys:
 | `t` | Cycle themes |
 | `?` | Open help and status legend |
 
-`Attention → Recent` is not pure recency sort. It keeps urgent panes above idle
+`Attention → Recent` isn't a pure recency sort. It keeps urgent panes above idle
 panes, then uses real pane/native-signal activity as the recency tiebreaker.
 
 ## Native harness support
 
-| Harness | Compatibility mode | Native mode |
+| Harness | Fallback mode | Native mode |
 |---|---:|---:|
 | Claude Code | yes | yes |
 | Codex CLI | yes | yes |
@@ -221,20 +221,20 @@ foreman --setup --user --project
 foreman --doctor
 ```
 
-Use `--repo` when the repo to diagnose or wire is not your current directory:
+Use `--repo` when the repo to diagnose or wire isn't your current directory:
 
 ```bash
 foreman --setup --project --repo /path/to/repo
 foreman --doctor --repo /path/to/repo
 ```
 
-If an existing pane was started before hook wiring changed, restart that agent
-pane. Setup updates files. It does not repair already-running processes.
+Restart any agent pane that predates a hook-wiring change. Setup updates files,
+but it won't repair a process that's already running.
 
-See [Operator Guide](docs/operator-guide.md) for setup scopes, doctor fixes,
-native hook examples, notification config, UI preferences, and troubleshooting.
+See [User Guide](docs/operator-guide.md) for setup scopes, doctor fixes,
+native hook examples, alert config, UI preferences, and troubleshooting.
 
-## Pull requests, provider cards, and linked repositories
+## Pull requests, provider cards, and linked repos
 
 Foreman's JSON control API can attach PR metadata and read-only extension cards:
 
@@ -243,7 +243,7 @@ foreman agents --json --pull-requests
 foreman agents --json --extensions
 ```
 
-The macOS app renders PR/inventory first, then asks for extension cards only for
+The macOS app renders PR/pane list first, then asks for extension cards only for
 the selected pane:
 
 ```bash
@@ -252,8 +252,8 @@ foreman extensions --pane %42 --json
 
 The included Harness Kit provider example maps `hk brief --json` and
 `hk status --json` into lifecycle cards such as `NEEDS VALIDATION`,
-`NEEDS REVIEW`, `NEEDS SYNC`, `READY`, and `NO WORK`. It is read-only: Foreman
-copies or opens commands and evidence, but it does not run mutating HK commands
+`NEEDS REVIEW`, `NEEDS SYNC`, `READY`, and `NO WORK`. Foreman only reads these
+cards. It copies or opens commands and evidence, but it doesn't run mutating HK commands
 such as `hk sync`, `hk export`, or `hk ready`.
 
 Install and operate the provider from
@@ -268,23 +268,23 @@ foreman links list --json
 foreman links remove --pane %82 --json
 ```
 
-Foreman still displays the pane's real working directory as `Workspace`, but PR
-lookups and extension providers use the linked repository. Links are guarded by
-the pane working-directory fingerprint so stale tmux pane IDs do not silently
-point at the wrong repo.
+Foreman still displays the pane's real working directory as `Workspace`, but
+pull-request lookups and extension providers use the linked repo. A pane
+working-directory fingerprint prevents a stale tmux pane ID from silently
+pointing at the wrong repo.
 
-## Notifications
+## Alerts
 
-Foreman can send desktop notifications for completion and attention states. On
-macOS, `alerter` is the preferred backend because notification clicks can focus
-the related tmux pane. Custom notification sounds can use
-`notification-sounds:<prefix>` so playback stays on the notification path instead
+Foreman can send desktop alerts for completion and attention states. On
+macOS, `alerter` is the preferred backend because alert clicks can focus
+the related tmux pane. Custom alert sounds can use
+`notification-sounds:<prefix>` so playback stays on the alert path instead
 of direct `afplay` audio.
 
-See [Operator Guide—Notifications](docs/operator-guide.md#notifications) for
-configuration, custom sound routes, and troubleshooting. That guide includes both
+See [User Guide—Alerts](docs/operator-guide.md#alerts) for
+config, custom sound routes, and troubleshooting. That guide includes both
 macOS custom sound routes: direct file playback and the `alerter --sound`
-notification-sound prefix path that better respects Focus / Do Not Disturb.
+alert-sound prefix path that better respects `Focus / Do Not Disturb`.
 
 ## Control API for scripts and clients
 
@@ -307,10 +307,10 @@ CLI.
 ## Docs
 
 - [Docs index](docs/README.md)—start here for the durable docs map
-- [Operator Guide](docs/operator-guide.md)—setup, dashboard, config, hooks,
-  notifications, extension providers, and troubleshooting
+- [User Guide](docs/operator-guide.md)—setup, dashboard, config, hooks,
+  alerts, extension providers, and troubleshooting
 - [Repo Tour](docs/tour.md)—contributor-oriented code map and reading order
-- [Workflow Guide](docs/workflows.md)—HK lifecycle, validation ladder, release
+- [Workflow Guide](docs/workflows.md)—HK lifecycle, checks ladder, release
   process, and `.ai/` policy
 - [Architecture](docs/architecture.md)—system boundaries and module map
 - [macOS App Bundle](docs/macos-overlay/app-bundle.md)—build, install, launch,
@@ -342,27 +342,27 @@ Useful tasks:
 | `mise run test` | Run Rust tests |
 | `mise run build` | Build release binaries |
 | `mise run check` | Fast quality gate. This is what CI calls |
-| `mise run verify` | Heavy validation, including release/UX evidence |
-| `mise run verify-release` | Release-confidence operator gauntlet |
+| `mise run verify` | Heavy checks, including release/UX evidence |
+| `mise run verify-release` | Release-confidence user gauntlet |
 | `mise run pr-preflight` | Large-PR checklist and cheap merge-prep guardrails |
 | `mise run validate-macos-overlay-change` | Required lane for macOS app, overlay, keyboard/focus, screenshot, or control-API changes |
-| `mise run capture-macos-overlay-demo` | Regenerate the deterministic macOS overlay demo GIF/MP4. Requires `ffmpeg` |
+| `mise run capture-macos-overlay-demo` | Regenerate the deterministic macOS overlay demo animation and video. Requires `ffmpeg` |
 | `mise run install-macos-overlay-app` | Build, install, and reset `~/Applications/Foreman.app` |
 | `mise run verify-macos-overlay-app` | Non-activating app-bundle smoke test |
 | `mise run native-preflight` | Check local real-harness readiness |
 | `mise run verify-native` | Opt-in real Claude, Codex, and Pi E2E drill |
-| `mise run verify-ux` | TUI runtime smoke and UX artifact refresh |
+| `mise run verify-ux` | Terminal UI runtime smoke and UX artifact refresh |
 
-Validation rule of thumb:
+Checks rule of thumb:
 
-- TUI/reducer/config change: start with focused Rust tests, then `mise run check`.
+- Terminal UI, reducer, or config change: start with focused Rust tests, then `mise run check`.
 - macOS overlay/control API change: run `mise run validate-macos-overlay-change`.
 - Native harness/hook behavior: run `mise run native-preflight`, then opt into
   `mise run verify-native` when done.
 - Release-sensitive change: run `mise run verify` before tagging.
 
 CI calls `mise run ci`, which maps to the fast check gate. See
-[Workflow Guide](docs/workflows.md) for HK lifecycle, validation layers, `.ai/`
+[Workflow Guide](docs/workflows.md) for HK lifecycle, checks layers, `.ai/`
 policy, and release evidence.
 
 ## Released in `1.5.0`
@@ -374,6 +374,6 @@ machine-local display activation, and macOS overlay source parity. See the
 [GitHub release](https://github.com/safurrier/foreman/releases/tag/v1.5.0) for
 release notes and archives.
 
-The release workflow rejects tags that do not match `Cargo.toml`, rebuilds the
-release binaries, uploads validation evidence, and publishes Linux and macOS
+The release workflow rejects tags that don't match `Cargo.toml`, rebuilds the
+release binaries, uploads checks evidence, and publishes Linux and macOS
 archives.

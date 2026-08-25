@@ -1,746 +1,264 @@
 ---
 id: foreman-spec
-title: foreman Specification
+title: Foreman specification
 description: >
-  Correctness envelope for foreman—the requirements, contracts, invariants,
-  and acceptance criteria that any valid implementation must satisfy.
+  Current requirements, interfaces, invariants, and acceptance criteria for Foreman.
 index:
   - id: summary
-    keywords: [overview, product, foreman, tmux, agents]
+    keywords: [overview, product, tmux, agents]
   - id: requirements
-    keywords: [must, should, may, native-mode, compatibility-mode, notifications]
-  - id: interfaces
-    keywords: [cli, config, tmux, integrations, pull-requests, notifications]
+    keywords: [required, recommended, extra, tools, alerts]
+  - id: interfaces-contracts
+    keywords: [cli, config, tmux, control-api, sources]
   - id: invariants
-    keywords: [state, selection, precedence, failure-modes, observability]
+    keywords: [state, choice, precedence, errors]
   - id: acceptance
-    keywords: [validation, scenarios, check, verify, ci]
+    keywords: [checks, scenarios, check, verify]
 ---
 
-# foreman—Specification
-
-> This document defines the correctness envelope for foreman. For how the
-> system is organized, see `docs/architecture.md`. For how to work in this repo,
-> see `AGENTS.md`.
+# Foreman specification
 
 ## Summary
 
-Foreman is a TUI for managing AI agents across tmux. It monitors AI coding
-agents running inside tmux panes and gives the operator a single control surface
-for navigation, direct input, pull request awareness, and notifications.
+Foreman is a keyboard-first user console for coding agents in tmux. It shows local and remote work in one source-aware pane list. Users can inspect status, focus panes, send text, manage panes, review pull requests, and receive alerts.
 
-Foreman is intentionally designed around two integration paths:
-- `native mode` for harnesses that expose structured hooks, events, or machine-readable state
-- `compatibility mode` for harnesses that can only be observed through tmux-visible process data and terminal capture
+Foreman supports two status paths:
 
-Native integrations are the preferred long-term architecture. Compatibility
-integrations exist so the dashboard remains useful even when a harness does not
-yet expose a stable contract.
+- Native tools read typed hooks, events, or activity files.
+- Fallback tools infer state from processes and captured terminal text.
+
+Native signal has more authority. Fallback mode keeps Foreman useful when a harness has no stable native contract.
 
 ## Goals / Non-Goals
 
-**Goals:**
+Goals:
 
-- Provide a terminal-native operator console for active multi-agent work inside tmux.
-- Let an operator tell at a glance which agents are working, done, blocked, or broken.
-- Prioritize reliable completion and attention detection over deep parsing of every tool or approval detail.
-- Provide enough product and validation detail that another team could rebuild the product without the original implementation.
-- Preserve a keyboard-first workflow.
+- Make active, idle, blocked, and failed agents easy to distinguish.
+- Keep navigation and direct actions fast enough for a command-palette workflow.
+- Support local tmux, remote SSH sources, snapshots, and trusted companions.
+- Expose one Rust control plane to the terminal UI and `Foreman.app`.
+- Fail softly when an extra tool, source, or service is unavailable.
 
-**Non-Goals:**
+Non-goals:
 
-- Foreman is not a general-purpose tmux replacement.
-- Foreman does not define a general plugin platform for arbitrary integrations.
-- Foreman does not require deep inspection of tool-by-tool activity, approval transcripts, or every intermediate agent decision.
-- Foreman does not include pull request mutation features such as merging, reviewing, or commenting.
-- Foreman does not promise identical behavior on every operating system or every notification backend.
-- This specification does not define internal module names, source file names, or implementation-specific APIs.
+- Replace tmux, an agent harness, or a full terminal emulator.
+- Parse every harness prompt or approval flow.
+- Let the Swift app own tmux scan or status logic.
+- Treat remote destructive actions as safe without an direct contract.
+- Hide source, transport, or source errors from the user.
 
 ## Requirements
 
-### MUST
+Foreman enforces every item below unless a rule says otherwise.
 
-**R1. Product identity and command surface**
+### R1. Product and command surface
 
-- The product name is `Foreman`.
-- The primary binary and command name is `foreman`.
-- The repository description is `TUI for managing AI agents across tmux`.
+- Foreman MUST start the live terminal UI when the user runs `foreman` without a utility command.
+- `--popup` enables popup rules without creating a second product mode.
+- Utility commands expose setup, doctor, config, agents, focus, send, links, sources, companions, extensions, and display registration.
+- `--version` prints the version and exits.
 
-**R2. Startup and configuration**
+### R2. Startup and config
 
-- The `foreman` command starts the interactive dashboard.
-- The CLI can print the expected config file location and exit.
-- The CLI can initialize a default config file and exit.
-- The CLI can diagnose local install, hook wiring, and runtime fallback state and exit.
-- The CLI can emit machine-readable diagnosis output.
-- The CLI can perform safe, additive setup fixes or scaffolds for supported integrations.
-- The CLI can target setup and diagnosis at the current repo or an explicit repo path.
-- The CLI supports user-scoped and project-scoped setup for supported integrations.
-- The CLI can limit setup writes to selected supported integrations.
-- The CLI can load a user config file.
-- The CLI can override runtime polling and capture settings from the command line.
-- The CLI can enable popup behavior.
-- The CLI can enable debug logging mode.
-- The CLI can disable notifications for the current run.
+- Foreman starts with a loading shell before the first live pane list arrives.
+- It loads config from the resolved path and applies direct command-line overrides.
+- It preserves representative version 1 config while applying defaults for newer fields.
+- `--init-config` never overwrites an existing file.
+- `--doctor` reports config, repo, runtime, and tool problems with useful severity.
 
-**R3. File logging**
+### R3. Logging and observability
 
-- Normal interactive runs write session logs to a user-scoped log directory.
-- The latest active run is easy to locate.
-- Older log files are cleaned up automatically.
+- Each run writes a log and updates a current-log pointer.
+- Logs record pane counts, native signals, fallback use, desktop alerts, pull-request lookup, timing, and errors.
+- Retention stays bounded.
+- Debug logging remains opt-in.
 
-**R4. Multi-session monitoring**
+### R4. Pane list and source key
 
-- Foreman monitors panes across all tmux sessions for each enabled source, not just the currently attached session.
-- Monitoring refreshes on a configurable interval.
-- Foreman captures recent pane output for analysis and preview.
-- Foreman keeps tmux pane metadata fresh across the full inventory, but it does
-  not need to recapture full preview text for every pane on every refresh.
-- When multiple sources are configured, Foreman preserves source identity in the
-  control API, terminal dashboard, and macOS overlay so duplicate tmux pane ids
-  from different sources do not collide.
-- Preview freshness is prioritized for the selected row, the current sidebar
-  viewport, and panes that have changed identity or need attention.
-- Off-screen panes may temporarily reuse cached preview text and are refreshed
-  gradually across later polls.
+- Foreman discovers tmux sessions, windows, and panes without assuming one session.
+- It hides non-agent panes by default and can reveal them explicitly.
+- Every merged pane key combines `source_id` with the source-local tmux pane ID.
+- Local, SSH, snapshot, and companion errors stay scoped to their source.
+- Healthy sources remain usable when another source fails.
 
-**R5. Integration architecture**
+### R5. Tool authority
 
-- Foreman supports two integration modes: native mode and compatibility mode.
-- Native mode is treated as the preferred path whenever a harness supports it.
-- Compatibility mode exists as a fallback rather than the primary long-term architecture.
+- Claude, Codex, and Pi each support native and fallback status paths.
+- Native signal only applies to the matching harness and current runtime key.
+- Stale files, pane titles, and old scrollback can't create native status.
+- Missing native signal falls back to fallback mode when config allows it.
+- Working-state stabilization can debounce a brief signal loss, but attention and errors surface immediately.
 
-**R6. Supported harnesses and rollout order**
+### R6. Status and visibility
 
-- Foreman recognizes these supported harness families:
-- Claude Code
-- Codex CLI
-- Pi
-- Gemini CLI
-- OpenCode
-- The current v1 support matrix is:
-- Claude Code: compatibility mode and native mode
-- Codex CLI: compatibility mode and native mode
-- Pi: compatibility mode and native mode
-- Gemini CLI: compatibility mode
-- OpenCode: compatibility mode
-- Foreman distinguishes recognized agent panes from unrecognized panes.
-- Claude Code, Codex CLI, and Pi are first-class native integrations in the
-  current v1 line.
-- Future supported harnesses should use native integrations where practical and
-  compatibility integrations otherwise.
+- The status model includes working, idle, attention, error, unknown, and non-agent states.
+- The UI shows the signal source for the selected pane.
+- Users can filter by harness and toggle non-agent sessions or panes.
+- Search and filters preserve logical choice when possible.
 
-**R7. Visibility controls**
+### R7. Main interface
 
-- The dashboard hides non-agent sessions and non-agent panes by default.
-- The operator can toggle both visibility rules at runtime.
+- The terminal UI includes a header, source-aware sidebar, preview, footer, and contextual overlays.
+- The preview shows the resolved useful pane, status source, repo context, pull-request state, extension cards, and user details.
+- Help documents every active shortcut and can scroll without moving the sidebar.
+- Narrow terminals degrade without panic or hidden critical state.
 
-**R8. Status model**
+### R8. Keyboard and pane actions
 
-- Each recognized agent exposes a coarse operator-facing status model:
-- `working`
-- `needs attention`
-- `idle`
-- `error`
-- `unknown`
-- The product optimizes for answering these operator questions:
-- Is the agent currently working?
-- Is the agent done or otherwise waiting for me?
-- Is the agent in a broken or unclear state?
-- Short-lived state transitions are debounced so active work does not flicker noisily.
-- Fine-grained details such as individual tool calls, explicit approval prompts, or low-level acceptance state may be omitted from the primary model.
+- Keyboard commands map to typed commands and actions before they reach the reducer.
+- Users can navigate, focus, search, use flash labels, compose input, rename windows, spawn windows, and kill panes with confirmation.
+- Text input supports multiple lines and Unicode editing.
+- Failed send, rename, or spawn actions restore the draft.
+- Remote selections reject destructive operations that lack a remote contract.
 
-**R9. Main UI surfaces**
+### R9. Focus and display focus
 
-- The dashboard includes a header with system and workload overview.
-- The dashboard includes a sidebar organized as a semantic session/agent tree in the default agents-only view.
-- The default sidebar elides singleton tmux window rows so the operator sees the actionable agent directly under its session.
-- Topology-oriented views preserve explicit tmux window rows so the raw session/window/pane tree remains available when needed.
-- Singleton counts such as `1w/1p` or `1p` are not repeated when the visible hierarchy already communicates that structure.
-- The dashboard includes a detailed pane preview.
-- The dashboard includes an input area for sending text to the selected agent.
-- The dashboard includes a footer with contextual actions or hints.
-- The footer uses labeled action groups so movement, selection, search, view,
-  and panel controls are easy to scan.
-- The dashboard includes a help surface with a legend for compact badges, status indicators, and status-source hints.
-- The help surface is keyboard-scrollable in layouts where its full contents do not fit at once.
-- The dashboard may include summary, subagent, and pull request detail panels.
-- Popup mode preserves the same side-by-side sidebar/details mental model as
-  the regular dashboard when the popup has enough width and height.
-- The preview identifies whether the selected or actionable pane status comes from native mode or compatibility heuristics.
-- The preview can surface setup or diagnosis hints when compatibility fallback is likely caused by missing hook wiring or failing hook commands.
+- Session and window rows resolve to a visible useful pane.
+- Tmux focus and local display focus report separate outcomes.
+- Tmux focus still succeeds when the extra display step fails.
+- Foreman tries a current exact display registration before a focus-command fallback.
+- Stable tool IDs select displays. Titles, tty values, and process IDs are detail only.
 
-**R9b. Details information hierarchy**
+### R10. Pull requests and extensions
 
-- The details pane uses stable, labeled sections so alerts, pull request state, current selection, diagnostics, dashboard overview, and pane output are visually distinguishable.
-- The details pane uses aligned scan rows for recurring facts such as status, source, target, workspace, PR state, diagnostics, and actions.
-- The selected target summary avoids duplicating the same status, source, target, and command facts in multiple adjacent blocks.
-- Event summaries and pane output use distinct names so recent notifications or refreshes are not confused with terminal output.
+- Pull-request lookup uses the selected pane's linked or detected repo.
+- Missing GitHub tooling, authentication, or repo state degrades softly.
+- Extension tools run behind bounded, read-only contracts.
+- Tool errors remain visible without hiding healthy cards or agent rows.
 
-**R10. Keyboard-first interaction**
+### R11. Alerts
 
-- The operator can move through visible items with keyboard navigation.
-- The operator can change focus between the sidebar, preview, and input regions.
-- The operator can collapse and expand session groups.
-- The operator can trigger focus on the selected pane.
-- The operator can cycle a harness/provider filter that narrows the tree to one
-  supported agent family at a time, with empty harness views skipped by default.
-- The operator can cycle the active theme at runtime.
-- The operator can scroll the help surface with the keyboard when help is open.
-- Escape cancels or dismisses non-normal modes. In normal mode it quits like `q`.
+- Alerts derive from status transitions, not render state.
+- Choice, mute state, profile rules, and source-scoped cooldowns can suppress an alert.
+- Burst coalescing keeps the most urgent useful signal.
+- Backends run in configured order and can fall back.
+- Alert errors remain visible and never stop the dashboard.
 
-**R11. Pane focus behavior**
+### R12. Control API and macOS app
 
-- Foreman can focus the selected pane by switching tmux context as needed.
-- Session and window selections can resolve to an actionable visible pane for focus-oriented actions.
-- The UI identifies the resolved actionable pane for focus-oriented and direct-input actions.
-- In popup mode, successful focus-oriented actions close the dashboard automatically.
-- A machine may register one exact local display identity per source. A current registered identity is attempted before a configured activation-command fallback.
-- tmux focus success and display activation success remain separate outcomes. A missing or closed display does not turn successful tmux focus into focus failure.
+- Control commands return schema-versioned JSON.
+- The API lists agents, focuses panes, sends text, manages links and sources, and exposes details.
+- `Foreman.app` remains a client of that API.
+- Swift views don't run tmux commands or infer terminal status.
+- The terminal UI and native app share source keys and action semantics.
 
-**R12. Direct input**
+### R13. Companions, snapshots, and trust
 
-- The operator can compose and send text to the actionable selected agent pane.
-- Multiline composition is supported.
-- Text editing behaves safely for non-ASCII input.
+- Companion requests use the documented JSON-line protocol.
+- Companion probes send a real protocol request instead of opening an empty socket.
+- Send capability requires direct trust and a token.
+- Snapshots use atomic writes, source checks, schema checks, and freshness metadata.
+- Stale snapshots can support display with a detail. Expired or corrupt snapshots can't hide healthy local rows.
+- Reverse-tunnel supervision reports transport errors and keeps local operation ready.
 
-**R13. Operational pane actions**
+### R14. State ownership
 
-- The operator can kill the selected pane with explicit confirmation.
-- The operator can rename the selected pane's window.
-- The operator can spawn a new agent window in the selected session.
-- Lightweight canned responses for supported harnesses are optional and are not core to the rebuild.
+- `AppState` owns interaction state, drafts, modes, choice, cached cards, alert policy state, and user alerts.
+- The reducer stays pure and emits clear effects.
+- Adapters and services own I/O.
+- Rendering reads state and doesn't mutate product rules.
+- Persisted UI choices restore safe choices, while direct config wins.
 
-**R14. Search**
+### Recommended rules
 
-- The dashboard provides interactive search that filters visible items by query.
-- Search supports moving between matches.
-- Search renders inline in the footer as `/<query>` with match count and does
-  not obscure the dashboard with a floating overlay.
-- Search can confirm into a focus action or an expansion action depending on the selected target.
-- Search can cancel and restore the previous cursor position.
+Foreman should use native tools when stable contracts exist. It should preserve fast keyboard feedback, useful text-only output, and clear degraded-state details. It should add fields to machine-readable schemas when fallback allows that approach.
 
-**R15. Flash navigation**
+### Extra rules
 
-- The dashboard provides a fast label-based jump mode.
-- Flash navigation renders short labels inline on visible targets without obscuring the target rows.
-- It supports both jump-only and jump-and-focus variants.
-- It supports overflow beyond single-character labels.
-- It can be canceled cleanly.
-
-**R16. Sorting**
-
-- The dashboard provides at least two sidebar sort modes:
-- `stable`
-- `attention -> recent`
-- `stable` keeps the common monitoring view from reordering rows due to volatile status changes.
-- `attention -> recent` sorts by status rank first, then by most recent activity.
-- Changing sort mode preserves the current logical selection whenever possible.
-
-**R17. Pull request awareness**
-
-- When pull request monitoring is enabled and relevant local tooling is available, Foreman detects whether the selected workspace has an open pull request.
-- Foreman shows compact pull request state for the selected workspace.
-- Foreman provides an expandable pull request detail view.
-- Foreman supports opening the pull request in the browser.
-- Foreman supports copying the pull request URL.
-- Foreman avoids repeated unnecessary lookups for the same visible paths.
-- Foreman degrades gracefully when pull request data is unavailable.
-
-**R18. Notifications**
-
-- When notifications are enabled, Foreman notifies when a working agent becomes complete or returns to a ready state.
-- When notifications are enabled, Foreman notifies when an agent enters a `needs attention` state.
-- Notifications are suppressed when the operator is already looking at the relevant pane or already focused on that agent in the dashboard, except popup mode may still notify for the selected pane because the dashboard is transient.
-- Per-agent cooldowns reduce noise.
-- Same-refresh notifications of the same kind are coalesced into one concise
-  notification.
-- When one refresh emits multiple notification kinds, only one notification
-  plays sound and `needs attention` takes audio priority over completion.
-- Runtime muting and unmuting are supported.
-- Runtime notification-profile switching is supported.
-- Notification backend fallback is supported when a preferred path is unavailable.
-- Notification text is concise enough for desktop notification surfaces and does
-  not include full workspace paths in the visible body.
-- Notification backends that support actions may focus the relevant tmux
-  window/pane when the operator clicks the notification.
-- Configurable notification sounds are supported for completion and
-  needs-attention transitions.
-
-**R19. Validation framework**
-
-- The project has unit tests.
-- The project has local build, format, lint, and test workflows.
-- The project has shell-based end-to-end tests for core user journeys.
-- Continuous integration checks build, test, formatting, and linting.
-- `mise run check` is the fast quality gate.
-- `mise run ci` delegates to the same quality gate as local checks.
-
-**R20. Control API for non-TUI clients**
-
-- Foreman exposes machine-readable agent inventory for GUI clients.
-- The control API can include or exclude non-agent panes.
-- The control API can attach pull request metadata when requested and degrades gracefully when pull request lookup fails or times out.
-- The control API can focus a pane by tmux pane ID and report the action as JSON.
-- The control API can send text to a pane by tmux pane ID and report the action as JSON.
-- Control API preview output is bounded so GUI clients and pipes do not hang on very large terminal captures.
-
-**R21. Native macOS control app**
-
-- Foreman ships a native macOS app bundle named `Foreman.app` for local installation.
-- The app is discoverable through Spotlight, Raycast, Finder, and `open -a Foreman` after installation.
-- The app provides a global configurable shortcut, menu/status-item entry points, and normal app activation/reopen behavior.
-- The app shows Foreman/tmux agent panes through the control API rather than reimplementing tmux discovery in Swift.
-- The app supports type-to-search, keyboard navigation, double-click-to-focus, detail preview, compose/send, pull request actions, flash jump, help, filters, sort, themes, and Settings.
-- The app preserves native AppKit text editing in text fields while retaining overlay-owned navigation shortcuts outside compose mode.
-- Focusing a pane through the app returns the operator to the configured terminal app.
-- Hiding the overlay without focusing returns the operator to the previous non-launcher app when possible.
-- The installed app path is `~/Applications/Foreman.app` by default, and the install workflow prevents stale build/prototype app bundles from poisoning Spotlight/Raycast/LaunchServices.
-
-### SHOULD
-
-- Foreman should keep the common path fully usable without a mouse.
-- Foreman should keep selections stable across refreshes, filtering changes, and re-sorting.
-- Foreman should avoid noisy pull request polling and unnecessary repeated notifications.
-- Foreman should make active work, waiting states, and errors visually distinct at a glance.
-- When both are available, native-mode status should be treated as more authoritative than compatibility-mode status.
-
-### MAY
-
-- Foreman may show derived summary information such as TODOs, recent activity, or child-task activity.
-- Foreman may surface a remaining-context indicator when a supported harness exposes it.
+Foreman may show summaries, child-task activity, system pressure, themes, and other derived context when those features don't weaken core actions or signal boundaries.
 
 ## Interfaces & Contracts
 
 ### Glossary
 
-- **tmux session**: A top-level tmux workspace that can contain multiple windows.
-- **tmux window**: A container inside a session that can contain one or more panes.
-- **tmux pane**: The basic terminal surface monitored and focused by the dashboard.
-- **agent pane**: A pane recognized as running a supported AI coding agent.
-- **non-agent pane**: A pane not recognized as running a supported AI coding agent.
-- **operator**: The human user driving the dashboard.
-- **focus**: Moving tmux view and selection to a target pane.
-- **popup mode**: A mode intended for use inside a tmux popup, where successful focus-oriented actions close the dashboard automatically.
-- **summary panel**: A compact view of current work, TODOs, or recent derived activity.
-- **subagent**: A child task or delegated unit of work surfaced by an agent that supports this concept.
-- **flash navigation**: Short-label jump navigation that lets the operator quickly target any visible item.
-- **pull request panel**: The product surface that shows pull request status and related actions for the selected workspace.
-- **notification profile**: A named notification-behavior preset that determines which status transitions emit alerts.
-- **native mode**: An integration path that consumes structured events, hooks, or machine-readable output from a supported agent harness.
-- **compatibility mode**: A fallback integration path that infers state from tmux-visible process and terminal behavior when no structured integration is available.
-- **macOS control app**: A native `Foreman.app` wrapper and overlay that exposes Foreman's core control plane from outside the terminal.
-- **control API**: Machine-readable CLI subcommands used by GUI clients and automation to list agents, focus panes, and send text without parsing the TUI.
-- **source**: A configured local or remote tmux-backed place Foreman can query and control.
-- **source-scoped pane**: A pane identified by both Foreman source id and tmux pane id. The tmux pane ids are not globally unique across sources.
-- **source display registration**: Machine-local ownership of an exact terminal display identity for one source, used to activate the display after tmux focus without sending that identity over source transports.
+- **Agent pane.** A pane known as a supported coding agent.
+- **Fallback mode.** Status inferred from process and terminal signal.
+- **Control API.** JSON commands used by native clients and automation.
+- **Native mode.** Status grounded in typed hook signals.
+- **User.** The person controlling Foreman.
+- **Popup mode.** A tmux-popup surface that closes after valid focus actions.
+- **Source.** A local or remote tmux-backed pane list tool.
+- **Source-scoped pane.** A pane identified by both source and tmux pane ID.
 
+### Command-line contract
 
-### CLI contract
+The root command accepts live options and utility subcommands. Control subcommands reject conflicting live modes. Use each command's `--help` output as the detailed option contract.
 
-- The command-line interface is exposed through `foreman`.
-- It supports normal interactive startup.
-- Normal interactive startup renders immediately with a loading state before the first tmux inventory refresh completes.
-- Popup startup may seed that first render from a fresh persisted inventory snapshot, but cached state must be marked and replaced by live tmux refresh.
-- It supports showing the config path.
-- It supports showing resolved config, UI state, popup cache, and runtime values.
-- It supports resetting persisted runtime UI state.
-- It supports initializing a config file.
-- It supports popup execution mode.
-- It supports debug logging mode.
-- It supports notification suppression for a single run.
-- It supports runtime overrides for monitoring cadence and capture depth.
-- It supports control subcommands for JSON agent listing, pane focus, and pane send.
-- Source commands can capture, explicitly register, list, diagnose, and ownership-guardedly unregister machine-local display identity as JSON.
-- Control subcommands reject conflicting top-level interactive modes such as doctor mode.
-- Hook-based native integrations may ship companion helper commands when the
-  main dashboard process is not the right place to consume hook stdin directly.
+Important machine-readable commands include:
 
-### Control API contract
+```text
+foreman agents --json
+foreman focus --pane <pane-id> --json
+foreman send --pane <pane-id> --stdin --json
+foreman links list --json
+foreman sources list --json
+foreman companion probe --endpoint <host:port> --json
+```
 
-- `foreman agents --json` returns schema-versioned JSON with inventory summary, entries, and diagnostics.
-- `foreman agents --json --all-panes` includes non-agent panes.
-- `foreman agents --json --pull-requests` includes best-effort pull request metadata.
-- `foreman focus --pane <pane-id> --json` focuses the requested tmux pane and reports success or failure in machine-readable form. Source-host activation remains in `displayActivation`. Requesting-host activation is additive in `callerDisplayActivation`.
-- `foreman send --pane <pane-id> --stdin --json` sends stdin to the requested pane and reports bytes sent.
-- `foreman send --pane <pane-id> --text <text> --json` sends explicit text to the requested pane and reports bytes sent.
-- Control API diagnostics are visible to clients when tmux or runtime inventory is unavailable.
-
-### macOS app contract
-
-- The Swift app remains a GUI client of the Rust control API.
-- Swift views do not spawn tmux commands directly and do not parse terminal state.
-- AppKit owns app lifecycle, panel/window behavior, menu/status items, global hotkey registration, and terminal/previous-app activation adapters.
-- SwiftUI owns the overlay list, search, details, compose, settings, and snapshot-rendered UI.
-- `mise run install-macos-overlay-app` is the supported local install/reset command and leaves only `~/Applications/Foreman.app` discoverable by macOS launchers.
-- Routine app-bundle validation runs in a non-activating mode so it does not interrupt the operator's desktop.
+Focus results keep source-host focus in `displayActivation` and requesting-host focus in `callerDisplayActivation`.
 
 ### Config contract
 
-- Foreman uses a user-scoped config file.
-- Config supports pane polling interval.
-- Config supports pane capture depth.
-- Config supports popup startup cache freshness.
-- Config supports per-harness integration mode selection or preference where multiple modes are possible.
-- Config supports pull request monitoring enablement and cadence.
-- Config supports notification enablement.
-- Config supports notification cooldowns.
-- Config supports notification backend preference.
-- Config supports a small set of built-in named notification profiles.
-- Config supports selection of the active notification profile.
-- Config supports selecting a notification sound profile with per-event system
-  sound names, audio files, or audio-file directories.
-- Config supports selection of the default UI theme.
-- Config supports selection of the startup sort mode with `stable` and `attention-recent` values.
-- Runtime UI choices may persist across launches, including sort mode, theme, filters, collapsed sessions, and last selected target.
-- Built-in UI themes include `catppuccin`, `gruvbox`, `tokyo-night`, `nord`,
-  `dracula`, `terminal`, and `no-color`.
-- Config may override the local signal directory or equivalent bridge path for
-  harnesses that use file-backed native integrations.
-- Backward-compatible migration from an older flatter notification-sound format may be supported.
+Config covers UI choices, alerts, tools, sources, source jumps, companions, and runtime paths. Unknown or invalid values produce useful errors. New extra fields keep compatible defaults.
 
-### Agent integration contract
+### Tmux and source contracts
 
-- For each supported harness, Foreman defines how an agent process is identified.
-- For each supported harness, Foreman defines whether it is operating in native mode or compatibility mode.
-- For each supported harness, Foreman defines which signals are authoritative for `working`, `needs attention`, `idle`, `error`, and `unknown`.
-- For each supported harness, Foreman defines fallback behavior when native integration becomes unavailable.
-- For each supported harness, Foreman defines how state transitions are debounced to avoid flicker and notification noise.
-- Native integrations should consume structured hooks, events, or machine-readable streams where available.
-- File-backed hook bridges use the tmux pane identity from `TMUX_PANE` so signal files match the pane IDs Foreman discovers from tmux inventory.
-- Compatibility integrations may use tmux-visible process metadata and captured terminal content, but these heuristics are treated as lower-confidence signals.
-- Compatibility integrations must not keep reviving an agent identity from stale title or preview text once the pane foreground command has returned to a shell.
+Tmux scan returns typed pane list or a typed unavailable error. Source aggregation preserves source key, details, and partial success. Actions route through the selected source rather than a bare pane ID.
 
-### tmux contract
+### Native tool contract
 
-- Foreman depends on tmux for discovery and control.
-- Foreman can discover sessions, windows, and panes.
-- Foreman can capture recent pane content.
-- Foreman can send text input to panes.
-- Foreman can focus sessions, windows, and panes.
-- Foreman can create new windows.
-- Foreman can rename windows.
-- Foreman can kill panes.
-- If tmux is unavailable or not running, the dashboard does not crash and remains usable as an empty shell with a visible error state.
+Tool hooks and activity files use shared atomic writers and typed readers. Native signal must match the tool and active runtime key. Fallback signal remains ready as a lower-confidence fallback.
 
-### Pull request contract
+### macOS contract
 
-- Foreman may use local Git and GitHub-aware tooling to determine whether the selected workspace has an associated open pull request.
-- Browser-opening and clipboard-copy behavior are part of the user-facing contract when platform support exists.
+AppKit owns lifecycle, windows, menus, hotkeys, and app focus. SwiftUI owns visible native UI state. Rust owns tmux, sources, status, and actions through the control API.
 
-### Notification contract
+### Checks contract
 
-- Foreman supports automatic fallback across available notification backends.
-- Sound playback and richer notification backends are best-effort and do not destabilize the dashboard when unavailable.
-- Desktop notification copy includes the product/event, target label, and tmux
-  location, while verbose implementation details stay out of the visible body.
-- macOS `alerter` notifications can select the relevant tmux window and pane
-  after a content/action click when `alerter` and `tmux` are available.
-
-### Task contract
-
-| Command | Purpose |
-|---------|---------|
-| `mise run setup` | Install tools and project dependencies |
-| `mise run check` | Fast quality gate for format, lint, typecheck, and test |
-| `mise run verify` | Heavier validation beyond the fast gate |
-| `mise run verify-release` | Release-confidence compiled-binary tmux gauntlet with checklist/report artifact |
-| `mise run pr-preflight` | Large-PR checklist and cheap guardrails for merge/release preparation |
-| `mise run validate-macos-overlay-change` | Required validation lane for Swift overlay, app bundle, keyboard/focus, screenshots, and control API changes |
-| `mise run build-macos-overlay-app` | Build the local `Foreman.app` bundle under the app dist directory |
-| `mise run install-macos-overlay-app` | Install/reset `~/Applications/Foreman.app` and clean stale macOS launcher registrations |
-| `mise run verify-macos-overlay-app` | Non-activating smoke test for app-bundle shape, plist values, embedded binaries, and ready-file launch |
-| `mise run ci` | CI entrypoint, aligned with local quality checks |
+`mise run check` is the fast gate. `mise run verify` is the broad pre-merge gate. Native hook changes also require native preflight and real-harness proof. Overlay changes use the macOS overlay checks lane.
 
 ## Invariants
 
-### Primary state
-
-- The dashboard maintains a periodically refreshed inventory of agent panes and non-agent panes.
-- The dashboard maintains integration-mode state per recognized agent.
-- The dashboard maintains a current selection.
-- The dashboard maintains a focused panel.
-- The dashboard maintains filter and optional-panel toggle state.
-- The dashboard maintains pull request lookup state.
-- The dashboard maintains notification state.
-- The dashboard maintains short-lived modal state for search, flash navigation, renaming, spawning, confirmation, and help.
-
-### Mode precedence
-
-- Only one high-priority mode consumes input at a time.
-- Help, rename, flash navigation, search, spawn, input editing, preview scrolling, and ordinary sidebar navigation have a deterministic precedence order.
-
-### Selection invariants
-
-- Refreshes do not leave the dashboard pointing at an invalid target.
-- Selection remains logically stable across refresh and sorting changes.
-- Collapsed and expanded session state persists across refreshes.
-- Preview refresh prioritization does not change the logical selection model or
-  tmux targeting semantics.
-
-### Integration precedence invariant
-
-- If a recognized agent has both native-mode and compatibility-mode signals available, Foreman prefers native-mode state as the source of truth for operator-visible status and notifications.
-
-### Pull request panel invariant
-
-- If a pull request detail panel auto-opens on first discovery for a workspace, it does not repeatedly re-open for that same workspace after the operator closes it.
-
-### macOS app invariants
-
-- The native macOS app is a control-plane client, not a second source of tmux truth.
-- The installed app bundle, not repo-local build artifacts, is the only Foreman app macOS launchers should discover after the install task completes.
-- Overlay keyboard handling preserves normal text editing in search and compose fields while keeping overlay navigation responsive.
-- Settings and other foreground windows do not leak overlay keyboard handling.
-- App launch, global hotkey, and app reactivation restore a visible control surface rather than leaving a hidden active app.
-
-### Failure modes and edge cases
-
-- tmux may be missing or not running.
-- A pane may fail to capture during polling.
-- Off-screen panes may temporarily show cached preview text while a later poll
-  refreshes them.
-- Native hooks, events, or machine-readable streams may be unavailable, misconfigured, or temporarily disconnected.
-- Compatibility heuristics may produce ambiguous or stale results.
-- Pull request tooling may be missing, unauthenticated, or rate-limited.
-- The selected workspace may not be a repository with a pull request.
-- Browser or clipboard actions may be unavailable on the current machine.
-- A notification backend or richer sound path may be unavailable.
-- macOS LaunchServices, Spotlight, Raycast, or icon caches may retain stale app bundle metadata after local development builds.
-- Mouse hit-testing may be approximate rather than exact in some layouts.
-- Some panel combinations may force a summary surface to remain visible even when a toggle suggests otherwise.
-- In all of these cases, Foreman fails soft rather than fail closed.
-
-### Observability
-
-- Foreman writes structured run logs to disk.
-- The latest active run is easy to locate.
-- User-facing action failures are surfaced in the UI.
-- Pull request polling lifecycle and notification backend selection are observable through logs.
-- Debug logging surfaces timing for `move-selection`, `render_frame`, `inventory_tmux`, and `inventory_native`.
-- tmux timing logs expose how many previews were freshly captured vs reused from
-  cache on a given refresh.
-- Header-level system stats give the operator a quick read on local CPU and memory pressure.
+- A choice always resolves through visible source-scoped state.
+- Native signal never crosses harness boundaries.
+- Fallback signals never become native status.
+- The reducer performs no I/O.
+- Source errors don't erase healthy source results.
+- Tmux focus success doesn't depend on display focus success.
+- Display key stays machine-local and outside source transport payloads.
+- Remote send requires direct authorization.
+- Generated text isn't sent without a direct user action.
+- Pull-request and extension errors don't block core tmux control.
+- Checks never create or kill sessions on the user's default tmux server.
 
 ## Acceptance
 
-### Validation entrypoints
+### Checks entrypoints
 
-```bash
+The repo must keep these entrypoints working:
+
+```text
 mise run check
-mise run verify
+mise run verify-agent-entrypoints
 mise run verify-ux
-mise run ci
+mise run validate-macos-overlay-change
+mise run native-preflight
+mise run verify-native
 ```
 
-### Acceptance scenarios
+### Core scenarios
 
-**A1. Config utility flow**
-
-- Given a writable user config directory, when the operator asks `foreman` to reveal the config path, the CLI prints the location and exits successfully.
-- Given a writable user config directory, when the operator asks `foreman` to create a default config, the CLI writes the file and exits successfully.
-
-**A2. Normal startup logging**
-
-- Given a normal interactive run, when the dashboard starts, it creates a fresh run log, updates the latest-log pointer, and retains only recent logs.
-- Given debug logging mode, startup writes debug lines in addition to the normal structured run log.
-
-**A3. Multi-session discovery**
-
-- Given at least two tmux sessions with visible panes, when the dashboard starts, it renders a loading state immediately and then both sessions appear in the sidebar after the first background inventory refresh.
-
-**A4. Agent detection**
-
-- Given panes running supported agent families, including Claude Code, Codex CLI, Pi, Gemini CLI, and OpenCode signatures, when the monitor refreshes, those panes appear as recognized agents rather than generic panes.
-- Given a pane that previously showed supported agent output but whose foreground command is now a shell prompt, compatibility mode no longer treats that pane as an active agent based on stale preview or title text alone.
-
-**A5. Integration mode selection**
-
-- Given a supported harness with native integration available, when the dashboard discovers that agent, it uses native mode as the authoritative source of status.
-- Given a Claude, Codex, or Pi hook bridge runs inside a tmux pane, when it writes a native signal, Foreman matches that signal to the same pane ID and promotes the pane from compatibility to native mode.
-- Given a Pi pane has fresh structured `pi-subagents` activity under the
-  selected pane's workspace, when the parent pane would otherwise appear idle
-  or unknown, Foreman treats that child-task activity as Pi-native evidence and
-  keeps or promotes the parent pane to working. A parent repo pane can inherit
-  nested-module subagent activity, but nested module panes do not inherit
-  repo-root activity. Structured subagent attention can promote the parent pane
-  to needs-attention, while stale or wrong-workspace subagent files do not
-  affect status.
-- Given native integration is not available and the harness is still visible in tmux, the dashboard falls back to compatibility mode instead of dropping the pane entirely.
-- Given config forces compatibility mode for Claude, Codex, or Pi, native signal data does not override compatibility status for that run.
-
-**A6. Default hiding and toggle behavior**
-
-- Given a mix of agent and non-agent panes, when the dashboard starts, non-agent-only sessions and non-agent panes are hidden by default.
-- When the operator toggles the relevant filters, those hidden items become visible.
-- Given one visible agent pane inside a one-pane tmux window, the default
-  sidebar shows the agent pane directly below its session, with harness glyph
-  and status styling on the pane row.
-- Given topology-oriented filters are enabled, the same one-pane tmux window
-  remains visible as an explicit window row.
-- Given visible supported harness families, pressing the harness-view key cycles
-  the sidebar through those harnesses plus the unfiltered view and reconciles the
-  selection to a visible target without stopping on empty harness views by
-  default.
-
-**A7. Status stability**
-
-- Given an agent shows signs of active work, repeated refreshes continue to show that agent as working.
-- If the activity signal disappears only briefly, the UI does not flicker immediately back to idle.
-
-**A7b. Details pane hierarchy**
-
-- Given a selected agent pane with pull request and diagnostic state, the details pane separates current alerts, pull request state, selected target facts, diagnostics, overview, and recent terminal output under distinct labels.
-- Given the details pane includes recurring metadata, labels and values align into predictable scan rows instead of loose prose.
-- Given recent notification or pull request activity exists, it is labeled as activity rather than recent terminal output.
-- Given a pane is selected, the details pane shows status/source/target metadata once before the recent terminal output section.
-
-**A8. Keyboard navigation**
-
-- Given visible sessions and panes, keyboard navigation advances through visible targets.
-- Activating a session header expands or collapses that session.
-- Given the dashboard is running, pressing `t` cycles the active theme without
-  changing selection or mode.
-- The heavy validation lane includes a deterministic burst-navigation perf smoke that enforces a bounded `move-selection` latency budget with a crowded tmux fixture.
-- Given the dashboard is running, pressing `?` opens help with a legend for
-  status and harness marks.
-- Given the help surface is taller than the visible popup, `j` / `k`,
-  arrow keys, and page navigation keys scroll it without changing the
-  underlying selection.
-- Given focus changes between sidebar, preview, and compose, the footer updates
-  its primary hints to match the active panel instead of repeating a single
-  static control summary.
-- Given a window row is selected, focus-oriented actions resolve to the top visible
-  actionable pane instead of silently no-oping.
-- Given a session or window row is selected, the preview identifies the resolved
-  target pane and help explains that `f` jumps tmux there.
-- Given a selected or actionable pane is using compatibility mode, the preview
-  and help identify that status as compatibility-derived and lower confidence
-  than native hook signals.
-
-**A9. Popup auto-exit**
-
-- Given the dashboard is running in popup mode, when the operator focuses a target pane successfully, tmux switches to that pane and the dashboard closes even if optional display activation reports a warning.
-- Given a source has a current local Ghostty display registration, focus activates the exact stable terminal UUID through Ghostty's AppleScript `focus` command before trying the source's activation-command fallback. Terminal title, tty, and pid are not target selectors.
-- Given the registered terminal is closed or unavailable, tmux focus remains successful and the JSON/runtime result includes an actionable `source.display.*` diagnostic. Caller-side activation-command fallback is bounded to two seconds.
-
-**A10. Direct input**
-
-- Given an actionable agent row is selected, when the operator composes text,
-  including multiple lines, and sends it, that content is delivered to the resolved
-  agent pane.
-
-**A11. Claude Code first-class support**
-
-- Given the product is being rebuilt from scratch, when the first native integration is delivered, Claude Code is the first harness supported in native mode.
-- Completion and needs-attention detection for Claude Code are reliable enough to drive notifications without terminal-only parsing as the primary signal.
-- Foreman ships a supported Claude Code hook bridge so native status does not
-  depend on ad hoc user scripts.
-
-**A11b. Codex CLI native hook support**
-
-- Given Codex CLI native integration is configured, real Codex hook events can
-  drive native `working` and `idle` status without terminal parsing as the
-  primary source.
-- Foreman ships a supported Codex hook bridge so Codex native status does not
-  depend on ad hoc user scripts.
-
-**A11c. Pi native extension support**
-
-- Given Pi native integration is configured, Pi lifecycle events can drive
-  native `working` and `idle` status without terminal parsing as the primary
-  source.
-- Foreman ships a supported Pi bridge and documented extension pattern so Pi
-  native status does not depend on ad hoc user scripts.
-- Real Pi-binary E2E proves a dashboard-sent prompt can produce native Pi
-  signals and a completion notification.
-
-**A12. Pane operations**
-
-- Given a pane is selected, a confirmed kill action terminates the pane.
-- Renaming the selected window applies the new name.
-- Spawning a new agent in the selected session creates a new window running that agent.
-
-**A13. Search**
-
-- Given several visible sessions and panes, entering search text filters the sidebar to matching targets and moves selection to a match.
-- Canceling search restores the previous selection.
-
-**A14. Flash navigation**
-
-- Given flash navigation is active, typing a visible label jumps directly to that target while the labels remain visible inline in the sidebar.
-- Using the focus variant focuses the chosen pane in tmux.
-
-**A15. Sorting**
-
-- Given the dashboard is running, cycling sort mode reorders the sidebar by the selected preset (`stable` or `attention -> recent`) and preserves the current logical selection where possible.
-- Given `[ui].default_sort = "attention-recent"`, startup uses the attention/recent order before the operator presses `o`, even when persisted UI state contains a different sort.
-- Given the operator changes sort/filter/theme/collapsed state or selection, a later launch restores those choices when the target still exists. Explicit `[ui]` config keys override persisted theme/sort.
-- Given persisted UI state is corrupt or unwanted, `foreman --doctor` reports it and `foreman --reset-ui-state` removes it.
-
-**A16. Pull request awareness**
-
-- Given pull request monitoring is enabled and local tooling is available, when the selected workspace has an open pull request, compact pull request state appears, detail can be expanded, manual refresh reports in-progress feedback, and browser or copy actions work.
-
-**A17. Pull request graceful degradation**
-
-- Given pull request monitoring is enabled but the local environment cannot provide pull request data, monitoring continues and the dashboard remains usable without that pull request surface.
-
-**A18. Notification behavior**
-
-- Given notifications are enabled, agent completion emits a completion notification unless suppression rules apply.
-- Given notifications are enabled, entry into a `needs attention` state emits an attention notification unless suppression rules apply.
-- Given multiple agents complete in the same refresh, Foreman emits one grouped
-  completion notification and records cooldowns for each contributing pane.
-- Given completion and `needs attention` notifications are both emitted in one
-  refresh, only the `needs attention` notification plays sound.
-- Given multiple notification backends are configured, Foreman uses configured backend order and falls back when an earlier backend fails.
-- Given the startup notification profile excludes a transition kind, that transition is suppressed until the operator changes profile at runtime.
-- Given a configured notification sound profile references an audio directory,
-  Foreman selects playable audio files from that directory for matching events.
-- Given the `alerter` backend reports a notification click, Foreman asks tmux to
-  select the notification's window and pane.
-- Muting and profile switching are reflected in the UI.
-
-**A19. Validation stack**
-
-- Given a clean checkout, when local validation commands run, unit tests pass and the expected local quality gate succeeds.
-- Given `vhs` is available locally, when `mise run verify-ux` runs, focused TUI
-  smoke tests pass and fresh visual artifacts can be generated from the live
-  binary.
-- Given `mise run verify-release` runs, the compiled binary completes the
-  startup/discovery, action, and integration gauntlets inside temporary tmux
-  worlds and emits a durable checklist/report artifact under `.ai/validation/release/`.
-- Given the focused runtime smoke runs, help/legend display, harness-view
-  cycling, deterministic native-hook provenance plus attention surfacing, live
-  `f` focus, and acting on the filtered selection all work in the compiled
-  binary inside real tmux.
-- Given the navigation performance smoke runs in the heavy UX lane, selection
-  bursts do not trigger pull-request lookups for every intermediate workspace.
-- Given the popup startup cache path is enabled, the heavy UX lane proves
-  cached-first render and verifies startup-cache writes stay cheap and bounded.
-- When CI runs, build, test, formatting, and lint checks succeed.
-- When CI runs the heavy validation lane, the UX artifact bundle and
-  release-gauntlet report are uploaded as reviewable artifacts.
-- Those review artifacts come from a stable validation root under `.ai/validation/`
-  and missing evidence is treated as a failure.
-
-**A20. Control API and macOS app**
-
-- Given tmux contains recognized agent panes, `foreman agents --json` returns bounded, schema-versioned entries suitable for a GUI client.
-- Given a pane ID from the control API, `foreman focus --pane <pane-id> --json` focuses that pane and returns a machine-readable action result.
-- Given text and a pane ID from the control API, `foreman send --pane <pane-id> --stdin --json` sends the text and reports bytes sent.
-- Given the macOS app is installed, Spotlight, Raycast, Finder, and `open -a Foreman` launch `~/Applications/Foreman.app` rather than stale repo-local or prototype bundles.
-- Given the overlay is open, single-click selects a row and double-click focuses the clicked row through the same focus path as the Focus button or Enter.
-- Given the overlay is hidden with Esc, Foreman returns focus to the previous non-launcher app when possible.
-- Given the overlay focuses a tmux pane, it hides and activates the configured or most recently active terminal app.
-- Given idle agent panes have equal status rank, `Attention → Recent` ordering uses real pane/native-signal recency before falling back to title or ID.
-- Given app-bundle validation runs, it does not show the overlay in front of the operator's desktop and does not leave the repo-local dist app registered as a launcher candidate.
+- Startup renders a loading shell and then a live pane list.
+- Multi-session scan preserves hierarchy and useful pane resolution.
+- Native status overrides matching fallback state and rejects stale or cross-harness signals.
+- Filters, search, sorting, and refreshes preserve logical choice.
+- Focus routes through the selected source and reports display warnings separately.
+- Compose, rename, spawn, and kill flows preserve drafts or confirmation on failure.
+- Pull-request, extension, alert, and source errors degrade without stopping the dashboard.
+- Companion probes, tokens, snapshots, and reverse tunnels preserve their trust boundaries.
+- The native app decodes the current control schema and delegates every tmux action to Rust.
+- Version 1 config fixtures load with current defaults.
 
 ### Definition of done
 
-- The required behaviors above are implemented.
-- The local validation workflow is green.
-- End-to-end smoke coverage exists for core operator flows.
-- Continuous integration is green.
-- User-facing documentation matches the actual CLI and runtime behavior.
+A change is complete when focused tests cover its invariant, the required repo gate passes, documentation and contracts match current rules, and no unresolved review finding proves the accepted rules false.

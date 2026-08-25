@@ -1,4 +1,4 @@
-# Docs Routing
+# Docs routing
 
 ## Tutorials
 
@@ -29,7 +29,7 @@
 
 | Doc | Topic |
 |---|---|
-| [`decisions/0001-stack-choice.md`](decisions/0001-stack-choice.md) | Stack choice ADR |
+| [`decisions/0001-stack-choice.md`](decisions/0001-stack-choice.md) | Stack decision |
 | [`decisions/0002-source-aggregation-and-remote-ssh.md`](decisions/0002-source-aggregation-and-remote-ssh.md) | Source aggregation and remote SSH target architecture |
 | [`decisions/0003-remote-jump-terminal-activation.md`](decisions/0003-remote-jump-terminal-activation.md) | Remote tmux focus plus local terminal activation options |
 | [`decisions/0004-source-companion-relay.md`](decisions/0004-source-companion-relay.md) | Accepted source companion, reverse tunnel, snapshot, and display architecture |

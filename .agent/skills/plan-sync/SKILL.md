@@ -13,7 +13,7 @@ Use this compatibility skill only when a task explicitly maintains one named his
 1. Read `.ai/plans/AGENTS.md` and the named plan.
 2. Verify internal links and required historical files. Avoid comparing its status to the current branch or PR.
 3. Preserve original dates, decisions, and validation claims.
-4. Report contradictions with current policy as historical context. Do not rewrite them into current instructions.
+4. Report contradictions with current policy as historical context. Don't rewrite them into current instructions.
 5. Route reusable lessons to the current `AGENTS.md` or `docs/` owner.
 
 For current work, stop and use `hk status`, `hk validate`, `hk sync`, and `hk ready` instead.

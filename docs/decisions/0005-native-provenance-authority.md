@@ -1,36 +1,40 @@
 ---
 id: foreman-adr-0005
-title: ADR 0005—Native provenance authority
+title: Native signal authority
 description: >
-  Keeps native agent status grounded in provider hooks or structured files while retaining compatibility fallback.
+  Defines which hook and activity files may set native agent status.
 status: accepted
 date: 2026-05-02
 index:
   - id: context
-    keywords: [native, hooks, compatibility, scrollback]
+    keywords: [native, hooks, fallback, scrollback]
   - id: decision
-    keywords: [provenance, runtime-identity, harness]
+    keywords: [signals, process, harness]
   - id: consequences
-    keywords: [fallback, stale-signals, diagnostics]
+    keywords: [fallback, stale, errors]
   - id: sources
     keywords: [pull-request, tests, commit]
 ---
 
-# ADR 0005: Native provenance authority
+# Native signal authority
 
 ## Context
 
-Terminal scrollback, pane titles, and reused tmux pane IDs can outlive the agent process that produced them. Treating that compatibility evidence as native state caused stale agent classifications and allowed one harness's old signal file to affect another harness.
+Terminal text, pane titles, and tmux pane IDs can outlive an agent. Old text once caused stale labels. A stale file from one harness could also affect another harness in the same pane.
 
 ## Decision
 
-Treat provider hooks, events, and structured activity files as the only native provenance. Before applying a native signal, verify current or process-derived runtime identity and the matching harness. Keep terminal and process heuristics as lower-confidence compatibility evidence, and honor explicit compatibility-mode configuration.
+Only hooks, events, and activity files may set native status.
+
+Foreman checks the live process and harness before it uses a native signal. Process and terminal clues remain lower-trust fallback data. Users may still select fallback mode in config.
 
 ## Consequences
 
-Native state can correct a compatibility classification, but terminal text never creates native provenance. Missing or stale native data falls back to compatibility behavior with diagnostics instead of dropping the pane. Each provider must use the shared overlay and atomic signal writers, and tests must cover stale-signal rejection and cross-harness isolation.
+A native signal can correct a fallback label. Terminal text can't create native status on its own. Missing or stale native data falls back with a clear detail.
+
+Each harness uses shared atomic writers and typed readers. Tests cover stale files, process changes, overlapping runs, and cross-harness leaks.
 
 ## Sources
 
-- Rationale and test plan: [PR #10](https://github.com/safurrier/foreman/pull/10), merge `f7bd2ea3eb44b97eb7c65a74348bcc529a602598`.
-- Current implementation: `src/integrations/native.rs`, `src/integrations/mod.rs`, and `src/integrations/AGENTS.md` at cutoff `5498eba741ce17231be503c31bbf19bffbb5d9f9`.
+- Reasons and test plan — [pull request 10](https://github.com/safurrier/foreman/pull/10), merge `f7bd2ea3eb44b97eb7c65a74348bcc529a602598`.
+- Current code at cutoff `5498eba741ce17231be503c31bbf19bffbb5d9f9` — `src/integrations/native.rs`, `src/integrations/mod.rs`, and `src/integrations/AGENTS.md`.
