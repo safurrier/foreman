@@ -44,7 +44,7 @@ Historical hand-authored slice plans live under `.ai/plans/`; new Harness Toolki
 - decision: pass — decision and spec reflection recorded
 - validation: pass — validation evidence with rationale recorded
 - review: pass — external-enough review recorded
-- profile-check:fast-gate: fail — missing required profile check `fast-gate` (matched .agent/skills/README.md, .ai/plans/AGENTS.md, .mise/tasks/check, +11 more); run the matching native command from `hk checks --changed`, record it with `hk validate --check fast-gate --why '...' -- <command>`, or `hk dangerously-skip validation --label fast-gate --reason ... --mitigation ...`
+- profile-check:fast-gate: pass — validation dangerously skipped: fast-gate; reason: The unchanged local wall-clock concurrency test is load-sensitive on this host; mitigation: GitHub Quality Gate and Full Validation pass on final head 0690f6c; local fmt/clippy/check/docs/link contracts and 376 non-timing tests pass
 - profile-review:codex-review: pass — required profile review recorded: codex-review (matched .mise/tasks/check, tests/docs_contract_test.py)
 
 ## Review
@@ -55,3 +55,4 @@ Historical hand-authored slice plans live under `.ai/plans/`; new Harness Toolki
 ## Dangerous skips
 - validation: fast-gate — reason: The unchanged wall-clock timing test sources::tests::aggregator_queries_sources_in_parallel fails persistently on this loaded host; the full gate otherwise reached 376 passing tests; mitigation: cargo fmt/clippy/check pass, 376 non-timing Rust tests pass, docs contracts pass, and GitHub CI will run the exact gate on a clean runner
 - validation: fast-gate — reason: The unchanged local wall-clock concurrency test is load-sensitive on this host; mitigation: GitHub Quality Gate and Full Validation pass on the exact published head; local fmt/clippy/check/docs/mirror contracts pass and 376 non-timing tests passed
+- validation: fast-gate — reason: The unchanged local wall-clock concurrency test is load-sensitive on this host; mitigation: GitHub Quality Gate and Full Validation pass on final head 0690f6c; local fmt/clippy/check/docs/link contracts and 376 non-timing tests pass
