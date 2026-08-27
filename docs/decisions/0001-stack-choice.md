@@ -1,59 +1,57 @@
 ---
 id: foreman-adr-0001
-title: ADR 0001 — Stack Choice for foreman
+title: Stack choice
 description: >
-  Records the rust stack selection decision for foreman,
-  including rationale, trade-offs, and alternatives considered.
+  Records the Rust stack and the tradeoffs behind it.
+status: accepted
+date: 2026-04-08
 index:
+  - id: context
+    keywords: [stack, terminal, distribution]
   - id: decision
-    keywords: [stack, choice, python, go, tools, rationale]
+    keywords: [rust, ratatui, clap, serde, tokio]
   - id: consequences
-    keywords: [trade-offs, positive, negative, accepted]
-  - id: alternatives-considered
-    keywords: [alternatives, rejected, comparison]
+    keywords: [tooling, build, contributors]
+  - id: alternatives
+    keywords: [python, go]
 ---
 
-# ADR 0001: Stack Choice for foreman
-
-**Status**: Accepted
-**Date**: <!-- YYYY-MM-DD -->
-**Deciders**: <!-- names or team -->
-**Generated from**: init
-
----
+# Stack choice
 
 ## Context
 
-foreman requires a primary implementation stack for building, testing, and
-deploying the application. The choice constrains tooling, CI configuration, and
-contributor onboarding.
+Foreman needs a fast terminal UI and safe state changes. It also needs one small binary and strong tests. The main language sets the build and release tools.
 
 ## Decision
 
-**Stack**: rust
+Use Rust with these core libraries:
 
-The Rust stack uses:
-- **cargo fmt** for formatting (rustfmt under the hood)
-- **cargo clippy** for linting (hundreds of lint rules)
-- **cargo check** for fast type/borrow checking
-- **cargo test** for testing
+| Concern | Choice |
+|---|---|
+| Terminal UI | Ratatui and Crossterm |
+| Command line | Clap |
+| Data and config | Serde, JSON, and `TOML` |
+| Errors | anyhow and thiserror |
+| Async work | Tokio |
+| System metrics | sysinfo |
+
+Use standard Rust tools for formatting, linting, checks, tests, and release builds.
 
 ## Consequences
 
-**Positive**:
+### Benefits
 
-- Standard tooling with strong ecosystem support.
-- Consistent quality gates via `mise run check`.
-- Reproducible builds via mise tool version pinning.
+- The type system catches many state and API mistakes before runtime.
+- Ratatui fits reducer-driven terminal rendering.
+- One release binary keeps setup simple.
+- Standard tools keep local and CI checks alike.
 
-**Negative / Trade-offs**:
+### Costs
 
-- Cold builds and the heavy validation gate are slower than the normal edit loop.
+- Cold builds take longer than an interpreted edit loop.
+- Contributors need a Rust toolchain.
+- Native macOS UI still needs a separate Swift target.
 
-## Alternatives Considered
+## Alternatives
 
-<!-- List stacks that were considered but not chosen, and why -->
-
-| Alternative | Reason not chosen |
-|---|---|
-| <!-- alt --> | <!-- reason --> |
+Python would make the first draft faster, but it catches fewer state errors before a run. Go would make builds simple, but it fits Ratatui and the reducer model less well.
